@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #0F62FE; text-decoration: none; }
+    a:hover { color: #0043CE; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; font-family: 'IBM Plex Sans', system-ui, sans-serif; background: #FAFAFB; color: #14141A; font-size: 13px; line-height: 1.45;">
+
+  <aside style="width: 196px; flex-shrink: 0; border-right: 1px solid #E4E4E9; background: #FFFFFF; display: flex; flex-direction: column;">
+    <div style="height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid #E4E4E9;">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#0F62FE" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"></circle><circle cx="8" cy="8" r="2.5"></circle><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"></path></svg>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600;">applicient</span>
+    </div>
+    <nav style="display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 6px 16px 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Work</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Radar</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Job Inbox</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Composer</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Pipeline</div>
+      <div style="padding: 14px 16px 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">System</div>
+      <div style="padding: 7px 14px; background: #EDF2FF; color: #0F62FE; font-weight: 500; border-left: 2px solid #0F62FE; display: flex; align-items: center;"><span>Run Console</span><span style="margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: #0F62FE;"></span></div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Events</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Models</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Cost</div>
+    </nav>
+    <div style="margin-top: auto; border-top: 1px solid #E4E4E9; padding: 10px 16px; display: flex; flex-direction: column; gap: 5px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Recent runs</div>
+      <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;"><span>r-0f3a</span><span style="color: #0F62FE;">live</span></div>
+      <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;"><span>r-0e91</span><span>$0.22</span></div>
+      <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;"><span>r-0e44</span><span>$0.31</span></div>
+    </div>
+  </aside>
+
+  <div style="width: 258px; flex-shrink: 0; border-right: 1px solid #E4E4E9; background: #FFFFFF; display: flex; flex-direction: column;">
+    <div style="height: 48px; flex-shrink: 0; border-bottom: 1px solid #E4E4E9; display: flex; align-items: center; padding: 0 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Plan &middot; write_todos</div>
+    <div style="padding: 14px 18px; display: flex; flex-direction: column; gap: 11px;">
+      <div style="display: flex; gap: 9px; align-items: flex-start;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #0E7C5A; padding-top: 1px;">[x]</span><span style="font-size: 12px; color: #6B6B78;">Expand role queries for persona</span></div>
+      <div style="display: flex; gap: 9px; align-items: flex-start;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #0E7C5A; padding-top: 1px;">[x]</span><span style="font-size: 12px; color: #6B6B78;">Fan out across 6 sources</span></div>
+      <div style="display: flex; gap: 9px; align-items: flex-start;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #0E7C5A; padding-top: 1px;">[x]</span><span style="font-size: 12px; color: #6B6B78;">Normalise and deduplicate</span></div>
+      <div style="display: flex; gap: 9px; align-items: flex-start;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #0E7C5A; padding-top: 1px;">[x]</span><span style="font-size: 12px; color: #6B6B78;">Filter against applied ledger</span></div>
+      <div style="display: flex; gap: 9px; align-items: flex-start; background: #EDF2FF; margin: 0 -18px; padding: 8px 18px; border-left: 2px solid #0F62FE;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #0F62FE; padding-top: 1px;">[&gt;]</span><div style="display: flex; flex-direction: column; gap: 5px; flex-grow: 1;"><span style="font-size: 12px; font-weight: 500;">Score 97 postings</span><div style="height: 3px; background: #D5DDF5; display: flex;"><div style="width: 88%; background: #0F62FE;"></div></div><span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;">prefilter done &middot; rubric 23/26</span></div></div>
+      <div style="display: flex; gap: 9px; align-items: flex-start;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #C9CDD6; padding-top: 1px;">[ ]</span><span style="font-size: 12px; color: #8D8D98;">Send digest notification</span></div>
+    </div>
+    <div style="margin-top: auto; border-top: 1px solid #E4E4E9; padding: 13px 18px; display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Virtual filesystem</div>
+      <div style="display: flex; flex-direction: column; gap: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;">
+        <div style="display: flex; justify-content: space-between;"><span>raw/greenhouse.jsonl</span><span>1.2M</span></div>
+        <div style="display: flex; justify-content: space-between;"><span>raw/jsearch.jsonl</span><span>2.8M</span></div>
+        <div style="display: flex; justify-content: space-between;"><span>canonical/jobs.json</span><span>410K</span></div>
+        <div style="display: flex; justify-content: space-between;"><span>manifest.json</span><span>9K</span></div>
+      </div>
+      <div style="font-size: 11px; color: #6B6B78; line-height: 1.5;">6.4 MB of postings held on disk, not in context.</div>
+    </div>
+  </div>
+
+  <main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+    <header style="height: 48px; flex-shrink: 0; border-bottom: 1px solid #E4E4E9; background: #FFFFFF; display: flex; align-items: center; gap: 11px; padding: 0 20px;">
+      <span style="font-size: 14px; font-weight: 600;">Run Console</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6B6B78;">r-0f3a &middot; radar &middot; AI Engineer</span>
+      <span style="height: 22px; padding: 0 9px; background: #FBF1E0; color: #A86A00; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #A86A00;"></span>WAITING ON YOU</span>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6B6B78;">02:11 elapsed</span>
+        <div style="height: 26px; padding: 0 11px; border: 1px solid #C9CDD6; display: flex; align-items: center; font-size: 12px;">Pause</div>
+      </div>
+    </header>
+
+    <div style="background: #FBF1E0; border-bottom: 1px solid #E4E4E9; padding: 12px 20px; display: flex; align-items: center; gap: 13px;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 12px; font-weight: 600; color: #A86A00;">Interrupt &mdash; bulk apply exceeds your per-run cap</span>
+        <span style="font-size: 11px; color: #6B6B78;">6 jobs scored strong_apply. Your cap is 5 per run. The agent stopped rather than deciding for you.</span>
+      </div>
+      <div style="margin-left: auto; display: flex; gap: 7px;">
+        <div style="height: 28px; padding: 0 12px; background: #14141A; color: #FFFFFF; display: flex; align-items: center; font-size: 12px; font-weight: 500;">Approve all 6</div>
+        <div style="height: 28px; padding: 0 12px; border: 1px solid #C9CDD6; background: #FFFFFF; display: flex; align-items: center; font-size: 12px;">Take top 5</div>
+        <div style="height: 28px; padding: 0 12px; border: 1px solid #C9CDD6; background: #FFFFFF; display: flex; align-items: center; font-size: 12px;">Choose</div>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; background: #FFFFFF; padding: 12px 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; line-height: 1.75; overflow: hidden;">
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:11</span><span style="color: #0F62FE; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #14141A;">write_todos</span><span style="margin-left: auto; color: #8D8D98;">6 items</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:12</span><span style="color: #0F62FE; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #14141A;">task &rarr; <span style="font-weight: 600;">discovery-agent</span></span><span style="margin-left: auto; color: #8D8D98;">fresh context</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:13</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">discovery</span><span style="color: #14141A;">search_source &nbsp;greenhouse</span><span style="margin-left: auto; color: #0E7C5A;">41 postings &middot; 0.4s</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:14</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">discovery</span><span style="color: #14141A;">search_source &nbsp;lever</span><span style="margin-left: auto; color: #0E7C5A;">18 postings &middot; 0.3s</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:16</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">discovery</span><span style="color: #14141A;">search_source &nbsp;jsearch</span><span style="margin-left: auto; color: #0E7C5A;">63 postings &middot; 1.9s</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FBECEA;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:16</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">discovery</span><span style="color: #C0392B;">search_source &nbsp;jobstreet-id &nbsp;&mdash; 429</span><span style="margin-left: auto; color: #C0392B;">backoff 60s &middot; retry queued</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:18</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">discovery</span><span style="color: #14141A;">write_file &nbsp;raw/greenhouse.jsonl</span><span style="margin-left: auto; color: #8D8D98;">1.2 MB</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:19</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">discovery</span><span style="color: #0E7C5A;">&larr; returned</span><span style="margin-left: auto; color: #8D8D98;">142 postings &middot; manifest only</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:19</span><span style="color: #0F62FE; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #14141A;">dedup</span><span style="margin-left: auto; color: #8D8D98;">142 &rarr; 104 &middot; 38 folded</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:20</span><span style="color: #0F62FE; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #14141A;">ledger_check</span><span style="margin-left: auto; color: #8D8D98;">7 already applied &middot; excluded</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:02:21</span><span style="color: #0F62FE; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #14141A;">task &times;97 &rarr; <span style="font-weight: 600;">fit-scoring</span> (prefilter)</span><span style="margin-left: auto; color: #8D8D98;">fast tier &middot; batched</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:03:04</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">fit-scoring</span><span style="color: #0E7C5A;">&larr; returned</span><span style="margin-left: auto; color: #8D8D98;">26 survived &middot; 71 dropped &middot; $0.24</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:03:05</span><span style="color: #0F62FE; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #14141A;">task &times;26 &rarr; <span style="font-weight: 600;">fit-scoring</span> (full rubric)</span><span style="margin-left: auto; color: #8D8D98;">balanced tier</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:03:41</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">fit-scoring</span><span style="color: #14141A;">AI Engineer &middot; Kata.ai</span><span style="margin-left: auto; color: #0E7C5A;">92 &middot; strong_apply</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:03:52</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">fit-scoring</span><span style="color: #14141A;">AI/ML Engineer &middot; undisclosed</span><span style="margin-left: auto; color: #C0392B;">41 &middot; ghost_job</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px 0 32px; background: #FAFAFB;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:04:01</span><span style="color: #6B6B78; width: 96px; flex-shrink: 0;">research</span><span style="color: #14141A;">web_search &nbsp;kata.ai hiring</span><span style="margin-left: auto; color: #8D8D98;">4 results &middot; cached 24h</span></div>
+      <div style="display: flex; gap: 12px; padding: 4px 20px; background: #FBF1E0;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;">14:04:22</span><span style="color: #A86A00; width: 96px; flex-shrink: 0;">orchestrator</span><span style="color: #A86A00; font-weight: 600;">interrupt &nbsp;bulk_apply_cap</span><span style="margin-left: auto; color: #A86A00;">awaiting your decision</span></div>
+      <div style="display: flex; gap: 12px; padding: 0 20px;"><span style="color: #8D8D98; width: 56px; flex-shrink: 0;"></span><span style="width: 96px; flex-shrink: 0;"></span><span style="color: #C9CDD6;">&#9608;</span></div>
+    </div>
+  </main>
+
+  <aside style="width: 292px; flex-shrink: 0; border-left: 1px solid #E4E4E9; background: #FFFFFF; display: flex; flex-direction: column;">
+    <div style="height: 48px; flex-shrink: 0; border-bottom: 1px solid #E4E4E9; display: flex; align-items: center; padding: 0 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">This run</div>
+    <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 16px;">
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 600; letter-spacing: -0.02em;">$0.38</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6B6B78;">of $2.00 cap</span></div>
+        <div style="height: 4px; background: #EEEFF2; display: flex;"><div style="width: 19%; background: #0F62FE;"></div></div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">By subagent</span>
+        <div style="display: flex; flex-direction: column; gap: 7px; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">
+          <div style="display: flex; flex-direction: column; gap: 3px;"><div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">fit-scoring</span><span>$0.29</span></div><div style="height: 3px; background: #EEEFF2; display: flex;"><div style="width: 76%; background: #14141A;"></div></div></div>
+          <div style="display: flex; flex-direction: column; gap: 3px;"><div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">discovery</span><span>$0.05</span></div><div style="height: 3px; background: #EEEFF2; display: flex;"><div style="width: 13%; background: #14141A;"></div></div></div>
+          <div style="display: flex; flex-direction: column; gap: 3px;"><div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">research</span><span>$0.03</span></div><div style="height: 3px; background: #EEEFF2; display: flex;"><div style="width: 8%; background: #14141A;"></div></div></div>
+          <div style="display: flex; flex-direction: column; gap: 3px;"><div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">orchestrator</span><span>$0.01</span></div><div style="height: 3px; background: #EEEFF2; display: flex;"><div style="width: 3%; background: #14141A;"></div></div></div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Tokens</span>
+        <div style="display: flex; flex-direction: column; gap: 5px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6B6B78;">
+          <div style="display: flex; justify-content: space-between;"><span>input</span><span style="color: #14141A;">412,880</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>cached read</span><span style="color: #0E7C5A;">309,110 &middot; 75%</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>output</span><span style="color: #14141A;">61,204</span></div>
+        </div>
+        <div style="font-size: 11px; color: #6B6B78; line-height: 1.5;">The profile prefix is cached across every scoring call &mdash; that 75% is most of why this run costs cents.</div>
+      </div>
+
+      <div style="border-top: 1px solid #E4E4E9; padding-top: 13px; display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Bindings in force</span>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 10px;">
+          <div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">fast</span><span>qwen3-30b:free</span></div>
+          <div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">balanced</span><span>deepseek-v3.2</span></div>
+          <div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">deep</span><span>claude-opus-5</span></div>
+          <div style="display: flex; justify-content: space-between;"><span style="color: #6B6B78;">embedding</span><span>nemotron-3-embed</span></div>
+        </div>
+        <div style="font-size: 11px; color: #6B6B78; line-height: 1.5;">Locked for the duration &mdash; a binding change mid-run would make this ledger meaningless.</div>
+      </div>
+
+    </div>
+  </aside>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

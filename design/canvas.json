@@ -1,0 +1,26 @@
+{
+  "pages": [
+    { "id": "build", "name": "Terminal Ledger" },
+    { "id": "archive", "name": "Rejected directions" }
+  ],
+  "artboards": [
+    { "file": "Tokens.dc.html", "title": "Design tokens", "page": "build", "x": 0, "y": 0, "w": 1440, "h": 1100 },
+    { "file": "Main.dc.html", "title": "Job Inbox - light", "page": "build", "x": 1540, "y": 0, "w": 1440, "h": 900 },
+    { "file": "InboxDark.dc.html", "title": "Job Inbox - dark", "page": "build", "x": 3080, "y": 0, "w": 1440, "h": 900 },
+    { "file": "Composer.dc.html", "title": "Application Composer", "page": "build", "x": 0, "y": 1220, "w": 1440, "h": 900 },
+    { "file": "RunConsole.dc.html", "title": "Run Console", "page": "build", "x": 1540, "y": 1220, "w": 1440, "h": 900 },
+    { "file": "Models.dc.html", "title": "Models and Providers", "page": "build", "x": 3080, "y": 1220, "w": 1440, "h": 900 },
+    { "file": "Pipeline.dc.html", "title": "Pipeline", "page": "build", "x": 0, "y": 2320, "w": 1440, "h": 900 },
+    { "file": "Editorial.dc.html", "title": "B - Editorial Dossier", "page": "archive", "x": 0, "y": 0, "w": 1440, "h": 900 },
+    { "file": "Signal.dc.html", "title": "C - Signal Board", "page": "archive", "x": 1540, "y": 0, "w": 1440, "h": 900 }
+  ],
+  "annotations": [
+    { "id": "system", "x": 0, "y": -230, "w": 620, "page": "build", "text": "TERMINAL LEDGER - the chosen direction, built out.\n\nIBM Plex Sans for prose, IBM Plex Mono for every number, identifier and label. Cool near-white ground, one IBM-blue accent, desaturated semantics.\n\nZero border-radius and no shadows anywhere. That is the identity, and it is what stops this reading as stock shadcn - literally one line in the Tailwind theme.\n\nAll of it is buildable with shadcn/ui primitives: same Radix behaviour, different token layer." },
+    { "id": "themes", "x": 1540, "y": -230, "w": 620, "page": "build", "text": "BOTH THEMES FROM ONE TOKEN SET.\n\nThe dark artboard is the light one with the token map applied - identical markup, 19 colour swaps, nothing hand-tuned. If a colour had needed special-casing, the token set would have been wrong.\n\nDark is NOT an inversion. Chroma is re-tuned per token so the semantics stay legible on a dark ground: the greens lift, the reds desaturate, the accent brightens." },
+    { "id": "composer-note", "x": 0, "y": 1140, "w": 620, "page": "build", "text": "COMPOSER shown in its BLOCKED state, deliberately.\n\nThe verifier caught 'Led a team of four engineers' - your profile records that you worked on the chatbot in a team of four, and nothing more. Participation is not leadership, so export is blocked at attempt 2 of 2.\n\nThis is the screen that makes the product defensible. A happy-path composer would demo better and prove nothing." },
+    { "id": "console-note", "x": 1540, "y": 1140, "w": 620, "page": "build", "text": "RUN CONSOLE - the agent actually reasoning, not a spinner.\n\nLeft: the live write_todos plan. Centre: subagent dispatches, tool calls, a rate-limited source backing off, and the interrupt where the agent hit your bulk-apply cap and stopped rather than deciding for you. Right: cost accruing per subagent, and the 75% cache-hit rate that is most of why a run costs cents.\n\nThe virtual-filesystem panel is the point: 6.4 MB of postings on disk, not in context." },
+    { "id": "models-note", "x": 3080, "y": 1140, "w": 620, "page": "build", "text": "MODELS AND PROVIDERS - paste a key, test, bind a tier.\n\nNote the failing Ollama row: a connection that cannot be verified is marked and excluded from binding rather than silently failing at run time. Note also 'this stage requires vision' hiding 211 models from the application-agent picker - preflight as a UI affordance, not an error message three minutes into a browser session.\n\nThe deep tier is pinned to Anthropic while everything else runs on cheap OpenRouter models. That mix is the intended shape." },
+    { "id": "archive-note", "x": 0, "y": -180, "w": 620, "page": "archive", "text": "Kept for the record. B optimised for the document, C for state at a glance.\n\nWorth lifting from C if the Job Inbox ever feels flat: its discipline of reserving one hue (violet) strictly for interaction, so semantic colour never competes with clickability." }
+  ],
+  "launch": { "view": "canvas", "page": "build" }
+}

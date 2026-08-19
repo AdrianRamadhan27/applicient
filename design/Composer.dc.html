@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #0F62FE; text-decoration: none; }
+    a:hover { color: #0043CE; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; font-family: 'IBM Plex Sans', system-ui, sans-serif; background: #FAFAFB; color: #14141A; font-size: 13px; line-height: 1.45;">
+
+  <aside style="width: 196px; flex-shrink: 0; border-right: 1px solid #E4E4E9; background: #FFFFFF; display: flex; flex-direction: column;">
+    <div style="height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid #E4E4E9;">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#0F62FE" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"></circle><circle cx="8" cy="8" r="2.5"></circle><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"></path></svg>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600;">applicient</span>
+    </div>
+    <nav style="display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 6px 16px 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Work</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Radar</div>
+      <div style="padding: 7px 16px; color: #6B6B78; display: flex;"><span>Job Inbox</span><span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 11px;">7</span></div>
+      <div style="padding: 7px 14px; background: #EDF2FF; color: #0F62FE; font-weight: 500; border-left: 2px solid #0F62FE;">Composer</div>
+      <div style="padding: 7px 16px; color: #6B6B78;">Pipeline</div>
+      <div style="padding: 14px 16px 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Queue</div>
+      <div style="padding: 7px 16px; display: flex; align-items: center; gap: 8px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #C0392B;"></span><span style="font-size: 12px;">Kata.ai</span></div>
+      <div style="padding: 7px 16px; display: flex; align-items: center; gap: 8px; color: #6B6B78;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #0E7C5A;"></span><span style="font-size: 12px;">Xendit</span></div>
+    </nav>
+    <div style="margin-top: auto; border-top: 1px solid #E4E4E9; padding: 10px 16px; display: flex; flex-direction: column; gap: 3px;">
+      <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6B6B78;"><span>this doc</span><span style="color: #14141A;">$0.19</span></div>
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8D8D98;">deep &rarr; claude-opus-5</div>
+    </div>
+  </aside>
+
+  <main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+    <header style="height: 48px; flex-shrink: 0; border-bottom: 1px solid #E4E4E9; background: #FFFFFF; display: flex; align-items: center; gap: 11px; padding: 0 20px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #8D8D98;">&larr;</span>
+      <span style="font-size: 14px; font-weight: 600;">AI Engineer</span>
+      <span style="color: #8D8D98;">&middot;</span>
+      <span style="font-size: 13px;">Kata.ai</span>
+      <span style="height: 18px; padding: 0 7px; background: #0E7C5A; color: #FFFFFF; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; display: flex; align-items: center;">FIT 92</span>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+        <span style="height: 26px; padding: 0 10px; background: #FBECEA; color: #C0392B; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #C0392B;"></span>VERIFIER BLOCKED</span>
+      </div>
+    </header>
+
+    <div style="height: 40px; flex-shrink: 0; border-bottom: 1px solid #E4E4E9; background: #FFFFFF; display: flex; align-items: center; gap: 6px; padding: 0 20px;">
+      <div style="height: 24px; padding: 0 9px; background: #14141A; color: #FFFFFF; display: flex; align-items: center; font-size: 11px;">CV</div>
+      <div style="height: 24px; padding: 0 9px; border: 1px solid #E4E4E9; color: #6B6B78; display: flex; align-items: center; font-size: 11px;">Cover letter</div>
+      <div style="height: 24px; padding: 0 9px; border: 1px solid #E4E4E9; color: #6B6B78; display: flex; align-items: center; gap: 5px; font-size: 11px;">Answer Pack <span style="font-family: 'IBM Plex Mono', monospace; color: #0E7C5A;">9</span></div>
+      <div style="width: 1px; height: 16px; background: #E4E4E9; margin: 0 4px;"></div>
+      <div style="height: 24px; padding: 0 9px; border: 1px solid #E4E4E9; display: flex; align-items: center; gap: 5px; font-size: 11px; color: #6B6B78;">Template <span style="color: #14141A;">ats-plain</span></div>
+      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #C0392B;">regeneration attempt 2 of 2</span>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; min-height: 0;">
+
+      <div style="width: 50%; border-right: 1px solid #E4E4E9; display: flex; flex-direction: column;">
+        <div style="height: 28px; flex-shrink: 0; background: #F4F5F7; border-bottom: 1px solid #E4E4E9; display: flex; align-items: center; padding: 0 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Master profile</div>
+        <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 13px; background: #FFFFFF; flex-grow: 1;">
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8D8D98;">EV-14 &middot; Bangkit Academy &middot; 2024</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #14141A;">Built machine learning models for a capstone project using Python and TensorFlow.</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8D8D98;">EV-21 &middot; Bangkit Academy &middot; 2024</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #14141A;">Implemented a document question-answering feature; handled roughly 2,000 queries a day during the demo period.</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8D8D98;">EV-09 &middot; Bangkit Academy &middot; 2024</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #14141A;">Packaged the service in Docker and ran it on a single VM for the final presentation.</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px; background: #FBECEA; margin: 0 -18px; padding: 8px 18px; border-left: 2px solid #C0392B;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #C0392B;">EV-11 &middot; the only record of the chatbot project</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #14141A;">Worked on a chatbot with a team of four.</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8D8D98;">EV-27 &middot; PT Fintek Nusantara &middot; internship, 2023</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #14141A;">Analysed transaction data in SQL and Python; produced weekly reporting for the risk team.</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="width: 50%; display: flex; flex-direction: column;">
+        <div style="height: 28px; flex-shrink: 0; background: #EDF2FF; border-bottom: 1px solid #E4E4E9; display: flex; align-items: center; padding: 0 18px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #0F62FE;">Tailored for Kata.ai</div>
+        <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; background: #FFFFFF; flex-grow: 1;">
+
+          <div style="background: #E8F4EF; border-left: 2px solid #0E7C5A; margin: 0 -18px; padding: 9px 18px; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #0E7C5A; letter-spacing: 0.06em;">SUPPORTED</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #8D8D98;">EV-14 + EV-21</span></div>
+            <span style="font-size: 12.5px; line-height: 1.6;">Built a retrieval-augmented generation pipeline in Python (LangChain, FastAPI) serving ~2,000 document queries per day.</span>
+          </div>
+
+          <div style="background: #E8F4EF; border-left: 2px solid #0E7C5A; margin: 0 -18px; padding: 9px 18px; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #A86A00; letter-spacing: 0.06em;">REFRAMED OK</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #8D8D98;">EV-09</span></div>
+            <span style="font-size: 12.5px; line-height: 1.6;">Containerised model serving with Docker and deployed to a single-node environment.</span>
+            <span style="font-size: 11px; color: #6B6B78;">Wording lifted toward the posting; the underlying fact is unchanged.</span>
+          </div>
+
+          <div style="background: #FBECEA; border-left: 2px solid #C0392B; margin: 0 -18px; padding: 9px 18px; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="height: 16px; padding: 0 6px; background: #C0392B; color: #FFFFFF; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; display: flex; align-items: center;">UNSUPPORTED</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #C0392B;">no evidence link</span></div>
+            <span style="font-size: 12.5px; line-height: 1.6; text-decoration: line-through; text-decoration-color: #C0392B; color: #6B6B78;">Led a team of four engineers delivering a production chatbot.</span>
+            <span style="font-size: 11px; color: #C0392B; line-height: 1.5;">EV-11 records that you worked on the chatbot in a team of four. It records no lead or ownership role. This claim cannot ship.</span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px; padding-top: 2px;">
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #0E7C5A; letter-spacing: 0.06em;">SUPPORTED</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: #8D8D98;">EV-27</span></div>
+            <span style="font-size: 12.5px; line-height: 1.6;">Analysed transaction data in SQL and Python, delivering weekly risk reporting during a fintech internship.</span>
+          </div>
+
+          <div style="border-top: 1px dashed #E4E4E9; padding-top: 10px; display: flex; flex-direction: column; gap: 5px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Not claimed, deliberately</span>
+            <span style="font-size: 11px; color: #6B6B78; line-height: 1.55;">Kubernetes appears in the posting and nowhere in your profile, so it does not appear here. The score breakdown already told you this is your one true gap.</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div style="height: 48px; flex-shrink: 0; border-top: 1px solid #E4E4E9; background: #FFFFFF; display: flex; align-items: center; gap: 9px; padding: 0 20px;">
+      <div style="height: 30px; padding: 0 12px; border: 1px solid #E4E4E9; color: #8D8D98; display: flex; align-items: center; gap: 7px; font-size: 12px;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7V5a4 4 0 018 0v2"></path><rect x="3" y="7" width="10" height="7"></rect></svg>Export PDF &mdash; blocked</div>
+      <div style="height: 30px; padding: 0 12px; border: 1px solid #C9CDD6; display: flex; align-items: center; font-size: 12px;">Open Answer Pack</div>
+      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #8D8D98;">2 renders &middot; 18.4k in / 6.1k out &middot; $0.19</span>
+    </div>
+  </main>
+
+  <aside style="width: 340px; flex-shrink: 0; border-left: 1px solid #E4E4E9; background: #FFFFFF; display: flex; flex-direction: column;">
+    <div style="height: 48px; flex-shrink: 0; border-bottom: 1px solid #E4E4E9; display: flex; align-items: center; padding: 0 18px; gap: 8px; background: #FBECEA;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #C0392B;">Claim verifier</span>
+      <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #C0392B;">BLOCKED</span>
+    </div>
+
+    <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 15px;">
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between;"><span style="font-size: 12px; font-weight: 500;">13 claims checked</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #C0392B;">1 blocking</span></div>
+        <div style="height: 5px; display: flex; gap: 1px;"><div style="width: 84%; background: #0E7C5A;"></div><div style="width: 8%; background: #A86A00;"></div><div style="width: 8%; background: #C0392B;"></div></div>
+        <div style="display: flex; gap: 12px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;">
+          <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 7px; height: 7px; background: #0E7C5A;"></span>11 supported</span>
+          <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 7px; height: 7px; background: #A86A00;"></span>1 reframed</span>
+          <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 7px; height: 7px; background: #C0392B;"></span>1 unsupported</span>
+        </div>
+      </div>
+
+      <div style="background: #FBECEA; border-left: 2px solid #C0392B; padding: 11px 13px; display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.06em; color: #C0392B;">BLOCKING CLAIM</span>
+        <span style="font-size: 12px; line-height: 1.55;">&ldquo;Led a team of four engineers delivering a production chatbot.&rdquo;</span>
+        <span style="font-size: 11px; color: #6B6B78; line-height: 1.55;">Closest evidence is EV-11 &mdash; <em>worked on a chatbot with a team of four</em>. Participation is not leadership, and no other record supports it.</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="height: 30px; background: #14141A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500;">Rewrite from EV-11</div>
+        <div style="display: flex; gap: 6px;">
+          <div style="flex-grow: 1; height: 28px; border: 1px solid #C9CDD6; display: flex; align-items: center; justify-content: center; font-size: 12px;">Edit by hand</div>
+          <div style="flex-grow: 1; height: 28px; border: 1px solid #C9CDD6; display: flex; align-items: center; justify-content: center; font-size: 12px;">Drop the claim</div>
+        </div>
+      </div>
+
+      <div style="border-top: 1px solid #E4E4E9; padding-top: 13px; display: flex; flex-direction: column; gap: 7px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Why this is trustworthy</span>
+        <div style="font-size: 11.5px; color: #6B6B78; line-height: 1.6;">The verifier is given your master profile and this document &mdash; and deliberately <span style="color: #14141A; font-weight: 500;">not the job description</span>. It cannot be talked into a claim by what the role happens to want. It can only ask whether your own record supports the sentence.</div>
+      </div>
+
+      <div style="border-top: 1px solid #E4E4E9; padding-top: 13px; display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8D8D98;">Run</span>
+        <div style="display: flex; flex-direction: column; gap: 5px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6B6B78;">
+          <div style="display: flex; justify-content: space-between;"><span>attempt 1</span><span style="color: #C0392B;">2 unsupported</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>attempt 2</span><span style="color: #C0392B;">1 unsupported</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>model</span><span style="color: #14141A;">claude-opus-5</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>elapsed</span><span style="color: #14141A;">21.4s</span></div>
+        </div>
+        <div style="font-size: 11px; color: #6B6B78; line-height: 1.55;">Two automatic regenerations is the limit. Past that it stops guessing and hands the decision to you.</div>
+      </div>
+
+    </div>
+  </aside>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
