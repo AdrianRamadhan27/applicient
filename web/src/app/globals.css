@@ -1,0 +1,224 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Terminal Ledger — Applicient's design system.
+ * Ported from design/Tokens.dc.html (the design canvas built with the
+ * user). Zero border-radius, no shadows, IBM Plex Sans/Mono — that
+ * combination is the whole identity; it's what keeps this from
+ * reading as stock shadcn. Don't add radius or shadow utilities back
+ * in per-component; if a component needs to look different, that's a
+ * token decision, made here.
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* Semantic status colors — separate from --primary/--accent so
+     meaning never competes with "this is clickable" (the Signal Board
+     direction's discipline, kept even though Terminal Ledger won). */
+  --color-ok: var(--ok);
+  --color-ok-foreground: var(--ok-foreground);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-warn-bg: var(--warn-bg);
+  --color-crit: var(--crit);
+  --color-crit-foreground: var(--crit-foreground);
+  --color-crit-bg: var(--crit-bg);
+  --color-evidence: var(--evidence);
+  --color-evidence-foreground: var(--evidence-foreground);
+
+  /* Evidence-category taxonomy colors (Profile Studio). Deliberately
+     a separate set from ok/warn/crit above — those carry status
+     meaning (healthy/pending/failed) elsewhere in the app, and reusing
+     e.g. green for "certification" would make a badge ambiguous with
+     "connection OK". Experience and Other reuse --primary/--muted
+     rather than adding two more bespoke hues. */
+  --color-cat-education: var(--cat-education);
+  --color-cat-education-bg: var(--cat-education-bg);
+  --color-cat-certification: var(--cat-certification);
+  --color-cat-certification-bg: var(--cat-certification-bg);
+  --color-cat-project: var(--cat-project);
+  --color-cat-project-bg: var(--cat-project-bg);
+  --color-cat-achievement: var(--cat-achievement);
+  --color-cat-achievement-bg: var(--cat-achievement-bg);
+  --color-cat-skill: var(--cat-skill);
+  --color-cat-skill-bg: var(--cat-skill-bg);
+
+  /* Zero radius, everywhere — the identity, not a per-component choice. */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+}
+
+:root {
+  --background: #fafafb;
+  --foreground: #14141a;
+  --card: #ffffff;
+  --card-foreground: #14141a;
+  --popover: #ffffff;
+  --popover-foreground: #14141a;
+  --primary: #0f62fe;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f5f7;
+  --secondary-foreground: #14141a;
+  --muted: #eeeff2;
+  --muted-foreground: #6b6b78;
+  --accent: #edf2ff;
+  --accent-foreground: #0f62fe;
+  --destructive: #c0392b;
+  --border: #e4e4e9;
+  --input: #c9cdd6;
+  --ring: #0f62fe;
+  --chart-1: #0f62fe;
+  --chart-2: #0e7c5a;
+  --chart-3: #a86a00;
+  --chart-4: #c0392b;
+  --chart-5: #6b6b78;
+  --radius: 0px;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #14141a;
+  --sidebar-primary: #0f62fe;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #edf2ff;
+  --sidebar-accent-foreground: #0f62fe;
+  --sidebar-border: #e4e4e9;
+  --sidebar-ring: #0f62fe;
+
+  --ok: #0e7c5a;
+  --ok-foreground: #ffffff;
+  --ok-bg: #e8f4ef;
+  --warn: #a86a00;
+  --warn-foreground: #ffffff;
+  --warn-bg: #fbf1e0;
+  --crit: #c0392b;
+  --crit-foreground: #ffffff;
+  --crit-bg: #fbecea;
+  --evidence: #fff3b8;
+  --evidence-foreground: #14141a;
+
+  --cat-education: #7c3aed;
+  --cat-education-bg: #f1eafe;
+  --cat-certification: #0f8b8d;
+  --cat-certification-bg: #e3f6f6;
+  --cat-project: #c2540a;
+  --cat-project-bg: #fdece0;
+  --cat-achievement: #b23368;
+  --cat-achievement-bg: #fbe7ef;
+  --cat-skill: #4f46e5;
+  --cat-skill-bg: #eae9fd;
+}
+
+.dark {
+  --background: #0b0c0f;
+  --foreground: #e8e9ed;
+  --card: #121419;
+  --card-foreground: #e8e9ed;
+  --popover: #121419;
+  --popover-foreground: #e8e9ed;
+  --primary: #4589ff;
+  --primary-foreground: #0b0c0f;
+  --secondary: #171a20;
+  --secondary-foreground: #e8e9ed;
+  --muted: #23262e;
+  --muted-foreground: #9096a1;
+  --accent: #16233d;
+  --accent-foreground: #4589ff;
+  --destructive: #ff8389;
+  --border: #23262e;
+  --input: #343945;
+  --ring: #4589ff;
+  --chart-1: #4589ff;
+  --chart-2: #42be9a;
+  --chart-3: #d9a441;
+  --chart-4: #ff8389;
+  --chart-5: #9096a1;
+  --sidebar: #121419;
+  --sidebar-foreground: #e8e9ed;
+  --sidebar-primary: #4589ff;
+  --sidebar-primary-foreground: #0b0c0f;
+  --sidebar-accent: #16233d;
+  --sidebar-accent-foreground: #4589ff;
+  --sidebar-border: #23262e;
+  --sidebar-ring: #4589ff;
+
+  --ok: #42be9a;
+  --ok-foreground: #0b0c0f;
+  --ok-bg: #10241d;
+  --warn: #d9a441;
+  --warn-foreground: #0b0c0f;
+  --warn-bg: #2a2114;
+  --crit: #ff8389;
+  --crit-foreground: #0b0c0f;
+  --crit-bg: #2b1618;
+  --evidence: #3f3714;
+  --evidence-foreground: #e8e9ed;
+
+  --cat-education: #b794f6;
+  --cat-education-bg: #241a3d;
+  --cat-certification: #4fd1c5;
+  --cat-certification-bg: #12302e;
+  --cat-project: #fdba74;
+  --cat-project-bg: #3a2410;
+  --cat-achievement: #f472b6;
+  --cat-achievement-bg: #3a1830;
+  --cat-skill: #a5b4fc;
+  --cat-skill-bg: #211e42;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* Tabular numerals wherever digits line up — scores, tokens, prices. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

@@ -9,7 +9,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-applicient}
       POSTGRES_DB: ${POSTGRES_DB:-applicient}
     ports:
-      - "5432:5432"
+      # Host port 5433, not 5432 — this machine already runs a native
+      # Homebrew postgresql@14 service bound to 127.0.0.1:5432/[::1]:5432,
+      # and macOS resolves "localhost" to that one first. Remapping here
+      # avoids the collision without touching the existing service.
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

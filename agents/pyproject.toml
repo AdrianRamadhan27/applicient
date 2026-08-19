@@ -1,0 +1,24 @@
+[project]
+name = "applicient-agents"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "adrianramadhan-strait", email = "adrian.ramadhan@straitpoint.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "applicient-api",
+    "deepagents>=0.7.7",
+    "langchain-openai>=1.5.2",
+]
+
+[project.scripts]
+applicient-agents = "applicient_agents:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+applicient-api = { path = "../api", editable = true }
