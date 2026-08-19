@@ -7,7 +7,9 @@ Built on [LangChain deepagents](https://github.com/langchain-ai/deepagents). Pro
 **Status:** M0 complete — local CV ingest, evidence verification, model routing, and cost ledger are runnable; discovery starts in M1.
 
 - [Product requirements](docs/PRD.md)
-- [Implementation checklist](docs/IMPLEMENTATION.md)
+- [Implementation index](docs/IMPLEMENTATION.md)
+- [M0 implementation checklist](docs/M0_IMPLEMENTATION.md)
+- [M1 implementation checklist](docs/M1_IMPLEMENTATION.md)
 
 ## Setup
 
