@@ -1,0 +1,41 @@
+"""M1 §3 — the radar-run trigger. SSE, mirroring routers/cv.py's shape
+exactly: precondition/ownership checks happen here, synchronously,
+before the stream starts (so a bad ID or an unmet precondition gets a
+real HTTP status, not a 200 with an error event); the actual fan-out
+lives in radar.py's generator."""
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
+
+from applicient_api.deps import current_user_id, get_db, get_session_factory
+from applicient_api.models.discovery import SavedSearch
+from applicient_api.models.profile import Persona, Profile
+from applicient_api.radar import run_radar_search
+
+router = APIRouter(prefix="/saved-searches", tags=["radar"])
+
+
+@router.post("/{saved_search_id}/run")
+def run_saved_search(
+    saved_search_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    saved_search = db.query(SavedSearch).filter_by(id=saved_search_id, user_id=user_id).one_or_none()
+    if saved_search is None:
+        raise HTTPException(404, "saved search not found")
+    if not saved_search.active:
+        raise HTTPException(409, "saved search is not active")
+    if not saved_search.source_ids:
+        raise HTTPException(409, "saved search has no sources selected")
+
+    profile = db.query(Profile).filter_by(user_id=user_id).one_or_none()
+    if profile is None or not profile.confirmed:
+        raise HTTPException(409, "profile must be confirmed before running a search")
+
+    persona = db.get(Persona, saved_search.persona_id)
+    if persona is None or not persona.active:
+        raise HTTPException(409, "saved search's persona is missing or inactive")
+
+    return EventSourceResponse(run_radar_search(saved_search_id, user_id, get_session_factory()))

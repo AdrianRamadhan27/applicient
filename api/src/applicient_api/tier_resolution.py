@@ -30,22 +30,56 @@ class TierResolutionError(Exception):
     pass
 
 
+# Only providers with one fixed, well-known API endpoint get a default
+# here. "openai_compatible" and "ollama_vllm" connections exist
+# specifically to point at a user-supplied endpoint — silently falling
+# back to some other provider's URL for those would mean a
+# misconfigured connection quietly calls a completely different
+# provider than the one the user thinks they added.
+_DEFAULT_BASE_URLS = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "openai": "https://api.openai.com/v1",
+    "mistral": "https://api.mistral.ai/v1",
+}
+
+
+def _resolve_base_url(conn: ProviderConnection) -> str:
+    if conn.base_url:
+        return conn.base_url
+    default = _DEFAULT_BASE_URLS.get(conn.provider)
+    if default is None:
+        raise TierResolutionError(
+            f"provider connection {conn.id} ({conn.provider!r}) has no base_url configured"
+        )
+    return default
+
+
 def _build_chat_model(entry: ModelCatalogEntry, conn: ProviderConnection, callbacks: list[BaseCallbackHandler]) -> BaseChatModel:
     api_key = decrypt_api_key(conn.api_key_encrypted)
 
-    if conn.provider in ("openrouter", "openai_compatible", "openai"):
+    # openai/mistral/ollama_vllm all speak the same OpenAI
+    # chat-completions shape (confirmed live for openai/openrouter;
+    # mistral and ollama_vllm are a stated, documentation-based
+    # confidence gap — see their own adapter docstrings), so all five
+    # reuse the one already-installed langchain-openai integration.
+    # ollama_vllm has no default base_url (see _DEFAULT_BASE_URLS'
+    # comment) — an unconfigured one correctly raises below via
+    # _resolve_base_url, not a silent wrong-provider fallback.
+    if conn.provider in ("openrouter", "openai_compatible", "openai", "mistral", "ollama_vllm"):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
             model=entry.model_id,
-            api_key=api_key,
-            base_url=conn.base_url or "https://openrouter.ai/api/v1",
+            api_key=api_key or "unused",
+            base_url=_resolve_base_url(conn),
             callbacks=callbacks,
         )
 
-    # Anthropic (and any other provider) needs its own langchain-*
-    # integration added as a dependency when first actually used —
-    # not installed speculatively.
+    # Anthropic and Google AI Studio both have real catalog/pricing
+    # adapters (F12.3) but neither has a chat-model builder wired up
+    # here yet — each needs its own langchain-* integration added as a
+    # dependency when first actually used, not installed speculatively
+    # (google_ai_studio.py's docstring explains why in more detail).
     raise TierResolutionError(
         f"no chat model builder wired up yet for provider {conn.provider!r} "
         f"(model {entry.model_id!r}) — add the langchain-* integration when this provider is first used"
@@ -61,6 +95,8 @@ def resolve_tier(
     subagent_name: str | None = None,
     agent_run_id: uuid.UUID | None = None,
     agent_step_id: uuid.UUID | None = None,
+    source_run_id: uuid.UUID | None = None,
+    job_id: uuid.UUID | None = None,
     session_factory: sessionmaker,
 ) -> BaseChatModel:
     profile = (
@@ -98,11 +134,13 @@ def resolve_tier(
         subagent_name=subagent_name,
         agent_run_id=agent_run_id,
         agent_step_id=agent_step_id,
+        source_run_id=source_run_id,
+        job_id=job_id,
     )
     return _build_chat_model(entry, conn, [handler])
 
 
-def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID):
+def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID) -> tuple["OpenAIEmbeddings", str]:
     """Same tier-binding chain as resolve_tier, but for the
     `embedding` tier — a different LangChain class (OpenAIEmbeddings,
     not a chat model) since embeddings are a different API shape.
@@ -131,7 +169,7 @@ def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID):
     if conn is None:
         raise TierResolutionError(f"provider connection for catalog entry {entry.id} no longer exists")
 
-    if conn.provider not in ("openrouter", "openai_compatible", "openai"):
+    if conn.provider not in ("openrouter", "openai_compatible", "openai", "mistral", "ollama_vllm"):
         raise TierResolutionError(
             f"no embedding client builder wired up yet for provider {conn.provider!r}"
         )
@@ -139,10 +177,10 @@ def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID):
     from langchain_openai import OpenAIEmbeddings
 
     api_key = decrypt_api_key(conn.api_key_encrypted)
-    return OpenAIEmbeddings(
+    client = OpenAIEmbeddings(
         model=entry.model_id,
-        openai_api_key=api_key,
-        openai_api_base=conn.base_url or "https://openrouter.ai/api/v1",
+        openai_api_key=api_key or "unused",
+        openai_api_base=_resolve_base_url(conn),
         tiktoken_enabled=False,
         check_embedding_ctx_length=False,
         # The openai SDK defaults to requesting base64-encoded vectors
@@ -154,3 +192,9 @@ def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID):
         # doesn't show the fix.
         model_kwargs={"encoding_format": "float"},
     )
+    # Returned alongside the client (rather than re-derived from
+    # openai_api_base downstream) because more than one provider can
+    # share a base_url shape — inferring provider from the URL string
+    # is exactly the kind of guess F13.6 says never to make for cost
+    # ledger rows.
+    return client, conn.provider

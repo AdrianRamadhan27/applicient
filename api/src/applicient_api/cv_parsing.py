@@ -51,9 +51,21 @@ class ExtractedEvidenceItem(BaseModel):
     category: str = Field(
         description="One of: experience, education, certification, project, achievement, skill, other."
     )
+    title: str | None = Field(
+        default=None,
+        description=(
+            "The specific role, degree, certificate, or project name — e.g. "
+            "'Machine Learning Engineer Intern', 'B.Sc. Computer Science', "
+            "'AWS Certified Solutions Architect'. NEVER the organization "
+            "name — that belongs in `employer` below, even when the source "
+            "writes them together like 'Bangkit Academy — Machine Learning "
+            "Cohort' (employer='Bangkit Academy', title='Machine Learning "
+            "Cohort', not the whole string jammed into employer)."
+        ),
+    )
     text: str = Field(description="One clear, standalone sentence describing a single accomplishment.")
     skills: list[str] = Field(default_factory=list, description="Technologies, languages, tools actually named or clearly implied.")
-    employer: str | None = Field(default=None, description="Employer, school, or organization this happened at, if stated.")
+    employer: str | None = Field(default=None, description="Employer, school, or organization this happened at, if stated — the organization only, never combined with the role/degree/program name (see `title`).")
     date_start: str | None = Field(default=None, description="ISO date (YYYY-MM-DD) or None if not determinable. Use the 1st of the month if only month/year is given.")
     date_end: str | None = Field(default=None, description="ISO date, or None if ongoing/current.")
     metrics: dict[str, str] = Field(default_factory=dict, description="Any concrete numbers mentioned, e.g. {\"queries_per_day\": \"2000\"}.")
@@ -103,6 +115,7 @@ How granular to be — this is the part that most often goes wrong, so read it c
 - achievement: awards, publications, competitions — one item each.
 
 Other rules:
+- `employer` is the organization only (company, school, issuing body). `title` is the role/degree/certificate/project name only. Keep them separate even when the source writes them on one line joined by a dash or "at" — e.g. source "Bangkit Academy — Machine Learning Cohort" becomes employer="Bangkit Academy", title="Machine Learning Cohort", never employer="Bangkit Academy — Machine Learning Cohort" with title left empty.
 - Never invent facts, numbers, dates, or skills not present in the source text. If a date isn't stated, leave it null rather than guessing.
 - Rewrite each item as a clear, standalone sentence in past tense (present tense only if explicitly ongoing) — do not copy sentence fragments verbatim if the source is telegraphic bullet-point shorthand, but never add claims the source doesn't support.
 - Skills should be concrete named technologies/tools/languages, not vague soft-skill words."""

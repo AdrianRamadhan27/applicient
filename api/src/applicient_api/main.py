@@ -6,7 +6,21 @@ uv run uvicorn applicient_api.main:app --reload
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from applicient_api.routers import cost, cv, evidence, health, model_profiles, profiles, providers, streaming
+from applicient_api.routers import (
+    cost,
+    cv,
+    evidence,
+    health,
+    jobs,
+    model_profiles,
+    personas,
+    profiles,
+    providers,
+    radar,
+    saved_searches,
+    sources,
+    streaming,
+)
 
 app = FastAPI(title="Applicient API", version="0.1.0")
 
@@ -34,3 +48,8 @@ app.include_router(providers.router)
 app.include_router(model_profiles.router)
 app.include_router(cost.router)
 app.include_router(streaming.router)
+app.include_router(personas.router)
+app.include_router(sources.router)
+app.include_router(saved_searches.router)
+app.include_router(radar.router)
+app.include_router(jobs.router)

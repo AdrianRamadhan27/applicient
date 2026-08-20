@@ -44,6 +44,12 @@ class CostLedgerCallbackHandler(BaseCallbackHandler):
         subagent_name: str | None = None,
         agent_run_id: uuid.UUID | None = None,
         agent_step_id: uuid.UUID | None = None,
+        # M1 §3/§7 — the two extra cost-attribution FKs LlmCall grew in
+        # the M1 schema delta (per-source and per-job cost rollups);
+        # unused by any caller before the radar-run service, so never
+        # threaded through here until now.
+        source_run_id: uuid.UUID | None = None,
+        job_id: uuid.UUID | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.user_id = user_id
@@ -54,6 +60,8 @@ class CostLedgerCallbackHandler(BaseCallbackHandler):
         self.subagent_name = subagent_name
         self.agent_run_id = agent_run_id
         self.agent_step_id = agent_step_id
+        self.source_run_id = source_run_id
+        self.job_id = job_id
         self._started_at: dict[uuid.UUID, datetime] = {}
 
     # Both hooks fire depending on model type (chat vs. legacy
@@ -92,6 +100,8 @@ class CostLedgerCallbackHandler(BaseCallbackHandler):
                     user_id=self.user_id,
                     agent_run_id=self.agent_run_id,
                     agent_step_id=self.agent_step_id,
+                    source_run_id=self.source_run_id,
+                    job_id=self.job_id,
                     stage=self.stage,
                     subagent_name=self.subagent_name,
                     provider=self.provider,
@@ -120,6 +130,8 @@ class CostLedgerCallbackHandler(BaseCallbackHandler):
                     user_id=self.user_id,
                     agent_run_id=self.agent_run_id,
                     agent_step_id=self.agent_step_id,
+                    source_run_id=self.source_run_id,
+                    job_id=self.job_id,
                     stage=self.stage,
                     subagent_name=self.subagent_name,
                     provider=self.provider,

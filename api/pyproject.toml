@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.19.1",
+    "applicient-sources",
     "cryptography>=50.0.0",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
@@ -39,3 +40,12 @@ build-backend = "uv_build"
 dev = [
     "httpx>=0.28.1",
 ]
+
+[tool.uv.sources]
+# M1 §3 — the radar-run orchestrator (this package) is the actual
+# caller of get_adapter()/SourceAdapter; the dependency direction was
+# backwards before (sources/pyproject.toml declared applicient-api as
+# a dependency it never actually imported — checked, zero real
+# imports, comments only). Flipped to match real usage instead of
+# leaving a circular declaration neither side needs.
+applicient-sources = { path = "../sources", editable = true }

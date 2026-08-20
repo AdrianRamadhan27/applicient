@@ -52,5 +52,40 @@ class FitScore(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     gap_closers: Mapped[str | None] = mapped_column(Text)  # F4.7
     red_flags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # F4.8
 
+    # M1 §5 — stamped so a prompt/schema change is distinguishable from
+    # a profile-driven rescore when reading score history; not a
+    # substitute for profile_revision above (that tracks WHAT was
+    # scored against, this tracks HOW the scoring itself was done).
+    scoring_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
+    model_used: Mapped[str | None] = mapped_column(String(120))
+    cost_usd: Mapped[float] = mapped_column(Numeric(10, 5), nullable=False, default=0)
+
+
+class PrefilterResult(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
+    """M1 §5 — the cheap fast-tier pass, its own contract, not folded
+    into FitScore. Every posting that reaches prefiltering gets a row
+    here, including drops — "never delete dropped postings; the user
+    can inspect why a job did not reach the expensive pass" (M1 §5) is
+    only true if the drop reasoning is actually persisted somewhere,
+    and FitScore's contract (recommendation, full dimensions, evidence
+    spans) doesn't fit a one-line keep/drop/review decision at all.
+    Append-only history, same as FitScore, for the same reason: a
+    rescore after a profile change shouldn't erase what the previous
+    pass concluded."""
+
+    __tablename__ = "prefilter_results"
+
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    persona_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("personas.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)  # PrefilterDecision
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    prefilter_version: Mapped[str] = mapped_column(String(40), nullable=False, default="v1")
     model_used: Mapped[str | None] = mapped_column(String(120))
     cost_usd: Mapped[float] = mapped_column(Numeric(10, 5), nullable=False, default=0)

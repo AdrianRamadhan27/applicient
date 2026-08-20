@@ -24,6 +24,9 @@ def create_connection(
     db: Session = Depends(get_db),
     user_id: uuid.UUID = Depends(current_user_id),
 ):
+    if body.provider == "openai_compatible" and not body.base_url:
+        raise HTTPException(422, "base_url is required for an openai_compatible provider")
+
     conn = connections.create_connection(
         db,
         user_id=user_id,

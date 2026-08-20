@@ -69,3 +69,29 @@ def update_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+@router.post("/{profile_id}/reset", response_model=schemas.ProfileOut)
+def reset_profile(
+    profile_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    """Deletes the profile and everything hung off it (evidence items,
+    personas, and — transitively via DB FK cascade — documents, fit
+    scores, prefilter results, and applications), then recreates a
+    blank shell in its place. The app has no "create profile" path and
+    every surface assumes exactly one profile exists per user (see
+    seed.py), so a bare delete would strand the frontend; recreating
+    keeps that invariant intact while giving the user an actual clean
+    slate.
+    """
+    profile = db.query(Profile).filter_by(id=profile_id, user_id=user_id).one_or_none()
+    if profile is None:
+        raise HTTPException(404, "profile not found")
+
+    db.delete(profile)
+    db.flush()
+    fresh = Profile(user_id=user_id, revision=1, confirmed=False)
+    db.add(fresh)
+    db.commit()
+    db.refresh(fresh)
+    return fresh

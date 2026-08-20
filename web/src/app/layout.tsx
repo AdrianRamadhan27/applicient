@@ -29,7 +29,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full">
+      {/* Some browser security extensions (Bitdefender/Avast-family
+          "web protection" scanners are the common case) inject
+          bis_skin_checked/bis_register/__processed_*__ attributes into
+          the DOM right after SSR paint but before React hydrates —
+          suppressHydrationWarning on body stops React from flagging
+          that specific, harmless mismatch, matching the same pattern
+          already used on <html> above for next-themes. */}
+      <body className="min-h-full" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AppShell>{children}</AppShell>
           <Toaster />

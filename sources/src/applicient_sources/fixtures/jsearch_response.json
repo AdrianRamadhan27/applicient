@@ -1,0 +1,47 @@
+{
+  "_fixture_note": "CONSTRUCTED from documented JSearch field names (see jsearch.py module docstring) — this is NOT a captured live API response. No real key was available to verify it. Delete this key before using as an actual test payload if that matters to a strict schema check; kept here as a visible reminder.",
+  "status": "OK",
+  "request_id": "fixture-request-id",
+  "parameters": {"query": "AI Engineer in Jakarta"},
+  "data": [
+    {
+      "job_id": "abc123fixture",
+      "job_title": "AI Engineer",
+      "employer_name": "Contoh Teknologi",
+      "job_apply_link": "https://example.com/careers/ai-engineer",
+      "job_google_link": "https://google.com/jobs/abc123",
+      "job_description": "Full plain-text fallback description used when job_highlights is absent.",
+      "job_city": "Jakarta",
+      "job_state": "DKI Jakarta",
+      "job_country": "ID",
+      "job_is_remote": false,
+      "job_employment_type": "FULLTIME",
+      "job_employment_types": ["FULLTIME"],
+      "job_min_salary": 18000000,
+      "job_max_salary": 25000000,
+      "job_posted_at_datetime_utc": "2026-08-01T00:00:00.000Z",
+      "seniority_level": "mid",
+      "job_highlights": {
+        "Qualifications": ["2+ years Python", "Experience with LLM APIs"],
+        "Responsibilities": ["Build RAG pipelines", "Own model evaluation"],
+        "Benefits": ["Health insurance", "Remote-friendly"]
+      }
+    },
+    {
+      "job_id": "def456fixture",
+      "job_title": "Machine Learning Engineer",
+      "employer_name": "Startup Kedua",
+      "job_apply_link": "https://example.com/careers/ml-engineer",
+      "job_description": "No structured highlights on this one — fallback to job_description.",
+      "job_city": null,
+      "job_state": null,
+      "job_country": "ID",
+      "job_is_remote": true,
+      "job_employment_type": "FULLTIME",
+      "job_min_salary": null,
+      "job_max_salary": null,
+      "job_posted_at_datetime_utc": "2026-07-15T00:00:00.000Z",
+      "seniority_level": null
+    }
+  ]
+}

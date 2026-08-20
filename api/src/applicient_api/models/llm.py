@@ -116,6 +116,17 @@ class LlmCall(UUIDPKMixin, Base):
     agent_step_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agent_steps.id", ondelete="SET NULL")
     )
+    # M1 §7 — direct FKs rather than a generic related_type/related_id
+    # polymorphic pair: "cost per newly discovered/scored job" and
+    # per-SourceRun breakdowns are the two M1-specific rollups that
+    # agent_run_id/stage alone can't answer, and both are common enough
+    # relationships to earn a real column rather than a generic one.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_runs.id", ondelete="SET NULL")
+    )
     stage: Mapped[str | None] = mapped_column(String(120))  # e.g. "fit-scoring-agent"
     subagent_name: Mapped[str | None] = mapped_column(String(120))
     provider: Mapped[str] = mapped_column(String(30), nullable=False)

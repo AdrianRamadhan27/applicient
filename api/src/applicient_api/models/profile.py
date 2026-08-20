@@ -86,6 +86,15 @@ class EvidenceItem(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(String(20), nullable=False, default="other", index=True)  # EvidenceCategory
+    # The specific role/degree/certificate/project name — e.g. "Machine
+    # Learning Cohort", "AI Engineer Intern", "B.Sc. Computer Science".
+    # Kept distinct from employer (the organization) rather than folded
+    # into it: a CV that reads "Bangkit Academy — Machine Learning
+    # Cohort" was, before this field existed, parsed with the whole
+    # string jammed into `employer` because there was nowhere else to
+    # put it. Also what lets two roles at the same employer (a
+    # promotion) read as two distinct blocks instead of one.
+    title: Mapped[str | None] = mapped_column(String(250))
     skills: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     metrics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     employer: Mapped[str | None] = mapped_column(String(200))

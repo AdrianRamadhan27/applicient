@@ -37,7 +37,36 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-const PROVIDERS = ["openrouter", "anthropic"] as const;
+// "openai_compatible" is a functional adapter key, not a brand name —
+// it's how the backend knows to build a generic ChatOpenAI/
+// OpenAIEmbeddings client against a user-supplied base_url (see
+// tier_resolution.py). The display name for a connection made this
+// way comes from its label (e.g. "Gemini"), not from this value.
+const PROVIDERS = [
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "mistral", label: "Mistral" },
+  { value: "google_ai_studio", label: "Google AI Studio (Gemini)" },
+  { value: "ollama_vllm", label: "Ollama / vLLM (self-hosted)" },
+  { value: "openai_compatible", label: "Custom (OpenAI-compatible)" },
+] as const;
+
+// Providers whose LangChain chat-model wiring isn't built yet
+// (tier_resolution.py: catalog/pricing works today, but binding a
+// tier to one of these and running it raises TierResolutionError
+// until its langchain-* integration is added — not installed
+// speculatively, same reasoning stated there). Surfaced here so the
+// GUI doesn't imply a capability the backend doesn't have yet.
+const UNWIRED_FOR_CHAT: string[] = ["anthropic", "google_ai_studio"];
+
+// Both need a real endpoint the connection form can't guess —
+// openai_compatible always did; ollama_vllm's default port differs
+// between Ollama (11434) and vLLM (commonly 8000, but not guaranteed),
+// so it's a real required input here too, not assumed.
+function needsBaseUrl(provider: string) {
+  return provider === "openai_compatible" || provider === "ollama_vllm";
+}
 const TIERS = ["fast", "balanced", "deep", "embedding"] as const;
 type Tier = (typeof TIERS)[number];
 
@@ -72,6 +101,7 @@ export default function ModelsPage() {
   const [newProvider, setNewProvider] = React.useState<string>("openrouter");
   const [newKey, setNewKey] = React.useState("");
   const [newLabel, setNewLabel] = React.useState("");
+  const [newBaseUrl, setNewBaseUrl] = React.useState("");
   const [creating, setCreating] = React.useState(false);
 
   const loadConnections = React.useCallback(async () => {
@@ -122,46 +152,53 @@ export default function ModelsPage() {
     };
   }, []);
 
+  // Loaded for every tested connection, not just the one highlighted
+  // in the table below — tier bindings can mix providers (F12.9: any
+  // tier may point at any connection's catalog), so the picker needs
+  // every "ok" connection's models available at once, not just one.
   React.useEffect(() => {
-    if (!selected || catalogs[selected]) return;
-    api
-      .getCatalog(selected)
-      .then((entries) => setCatalogs((c) => ({ ...c, [selected]: entries })))
-      .catch((e) => toast.error(String(e)));
-  }, [selected, catalogs]);
+    for (const conn of connections) {
+      if (conn.status !== "ok" || catalogs[conn.id]) continue;
+      api
+        .getCatalog(conn.id)
+        .then((entries) => setCatalogs((c) => ({ ...c, [conn.id]: entries })))
+        .catch((e) => toast.error(String(e)));
+    }
+  }, [connections, catalogs]);
 
   const activeCatalog = React.useMemo(
     () => (selected ? (catalogs[selected] ?? []) : []),
     [selected, catalogs],
   );
 
+  type TierOption = { entry: ModelCatalogEntry; connectionId: string; connectionLabel: string };
+
   const tierOptions = React.useMemo(() => {
-    const options: Record<Tier, ModelCatalogEntry[]> = {
-      fast: [],
-      balanced: [],
-      deep: [],
-      embedding: [],
-    };
-    for (const entry of activeCatalog) {
-      if (entry.capabilities.includes("embedding")) {
-        options.embedding.push(entry);
-      } else {
-        options.fast.push(entry);
-        options.balanced.push(entry);
-        if (entry.capabilities.includes("structured_output")) options.deep.push(entry);
+    const options: Record<Tier, TierOption[]> = { fast: [], balanced: [], deep: [], embedding: [] };
+    for (const conn of connections) {
+      const connectionLabel = conn.label || conn.provider;
+      for (const entry of catalogs[conn.id] ?? []) {
+        const option = { entry, connectionId: conn.id, connectionLabel };
+        if (entry.capabilities.includes("embedding")) {
+          options.embedding.push(option);
+        } else {
+          options.fast.push(option);
+          options.balanced.push(option);
+          if (entry.capabilities.includes("structured_output")) options.deep.push(option);
+        }
       }
     }
     return options;
-  }, [activeCatalog]);
+  }, [connections, catalogs]);
 
   const effectiveBindings = React.useMemo(() => {
     const next = { ...bindings };
     for (const tier of TIERS) {
       const options = tierOptions[tier];
-      if (options.length && !options.some((entry) => entry.id === next[tier])) {
+      if (options.length && !options.some(({ entry }) => entry.id === next[tier])) {
         next[tier] =
-          options.find((entry) => tier === "fast" && entry.input_price_per_mtok === 0)?.id ??
-          options[0].id;
+          options.find((o) => tier === "fast" && o.entry.input_price_per_mtok === 0)?.entry.id ??
+          options[0].entry.id;
       }
     }
     return next;
@@ -196,17 +233,23 @@ export default function ModelsPage() {
   }
 
   async function handleCreate() {
+    if (needsBaseUrl(newProvider) && !newBaseUrl.trim()) {
+      toast.error("Base URL is required for this provider");
+      return;
+    }
     setCreating(true);
     try {
       const conn = await api.createConnection({
         provider: newProvider,
         api_key: newKey,
+        base_url: newBaseUrl.trim() || undefined,
         label: newLabel || undefined,
       });
       setConnections((cs) => [...cs, conn]);
       setSelected(conn.id);
       setNewKey("");
       setNewLabel("");
+      setNewBaseUrl("");
       setDialogOpen(false);
       toast.success("Connection added — test it to verify the key");
     } catch (e) {
@@ -262,13 +305,46 @@ export default function ModelsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {PROVIDERS.map((p) => (
-                        <SelectItem key={p} value={p}>
-                          {p}
+                        <SelectItem key={p.value} value={p.value}>
+                          {p.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {newProvider === "openai_compatible" && (
+                    <span className="text-xs text-muted-foreground">
+                      Any endpoint that speaks the OpenAI chat-completions API — Gemini&apos;s
+                      OpenAI-compat endpoint, Groq, Together, a local server, etc.
+                    </span>
+                  )}
+                  {newProvider === "ollama_vllm" && (
+                    <span className="text-xs text-muted-foreground">
+                      A self-hosted Ollama or vLLM server — free by design, no real API key needed
+                      (any placeholder works).
+                    </span>
+                  )}
+                  {UNWIRED_FOR_CHAT.includes(newProvider) && (
+                    <span className="text-xs text-warn">
+                      Catalog and pricing work today, but running a tier bound to this provider
+                      isn&apos;t wired up yet — see tier_resolution.py.
+                    </span>
+                  )}
                 </div>
+                {needsBaseUrl(newProvider) && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="base-url">Base URL</Label>
+                    <Input
+                      id="base-url"
+                      value={newBaseUrl}
+                      onChange={(e) => setNewBaseUrl(e.target.value)}
+                      placeholder={
+                        newProvider === "ollama_vllm"
+                          ? "http://localhost:11434/v1"
+                          : "https://generativelanguage.googleapis.com/v1beta/openai"
+                      }
+                    />
+                  </div>
+                )}
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="key">API key</Label>
                   <Input
@@ -289,12 +365,17 @@ export default function ModelsPage() {
                     id="label"
                     value={newLabel}
                     onChange={(e) => setNewLabel(e.target.value)}
-                    placeholder="e.g. Personal OpenRouter"
+                    placeholder={
+                      newProvider === "openai_compatible" ? "e.g. Gemini" : "e.g. Personal OpenRouter"
+                    }
                   />
                 </div>
               </div>
               <DialogFooter>
-                <Button onClick={handleCreate} disabled={!newKey || creating}>
+                <Button
+                  onClick={handleCreate}
+                  disabled={!newKey || creating || (needsBaseUrl(newProvider) && !newBaseUrl.trim())}
+                >
                   {creating ? "Saving…" : "Save"}
                 </Button>
               </DialogFooter>
@@ -398,7 +479,7 @@ export default function ModelsPage() {
               Agents ask for a capability tier; this is the only place a model is selected.
             </span>
           </div>
-          {!selected || !activeCatalog.length ? (
+          {!Object.values(tierOptions).some((options) => options.length) ? (
             <div className="border border-dashed border-input p-5 text-center text-sm text-muted-foreground">
               Test a provider and refresh its catalog to configure the tiers.
             </div>
@@ -406,7 +487,19 @@ export default function ModelsPage() {
             <div className="border border-border bg-card">
               {TIERS.map((tier) => {
                 const options = tierOptions[tier];
-                const selectedEntry = options.find((entry) => entry.id === effectiveBindings[tier]);
+                const selectedOption = options.find((o) => o.entry.id === effectiveBindings[tier]);
+                // Grouped by connection so a tier bound across two
+                // providers (e.g. embedding -> OpenRouter, deep ->
+                // a separate Gemini connection) still reads clearly —
+                // this is the whole point of sourcing tierOptions from
+                // every connection instead of just the selected one.
+                const byConnection = new Map<string, { label: string; options: TierOption[] }>();
+                for (const option of options) {
+                  if (!byConnection.has(option.connectionId)) {
+                    byConnection.set(option.connectionId, { label: option.connectionLabel, options: [] });
+                  }
+                  byConnection.get(option.connectionId)!.options.push(option);
+                }
                 return (
                   <div
                     key={tier}
@@ -423,18 +516,22 @@ export default function ModelsPage() {
                       <option value="" disabled>
                         No compatible model in this catalog
                       </option>
-                      {options.map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.model_id}
-                          {entry.pricing_known
-                            ? ` · $${entry.input_price_per_mtok ?? "?"}/$${entry.output_price_per_mtok ?? "?"} Mtok`
-                            : " · price unknown"}
-                        </option>
+                      {Array.from(byConnection.entries()).map(([connectionId, group]) => (
+                        <optgroup key={connectionId} label={group.label}>
+                          {group.options.map(({ entry }) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.model_id}
+                              {entry.pricing_known
+                                ? ` · $${entry.input_price_per_mtok ?? "?"}/$${entry.output_price_per_mtok ?? "?"} Mtok`
+                                : " · price unknown"}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     <span className="w-28 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
-                      {selectedEntry?.context_window
-                        ? `${Math.round(selectedEntry.context_window / 1000)}k context`
+                      {selectedOption?.entry.context_window
+                        ? `${Math.round(selectedOption.entry.context_window / 1000)}k context`
                         : "—"}
                     </span>
                   </div>

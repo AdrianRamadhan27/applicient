@@ -49,6 +49,7 @@ def create_evidence(
         user_id=user_id,
         profile_id=profile_id,
         category=body.category,
+        title=body.title,
         text=body.text,
         skills=body.skills,
         metrics=body.metrics,
@@ -94,22 +95,23 @@ def update_evidence(
         setattr(item, field, value)
     profile.revision += 1
     profile.confirmed = False
-    # Text and skills are what the current retrieval input is built from.
-    # Marking the vector stale makes the safety boundary visible instead of
-    # silently searching with an embedding for the old claim.
-    if any(field in updates for field in ("text", "skills", "metrics")):
+    # Title, text and skills are what the current retrieval input is built
+    # from. Marking the vector stale makes the safety boundary visible
+    # instead of silently searching with an embedding for the old claim.
+    if any(field in updates for field in ("title", "text", "skills", "metrics")):
         item.embedding = None
     item.verified = False
 
-    if any(field in updates for field in ("text", "skills", "metrics")):
+    if any(field in updates for field in ("title", "text", "skills", "metrics")):
         try:
-            embeddings_client = resolve_embedding_tier(db, user_id=user_id)
+            embeddings_client, provider = resolve_embedding_tier(db, user_id=user_id)
             embed_evidence_items(
                 db,
                 embeddings_client,
                 [item],
                 user_id=user_id,
                 session_factory=get_session_factory(),
+                provider=provider,
                 stage="evidence-edit",
             )
         except TierResolutionError as exc:

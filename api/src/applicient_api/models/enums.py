@@ -187,3 +187,24 @@ class EvidenceCategory(str, enum.Enum):
     ACHIEVEMENT = "achievement"
     SKILL = "skill"
     OTHER = "other"
+
+
+class PrefilterDecision(str, enum.Enum):
+    """M1 §5 — the cheap fast-tier pass. Persisted separately from
+    FitScore (a distinct contract, PrefilterResult) so a dropped
+    posting's reasoning survives for audit even though it never
+    reaches the expensive full rubric."""
+
+    KEEP = "keep"
+    DROP = "drop"
+    REVIEW = "review"
+
+
+class SourceRunStatus(str, enum.Enum):
+    """M1 §3 — lets a resumed radar run know what source/query work is
+    already done rather than restarting from zero."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"

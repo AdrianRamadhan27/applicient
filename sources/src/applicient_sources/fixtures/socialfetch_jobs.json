@@ -1,0 +1,72 @@
+{
+  "data": {
+    "lookupStatus": "found",
+    "jobs": [
+      {
+        "id": "3812345678",
+        "url": "https://www.linkedin.com/jobs/view/3812345678",
+        "title": "Senior Backend Engineer",
+        "companyName": "Acme Corp",
+        "companyId": "acme-corp",
+        "companyUrl": "https://www.linkedin.com/company/acme-corp",
+        "location": "London, United Kingdom",
+        "summary": "Own core backend services.",
+        "seniorityLevel": "Mid-Senior level",
+        "function": "Engineering",
+        "employmentType": "Full-time",
+        "industries": "Software Development",
+        "basePayRange": "£70K/yr - £90K/yr",
+        "postedAt": "2 days ago",
+        "postedDate": "2026-08-18T00:00:00Z",
+        "applicantCount": 42,
+        "jobPoster": null,
+        "applicationAvailable": true,
+        "descriptionFormatted": "We are looking for a Senior Backend Engineer to own our core services...",
+        "baseSalary": {
+          "minAmount": 70000,
+          "maxAmount": 90000,
+          "currency": "GBP",
+          "paymentPeriod": "YEARLY"
+        },
+        "salaryStandards": null,
+        "isEasyApply": false,
+        "applyLink": "https://acme.example.com/careers/senior-backend-engineer",
+        "countryCode": "GB",
+        "companyLogoUrl": null
+      },
+      {
+        "id": "3812345679",
+        "url": "https://www.linkedin.com/jobs/view/3812345679",
+        "title": "Marketing Coordinator",
+        "companyName": "Globex",
+        "companyId": null,
+        "companyUrl": null,
+        "location": "Remote",
+        "summary": "Support the marketing team.",
+        "seniorityLevel": "Entry level",
+        "function": "Marketing",
+        "employmentType": "Full-time",
+        "industries": null,
+        "basePayRange": null,
+        "postedAt": "1 week ago",
+        "postedDate": null,
+        "applicantCount": null,
+        "jobPoster": null,
+        "applicationAvailable": true,
+        "descriptionFormatted": null,
+        "baseSalary": null,
+        "salaryStandards": null,
+        "isEasyApply": true,
+        "applyLink": null,
+        "countryCode": null,
+        "companyLogoUrl": null
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req_test123",
+    "creditsCharged": 6,
+    "version": "v1",
+    "cached": false
+  }
+}
