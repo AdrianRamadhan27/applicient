@@ -165,6 +165,42 @@ async def test_glassdoor_unsupported_country_falls_back_to_remaining_sites(adapt
     assert calls == [["indeed", "glassdoor"], ["indeed"]]
 
 
+async def test_network_failure_on_one_site_falls_back_to_remaining_sites(adapter, monkeypatch):
+    # Reproduces a real live failure Adrian hit: a DNS resolution
+    # failure reaching Indeed ("apis.indeed.com... Failed to resolve")
+    # took an entire indeed+linkedin call down with it, losing
+    # LinkedIn's real, working results along with it. Same shape as
+    # the glassdoor case above, generalized to a connection failure.
+    calls: list[list[str]] = []
+
+    def fake_scrape_jobs(*, site_name, **kw):
+        calls.append(site_name)
+        if "indeed" in site_name:
+            raise Exception(
+                "HTTPSConnectionPool(host='apis.indeed.com', port=443): Max retries exceeded with url: "
+                "/graphql (Caused by NameResolutionError(\"Failed to resolve 'apis.indeed.com'\"))"
+            )
+        return _fixture_df()
+
+    monkeypatch.setattr("jobspy.scrape_jobs", fake_scrape_jobs)
+
+    postings = await adapter.search(
+        "engineer", {"location": "Remote"}, {"sites": "indeed,linkedin", "country": "USA"}
+    )
+    assert len(postings) == 2  # the fixture's two rows, recovered via the linkedin-only retry
+    assert calls == [["indeed", "linkedin"], ["linkedin"]]
+
+
+async def test_network_failure_on_only_site_still_raises(adapter, monkeypatch):
+    def fake_scrape_jobs(*, site_name, **kw):
+        raise Exception("Failed to resolve 'apis.indeed.com'")
+
+    monkeypatch.setattr("jobspy.scrape_jobs", fake_scrape_jobs)
+
+    with pytest.raises(Exception, match="Failed to resolve"):
+        await adapter.search("engineer", {"location": "Remote"}, {"sites": "indeed", "country": "USA"})
+
+
 async def test_glassdoor_unsupported_country_with_no_other_sites_still_raises(adapter, monkeypatch):
     def fake_scrape_jobs(*, site_name, **kw):
         raise Exception("Glassdoor is not available for INDONESIA")

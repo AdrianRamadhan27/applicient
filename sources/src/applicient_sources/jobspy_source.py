@@ -66,6 +66,53 @@ _VALID_SITES = {"indeed", "linkedin", "glassdoor", "google", "zip_recruiter"}
 _DEFAULT_SITES = ["indeed"]  # JobSpy's own docs call this "the best scraper currently, no rate limiting"
 _DEFAULT_RESULTS_WANTED = 15  # bounded on purpose — this is a slow, blockable call, not a cheap API request
 
+# Raised by Adrian, live: a real Indeed DNS resolution failure
+# ("apis.indeed.com... Failed to resolve") followed by what looked
+# like a second, unrelated failure — this is the same class of bug the
+# existing Glassdoor handling below already covers, just for a network
+# failure instead of a business-logic one: `scrape_jobs()` scrapes every
+# requested site inside ONE blocking call, and any single site raising
+# kills the return value for every OTHER site too, even ones that would
+# have worked. `apis.indeed.com`/`linkedin.com`/etc. are jobspy's own
+# real hostnames (confirmed directly against its installed source, not
+# guessed), so a hostname match plus a connection-failure-shaped
+# message is a real, specific signal that THIS site (not the whole
+# call) is what's actually broken right now.
+_SITE_HOSTNAMES = {
+    "indeed": "indeed.com",
+    "linkedin": "linkedin.com",
+    "glassdoor": "glassdoor.com",
+    "zip_recruiter": "ziprecruiter.com",
+    "google": "google.com",
+}
+_CONNECTION_FAILURE_MARKERS = (
+    "failed to resolve",
+    "nodename nor servname",
+    "name or service not known",
+    "max retries exceeded",
+    "remote error",
+    "connection refused",
+    "connection reset",
+    "nameresolutionerror",
+)
+
+
+def _connection_failure_site(exc: Exception, sites: list[str]) -> str | None:
+    """Which requested site, if any, this exception's own message
+    implicates as the actual point of failure — only meaningful
+    alongside a connection-failure-shaped message, never used to
+    swallow a real application-level error from a site that's
+    otherwise working."""
+
+    text = str(exc).lower()
+    if not any(marker in text for marker in _CONNECTION_FAILURE_MARKERS):
+        return None
+    for site in sites:
+        hostname = _SITE_HOSTNAMES.get(site)
+        if hostname and hostname in text:
+            return site
+    return None
+
 
 def _clean_value(value: Any) -> Any:
     """pandas/JobSpy hand back types that aren't JSON-safe as-is:
@@ -296,6 +343,22 @@ class JobSpyAdapter(SourceAdapter):
                 # run_with_live_logs) shows nothing at all for this
                 # recovery, even though a real site just got dropped.
                 _logger.warning("glassdoor unavailable for country=%r — retrying without it (%s)", country, e)
+                return await to_thread(scrape_jobs, site_name=remaining, **kwargs)
+
+            # Raised live: a real Indeed DNS resolution failure took
+            # down an entire multi-site call. Same fix shape as
+            # glassdoor above, generalized to any site whose own
+            # hostname shows up in a connection-failure-shaped message
+            # — a real network blip for one site shouldn't cost the
+            # results of every other site in the same call.
+            failed_site = _connection_failure_site(e, sites)
+            if failed_site is not None:
+                remaining = [s for s in sites if s != failed_site]
+                if not remaining:
+                    raise
+                _logger.warning(
+                    "%s unreachable (network failure) — retrying without it (%s)", failed_site, e
+                )
                 return await to_thread(scrape_jobs, site_name=remaining, **kwargs)
             raise
 

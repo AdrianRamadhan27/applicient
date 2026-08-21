@@ -592,3 +592,84 @@ class BulkDeleteJobsIn(BaseModel):
 
 class BulkDeleteJobsOut(BaseModel):
     deleted: int
+
+
+# --- M3 §2/F5.10 — job groups, tailoring ---
+
+
+class JobGroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    persona_id: uuid.UUID
+    name: str
+    job_ids: list[uuid.UUID]
+
+
+class JobGroupCreate(BaseModel):
+    name: str
+    job_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class JobGroupUpdate(BaseModel):
+    name: str | None = None
+
+
+class JobGroupAddMember(BaseModel):
+    job_id: uuid.UUID
+
+
+class DocumentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_group_id: uuid.UUID
+    persona_id: uuid.UUID
+    profile_revision: int
+    doc_type: str
+    version: int
+    json_delta: dict
+    rendered_keys: dict
+    template: str
+    verified: bool
+    created_at: datetime
+
+
+class DocumentTexOut(BaseModel):
+    tex: str
+    is_edited: bool
+
+
+class DocumentTexIn(BaseModel):
+    template_id: str
+    tex: str
+
+
+class AnswerPackRequest(BaseModel):
+    questions: list[str]
+
+
+class CoverLetterRequest(BaseModel):
+    tone: str = "neutral"  # neutral | formal | very_formal | warm
+    length: str = "medium"  # short | medium | long
+
+
+class SkillGapItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_group_id: uuid.UUID
+    skill_text: str
+    status: str
+    evidence_item_id: uuid.UUID | None
+
+
+class ClaimVerificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    claim_text: str
+    evidence_ids: list[uuid.UUID]
+    verdict: str
+    rationale: str | None
+    attempt_number: int

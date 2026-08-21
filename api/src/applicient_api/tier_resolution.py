@@ -190,7 +190,30 @@ def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID) -> tuple["Op
         # documented anywhere obvious — langchain_openai's own
         # docstring mentions this exact failure mode but its example
         # doesn't show the fix.
-        model_kwargs={"encoding_format": "float"},
+        #
+        # `truncate: "END"` — confirmed live during a real radar run: a
+        # long job description (4615 tokens) exceeded this model's 4096
+        # token limit and the endpoint returned a 422 naming the exact
+        # fix ("set truncate=END or START"). `check_embedding_ctx_length`
+        # is already off (tiktoken doesn't know this model's tokenizer,
+        # per the docstring above), so nothing on the client side was
+        # ever going to catch an oversized input before it reached the
+        # API — this asks the server to safely truncate instead of
+        # erroring, which is what job_embedding.py's own char-based
+        # `_MAX_CHARS` cap was already trying to approximate but can't
+        # guarantee exactly, since token:char ratio isn't fixed.
+        #
+        # `truncate` isn't a real field of the openai SDK's
+        # `Embeddings.create()` (confirmed via its own signature — only
+        # `dimensions`/`encoding_format`/`user` are named params) the
+        # way `encoding_format` is, so it can't go directly into
+        # `model_kwargs` as a bare key the way that one does — a first
+        # attempt doing exactly that failed live with
+        # `TypeError: Embeddings.create() got an unexpected keyword
+        # argument 'truncate'`. `extra_body` is the SDK's own sanctioned
+        # passthrough for provider-specific fields outside its typed
+        # signature.
+        model_kwargs={"encoding_format": "float", "extra_body": {"truncate": "END"}},
     )
     # Returned alongside the client (rather than re-derived from
     # openai_api_base downstream) because more than one provider can

@@ -50,6 +50,90 @@ export type ParsedProfile = {
   skills?: string[];
 };
 
+// --- M3 §2-4/F5.10 — job groups, tailoring, verification, rendering ---
+
+export type JobGroup = {
+  id: string;
+  persona_id: string;
+  name: string;
+  job_ids: string[];
+};
+
+export type TailoredBullet = { evidence_id: string; text: string };
+export type TailoredSection = { evidence_id: string; bullets: TailoredBullet[] };
+
+export type TailoringDelta = {
+  summary: string;
+  sections: TailoredSection[];
+  skills_highlight: string[];
+  rationale: string;
+};
+
+export type CoverLetterParagraph = { evidence_ids: string[]; text: string };
+export type CoverLetterDelta = {
+  greeting: string;
+  paragraphs: CoverLetterParagraph[];
+  closing: string;
+};
+
+export type CoverLetterTone = "neutral" | "formal" | "very_formal" | "warm";
+export type CoverLetterLength = "short" | "medium" | "long";
+
+export type AnswerPackAnswer = { question: string; evidence_ids: string[]; answer: string };
+export type AnswerPackDelta = { answers: AnswerPackAnswer[] };
+
+export type TailoredDocument = {
+  id: string;
+  job_group_id: string;
+  persona_id: string;
+  profile_revision: number;
+  doc_type: string;
+  version: number;
+  // Narrow on doc_type ("cv" | "cover_letter" | "answer_pack") — each
+  // doc type has a genuinely different content shape, not a superset/
+  // subset of the others.
+  json_delta: TailoringDelta | CoverLetterDelta | AnswerPackDelta;
+  rendered_keys: Record<string, string>;
+  template: string;
+  verified: boolean;
+  created_at: string;
+};
+
+export type ClaimVerdict = "supported" | "reframed_ok" | "unsupported" | "inflated";
+
+export type ClaimVerification = {
+  id: string;
+  claim_text: string;
+  evidence_ids: string[];
+  verdict: ClaimVerdict;
+  rationale: string | null;
+  attempt_number: number;
+};
+
+export type CvTemplate = { id: string; name: string; description: string };
+
+export type SkillGapItem = {
+  id: string;
+  job_group_id: string;
+  skill_text: string;
+  status: "pending" | "done";
+  evidence_item_id: string | null;
+};
+
+export type TailorProgressEvent =
+  | {
+      type: "stage";
+      stage: "tailoring" | "verifying" | "regenerating";
+      status: "started" | "done";
+      message: string;
+      attempt?: number;
+      clean?: boolean;
+    }
+  | { type: "done"; result: TailoredDocument }
+  | { type: "error"; message: string };
+
+export type DocumentTex = { tex: string; is_edited: boolean };
+
 export const EVIDENCE_CATEGORIES = [
   "experience",
   "education",
@@ -719,7 +803,10 @@ export const api = {
     source_ids: string[];
     filters?: SavedSearch["filters"];
   }) => request<SavedSearch>("/saved-searches", { method: "POST", body: JSON.stringify(body) }),
-  updateSavedSearch: (id: string, body: Partial<Pick<SavedSearch, "active" | "role_titles" | "source_ids">>) =>
+  updateSavedSearch: (
+    id: string,
+    body: Partial<Pick<SavedSearch, "name" | "active" | "role_titles" | "source_ids" | "filters">>,
+  ) =>
     request<SavedSearch>(`/saved-searches/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSavedSearch: (id: string) => request<void>(`/saved-searches/${id}`, { method: "DELETE" }),
   listSavedSearchRuns: (id: string, limit = 5) =>
@@ -734,6 +821,7 @@ export const api = {
     filters?: {
       recommendation?: (Recommendation | "unscored")[];
       sourceId?: string;
+      search?: string;
       location?: string;
       minScore?: number;
       maxScore?: number;
@@ -744,6 +832,7 @@ export const api = {
     const params = new URLSearchParams({ persona_id: personaId });
     for (const r of filters?.recommendation ?? []) params.append("recommendation", r);
     if (filters?.sourceId) params.set("source_id", filters.sourceId);
+    if (filters?.search) params.set("search", filters.search);
     if (filters?.location) params.set("location", filters.location);
     if (filters?.minScore !== undefined) params.set("min_score", String(filters.minScore));
     if (filters?.maxScore !== undefined) params.set("max_score", String(filters.maxScore));
@@ -757,6 +846,156 @@ export const api = {
     request<{ deleted: number }>("/jobs/bulk-delete", {
       method: "POST",
       body: JSON.stringify({ job_ids: jobIds }),
+    }),
+
+  // --- M3 §2-4/F5.10 — job groups, tailoring, verification, rendering ---
+
+  listJobGroups: (personaId: string) => request<JobGroup[]>(`/personas/${personaId}/job-groups`),
+  createJobGroup: (personaId: string, body: { name: string; job_ids?: string[] }) =>
+    request<JobGroup>(`/personas/${personaId}/job-groups`, { method: "POST", body: JSON.stringify(body) }),
+  updateJobGroup: (id: string, body: { name?: string }) =>
+    request<JobGroup>(`/job-groups/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteJobGroup: (id: string) => request<void>(`/job-groups/${id}`, { method: "DELETE" }),
+  addJobGroupMember: (groupId: string, jobId: string) =>
+    request<JobGroup>(`/job-groups/${groupId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ job_id: jobId }),
+    }),
+  removeJobGroupMember: (groupId: string, jobId: string) =>
+    request<JobGroup>(`/job-groups/${groupId}/members/${jobId}`, { method: "DELETE" }),
+  listGroupDocuments: (groupId: string, docType?: "cv" | "cover_letter" | "answer_pack") =>
+    request<TailoredDocument[]>(
+      `/job-groups/${groupId}/documents${docType ? `?doc_type=${docType}` : ""}`,
+    ),
+  getSkillGap: (groupId: string) => request<SkillGapItem[]>(`/job-groups/${groupId}/skill-gap`),
+  completeSkillGapItem: (groupId: string, itemId: string) =>
+    request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/complete`, { method: "POST" }),
+  reopenSkillGapItem: (groupId: string, itemId: string) =>
+    request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/reopen`, { method: "POST" }),
+  listTemplates: (docType: "cv" | "cover_letter" = "cv") =>
+    request<CvTemplate[]>(`/documents/templates?doc_type=${docType}`),
+  listDocumentVerifications: (documentId: string) =>
+    request<ClaimVerification[]>(`/documents/${documentId}/verifications`),
+
+  /** Synchronous, not SSE — Tectonic compiles in low single-digit
+   * seconds. Returns the rendered PDF bytes directly, for the
+   * Composer's live-preview pane. */
+  async renderDocument(documentId: string, templateId: string): Promise<Blob> {
+    const res = await fetch(
+      `${API_BASE_URL}/documents/${documentId}/render?template_id=${encodeURIComponent(templateId)}`,
+      { method: "POST" },
+    );
+    if (!res.ok) throw new Error(`render failed: ${res.status}: ${await res.text()}`);
+    return res.blob();
+  },
+
+  /** The already-rendered PDF, if one exists — no recompile. Returns
+   * null (not an error) when this exact document/template combination
+   * was never rendered, so the Composer can restore a preview across
+   * a page reload instead of always starting blank. */
+  async getRenderedPdf(documentId: string, templateId: string): Promise<Blob | null> {
+    const res = await fetch(
+      `${API_BASE_URL}/documents/${documentId}/rendered?template_id=${encodeURIComponent(templateId)}`,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`fetch rendered PDF failed: ${res.status}: ${await res.text()}`);
+    return res.blob();
+  },
+
+  /** Same SSE shape as streamParseCV/streamRadarRun — see
+   * job_groups.py's module docstring. */
+  async *streamTailorJobGroup(groupId: string): AsyncGenerator<TailorProgressEvent> {
+    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/tailor`, { method: "POST" });
+    if (!res.ok) throw new Error(`tailor failed: ${res.status}: ${await res.text()}`);
+
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
+      else if (event === "error") yield { type: "error", message: payload.message };
+    }
+  },
+
+  /** F5.7 — a per-application toggle, off by default: nothing calls
+   * this unless the user explicitly asks for a cover letter. Same SSE
+   * shape as streamTailorJobGroup. */
+  async *streamGenerateCoverLetter(
+    groupId: string,
+    style?: { tone?: CoverLetterTone; length?: CoverLetterLength },
+  ): AsyncGenerator<TailorProgressEvent> {
+    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/cover-letter`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tone: style?.tone ?? "neutral", length: style?.length ?? "medium" }),
+    });
+    if (!res.ok) throw new Error(`cover letter generation failed: ${res.status}: ${await res.text()}`);
+
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
+      else if (event === "error") yield { type: "error", message: payload.message };
+    }
+  },
+
+  /** F6.8 — ready-to-copy answers to real screening questions,
+   * user-supplied (pasted from the actual application) since this
+   * system has no scraped screening-question data. Same SSE shape as
+   * streamTailorJobGroup. */
+  async *streamGenerateAnswerPack(groupId: string, questions: string[]): AsyncGenerator<TailorProgressEvent> {
+    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/answer-pack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questions }),
+    });
+    if (!res.ok) throw new Error(`answer pack generation failed: ${res.status}: ${await res.text()}`);
+
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
+      else if (event === "error") yield { type: "error", message: payload.message };
+    }
+  },
+
+  /** Re-runs verification (and the one regeneration attempt, if
+   * needed) against an already-tailored document — cheaper than a
+   * full /tailor, and the recovery path for a document whose
+   * verification never actually completed (e.g. a dropped connection
+   * mid-run). Same event shape as streamTailorJobGroup's verifying/
+   * regenerating stages. */
+  async *streamReverifyDocument(documentId: string): AsyncGenerator<TailorProgressEvent> {
+    const res = await fetch(`${API_BASE_URL}/documents/${documentId}/verify`, { method: "POST" });
+    if (!res.ok) throw new Error(`verify failed: ${res.status}: ${await res.text()}`);
+
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
+      else if (event === "error") yield { type: "error", message: payload.message };
+    }
+  },
+
+  getDocumentTex: (documentId: string, templateId: string) =>
+    request<DocumentTex>(`/documents/${documentId}/tex?template_id=${encodeURIComponent(templateId)}`),
+  saveDocumentTex: (documentId: string, templateId: string, tex: string) =>
+    request<TailoredDocument>(`/documents/${documentId}/tex`, {
+      method: "PUT",
+      body: JSON.stringify({ template_id: templateId, tex }),
+    }),
+  clearDocumentTex: (documentId: string, templateId: string) =>
+    request<TailoredDocument>(`/documents/${documentId}/tex?template_id=${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+    }),
+
+  /** A structured, per-section hand edit (add/remove a whole
+   * "experience card", add/remove/reword a bullet, edit the summary)
+   * — distinct from saveDocumentTex's raw-source edit. Resets
+   * `verified` server-side, since the content just changed. */
+  saveDocumentDelta: (documentId: string, delta: TailoringDelta) =>
+    request<TailoredDocument>(`/documents/${documentId}/delta`, {
+      method: "PUT",
+      body: JSON.stringify(delta),
     }),
 
   getActiveModelProfile: () => request<ModelProfile | null>("/model-profiles/active"),

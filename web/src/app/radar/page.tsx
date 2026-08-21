@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   api,
@@ -192,6 +193,7 @@ export default function RadarPage() {
   const [testingSourceId, setTestingSourceId] = React.useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [editingSearchId, setEditingSearchId] = React.useState<string | null>(null);
   const [draftName, setDraftName] = React.useState("");
   const [draftRoleTitles, setDraftRoleTitles] = React.useState("");
   const [draftPersonaId, setDraftPersonaId] = React.useState<string>("");
@@ -498,11 +500,22 @@ export default function RadarPage() {
   }
 
   function openCreateSearch() {
+    setEditingSearchId(null);
     setDraftName("");
     setDraftRoleTitles("");
     setDraftPersonaId(selectedPersonaId);
     setDraftSourceIds(new Set());
     setDraftLocation("");
+    setCreateOpen(true);
+  }
+
+  function openEditSearch(s: SavedSearch) {
+    setEditingSearchId(s.id);
+    setDraftName(s.name);
+    setDraftRoleTitles(s.role_titles.join(", "));
+    setDraftPersonaId(s.persona_id);
+    setDraftSourceIds(new Set(s.source_ids));
+    setDraftLocation(s.filters.location ?? "");
     setCreateOpen(true);
   }
 
@@ -517,16 +530,29 @@ export default function RadarPage() {
     }
     setCreatingSearch(true);
     try {
-      const saved = await api.createSavedSearch({
-        name: draftName.trim(),
-        persona_id: draftPersonaId,
-        role_titles: roleTitles,
-        source_ids: Array.from(draftSourceIds),
-        filters: draftLocation.trim() ? { location: draftLocation.trim() } : {},
-      });
-      setSavedSearches((prev) => [...prev, saved]);
+      const filters = draftLocation.trim() ? { location: draftLocation.trim() } : {};
+      if (editingSearchId) {
+        const updated = await api.updateSavedSearch(editingSearchId, {
+          name: draftName.trim(),
+          role_titles: roleTitles,
+          source_ids: Array.from(draftSourceIds),
+          filters,
+        });
+        setSavedSearches((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        toast.success("Saved search updated");
+      } else {
+        const saved = await api.createSavedSearch({
+          name: draftName.trim(),
+          persona_id: draftPersonaId,
+          role_titles: roleTitles,
+          source_ids: Array.from(draftSourceIds),
+          filters,
+        });
+        setSavedSearches((prev) => [...prev, saved]);
+        toast.success("Saved search created");
+      }
       setCreateOpen(false);
-      toast.success("Saved search created");
+      setEditingSearchId(null);
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -998,6 +1024,9 @@ export default function RadarPage() {
                         Cancel
                       </Button>
                     )}
+                    <Button size="sm" variant="outline" onClick={() => openEditSearch(s)}>
+                      Edit
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => handleDeleteSearch(s.id)}>
                       Delete
                     </Button>
@@ -1134,7 +1163,12 @@ export default function RadarPage() {
                                 >
                                   {sc.recommendation ?? sc.decision}
                                 </Badge>
-                                <span className="truncate flex-1">{sc.title}</span>
+                                <Link
+                                  href={`/inbox?job_id=${encodeURIComponent(sc.jobId)}`}
+                                  className="truncate flex-1 hover:underline"
+                                >
+                                  {sc.title}
+                                </Link>
                                 {sc.overallScore !== null && (
                                   <span className="font-mono text-muted-foreground shrink-0">{sc.overallScore}</span>
                                 )}
@@ -1215,19 +1249,27 @@ export default function RadarPage() {
                       jobsCache[s.id].map((job) => (
                         <div key={job.id} className="flex items-start gap-2 text-xs border-b border-border last:border-b-0 pb-2 last:pb-0">
                           <div className="flex-1 min-w-0">
-                            <a
-                              href={job.apply_url ?? undefined}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <Link
+                              href={`/inbox?job_id=${encodeURIComponent(job.id)}`}
                               className="font-medium hover:underline"
                             >
                               {job.title}
-                            </a>
+                            </Link>
                             <span className="block text-muted-foreground">
                               {job.company_name_raw}
                               {job.location ? ` · ${job.location}` : ""}
                               {job.remote_policy ? ` · ${job.remote_policy}` : ""}
                             </span>
+                            {job.apply_url && (
+                              <a
+                                href={job.apply_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-block text-[10px] text-primary hover:underline"
+                              >
+                                Apply ↗
+                              </a>
+                            )}
                             {(job.salary_min || job.salary_max) && (
                               <span className="block font-mono text-[10px] text-muted-foreground tabular">
                                 {job.salary_min ?? "?"}–{job.salary_max ?? "?"} {job.salary_currency ?? ""}
@@ -1251,7 +1293,7 @@ export default function RadarPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>New saved search</DialogTitle>
+            <DialogTitle>{editingSearchId ? "Edit saved search" : "New saved search"}</DialogTitle>
             <DialogDescription>Manual run only in this milestone — scheduling comes later.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-2">
@@ -1270,18 +1312,25 @@ export default function RadarPage() {
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="search-persona">Persona</Label>
-              <Select value={draftPersonaId} onValueChange={setDraftPersonaId}>
-                <SelectTrigger id="search-persona" className="w-full">
-                  <SelectValue placeholder="Choose a persona" />
-                </SelectTrigger>
-                <SelectContent>
-                  {personas.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {editingSearchId ? (
+                <p className="text-sm text-muted-foreground font-mono">
+                  {personas.find((p) => p.id === draftPersonaId)?.name ?? "?"} — can&apos;t be changed after
+                  creation
+                </p>
+              ) : (
+                <Select value={draftPersonaId} onValueChange={setDraftPersonaId}>
+                  <SelectTrigger id="search-persona" className="w-full">
+                    <SelectValue placeholder="Choose a persona" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {personas.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="grid gap-1.5">
               <Label>Sources</Label>
@@ -1315,11 +1364,17 @@ export default function RadarPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateOpen(false);
+                setEditingSearchId(null);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleCreateSearch} disabled={creatingSearch}>
-              {creatingSearch ? "Saving…" : "Create"}
+              {creatingSearch ? "Saving…" : editingSearchId ? "Save changes" : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

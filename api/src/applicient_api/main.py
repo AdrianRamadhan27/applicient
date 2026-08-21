@@ -12,6 +12,7 @@ from applicient_api.routers import (
     cv,
     evidence,
     health,
+    job_groups,
     jobs,
     model_profiles,
     personas,
@@ -58,3 +59,6 @@ app.include_router(sources.router)
 app.include_router(saved_searches.router)
 app.include_router(radar.router)
 app.include_router(jobs.router)
+app.include_router(job_groups.router)
+app.include_router(job_groups.persona_router)
+app.include_router(job_groups.documents_router)

@@ -50,6 +50,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from applicient_api.llm_retry import invoke_structured_with_retry
+
 from applicient_api.models.discovery import Job
 from applicient_api.models.profile import EvidenceItem, Preference, Profile
 
@@ -221,29 +223,12 @@ def _evidence_summary(items: list[EvidenceItem]) -> str:
     return "\n".join(lines)
 
 
-# A free/cheap reasoning-capable model occasionally spends its whole
-# completion budget on internal reasoning and never emits the actual
-# structured answer — confirmed live: `nvidia/nemotron-3.5-lightning:free`
-# (the fast tier) returned `content=''` with no `parsed` or `refusal`
-# field after 3,270 real completion tokens, which langchain_openai
-# surfaces as a plain `ValueError` with this exact message (checked
-# against its own source, chat_models/base.py). This is nondeterministic
-# model flakiness, not a real conversation error — a retry immediately
-# after often succeeds where the first attempt didn't, since nothing
-# about the prompt changed. Retried once, not looped indefinitely: a
-# job that fails twice in a row gets no `PrefilterResult`/`FitScore`
-# row, same as before this existed, and is naturally retried again on
-# a later run rather than blocking this one.
-_EMPTY_STRUCTURED_OUTPUT_MARKER = "does not have a 'parsed' field nor a 'refusal' field"
-
-
-def _invoke_structured(structured, messages):
-    try:
-        return structured.invoke(messages)
-    except ValueError as e:
-        if _EMPTY_STRUCTURED_OUTPUT_MARKER not in str(e):
-            raise
-        return structured.invoke(messages)
+# Shared with tailoring_engine.py/claim_verifier.py — one retry for
+# empty-structured-output model flakiness AND real transient network
+# failures (confirmed live: "network error when scoring" during a
+# radar run, openai.APIConnectionError/APITimeoutError). See
+# llm_retry.py's own module docstring for the full story on both.
+_invoke_structured = invoke_structured_with_retry
 
 
 def run_prefilter(

@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { api, type InboxJob, type InboxJobDetail, type Recommendation, type Source } from "@/lib/api";
+import { api, type InboxJob, type InboxJobDetail, type JobGroup, type Recommendation, type Source } from "@/lib/api";
 import { usePersona } from "@/components/persona-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { Trash2 } from "lucide-react";
+import { Search, Trash2, X } from "lucide-react";
 
 // Skills come straight from the model's own free-form output, not a
 // controlled vocabulary — sometimes that's a real short skill name,
@@ -97,14 +98,23 @@ function JobDetailDrawer({
 }) {
   const [detail, setDetail] = React.useState<InboxJobDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [jobGroups, setJobGroups] = React.useState<JobGroup[]>([]);
+  const [newGroupName, setNewGroupName] = React.useState("");
+  const [addingToGroup, setAddingToGroup] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const d = await api.getInboxJob(jobId, personaId);
-        if (!cancelled) setDetail(d);
+        const [d, groups] = await Promise.all([
+          api.getInboxJob(jobId, personaId),
+          api.listJobGroups(personaId),
+        ]);
+        if (!cancelled) {
+          setDetail(d);
+          setJobGroups(groups);
+        }
       } catch (e) {
         if (!cancelled) toast.error(String(e));
       } finally {
@@ -116,7 +126,37 @@ function JobDetailDrawer({
     };
   }, [jobId, personaId]);
 
+  async function handleAddToGroup(groupId: string) {
+    setAddingToGroup(true);
+    try {
+      const updated = await api.addJobGroupMember(groupId, jobId);
+      setJobGroups((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      toast.success(`Added to "${updated.name}" — tailor it from the Composer`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setAddingToGroup(false);
+    }
+  }
+
+  async function handleCreateGroupAndAdd() {
+    if (!newGroupName.trim()) return;
+    setAddingToGroup(true);
+    try {
+      const group = await api.createJobGroup(personaId, { name: newGroupName.trim(), job_ids: [jobId] });
+      setJobGroups((prev) => [...prev, group]);
+      setNewGroupName("");
+      toast.success(`Created "${group.name}" and added this job`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setAddingToGroup(false);
+    }
+  }
+
   const fs = detail?.fit_score ?? null;
+  const groupsWithThisJob = jobGroups.filter((g) => g.job_ids.includes(jobId));
+  const groupsWithoutThisJob = jobGroups.filter((g) => !g.job_ids.includes(jobId));
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -314,6 +354,52 @@ function JobDetailDrawer({
                   </a>
                 </Button>
               )}
+
+              <div className="border-t border-border pt-3 space-y-1.5">
+                <span className="text-xs font-semibold text-muted-foreground uppercase">
+                  Job groups (Composer tailoring)
+                </span>
+                {groupsWithThisJob.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {groupsWithThisJob.map((g) => (
+                      <Badge key={g.id} variant="secondary">
+                        {g.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  {groupsWithoutThisJob.length > 0 && (
+                    <Select onValueChange={handleAddToGroup} value="" disabled={addingToGroup}>
+                      <SelectTrigger className="w-56 h-8 text-xs">
+                        <SelectValue placeholder="+ add to an existing group" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {groupsWithoutThisJob.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Input
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="or new group name…"
+                    className="h-8 text-xs w-44"
+                    onKeyDown={(e) => e.key === "Enter" && handleCreateGroupAndAdd()}
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleCreateGroupAndAdd}
+                    disabled={addingToGroup || !newGroupName.trim()}
+                  >
+                    Create &amp; add
+                  </Button>
+                </div>
+              </div>
             </div>
           </>
         )}
@@ -330,6 +416,7 @@ export default function InboxPage() {
   // pointed out that meant the sidebar switcher looked broken from
   // here (it had no further effect once this page's own copy diverged).
   const { personas, selectedPersonaId } = usePersona();
+  const router = useRouter();
   const personaId = selectedPersonaId;
   const [sources, setSources] = React.useState<Source[]>([]);
   const [jobs, setJobs] = React.useState<InboxJob[] | null>(null);
@@ -346,6 +433,8 @@ export default function InboxPage() {
 
   const [recFilter, setRecFilter] = React.useState<Set<Recommendation | "unscored">>(new Set());
   const [sourceFilter, setSourceFilter] = React.useState<string>("");
+  const [searchInput, setSearchInput] = React.useState("");
+  const [searchQuery, setSearchQuery] = React.useState("");
   const [locationInput, setLocationInput] = React.useState("");
   const [locationFilter, setLocationFilter] = React.useState("");
   const [minScore, setMinScore] = React.useState("");
@@ -377,6 +466,7 @@ export default function InboxPage() {
       const result = await api.listInboxJobs(personaId, {
         recommendation: recFilter.size > 0 ? Array.from(recFilter) : undefined,
         sourceId: sourceFilter || undefined,
+        search: searchQuery || undefined,
         location: locationFilter || undefined,
         minScore: minScore ? Number(minScore) : undefined,
         maxScore: maxScore ? Number(maxScore) : undefined,
@@ -392,13 +482,38 @@ export default function InboxPage() {
     } finally {
       setLoadingList(false);
     }
-  }, [personaId, recFilter, sourceFilter, locationFilter, minScore, maxScore]);
+  }, [personaId, recFilter, sourceFilter, searchQuery, locationFilter, minScore, maxScore]);
 
   React.useEffect(() => {
     (async () => {
       await loadJobs();
     })();
   }, [loadJobs]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const jobId = new URLSearchParams(window.location.search).get("job_id");
+      if (jobId && !cancelled) setSelectedJobId(jobId);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function openJobDetail(jobId: string) {
+    setSelectedJobId(jobId);
+    router.replace(`/inbox?job_id=${encodeURIComponent(jobId)}`, { scroll: false });
+  }
+
+  function closeJobDetail() {
+    setSelectedJobId(null);
+    router.replace("/inbox", { scroll: false });
+  }
+
+  function submitSearch() {
+    setSearchQuery(searchInput.trim());
+  }
 
   function toggleRec(rec: Recommendation | "unscored") {
     setRecFilter((prev) => {
@@ -537,6 +652,38 @@ export default function InboxPage() {
             </div>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1">
+                <Label className="text-[10px] text-muted-foreground">Search jobs</Label>
+                <div className="flex items-center gap-1">
+                  <Input
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && submitSearch()}
+                    placeholder="Title or company"
+                    className="h-8 w-44 text-xs"
+                    aria-label="Search jobs by title or company"
+                  />
+                  <Button type="button" size="sm" onClick={submitSearch} className="h-8 gap-1 px-2.5">
+                    <Search className="size-3.5" />
+                    Search
+                  </Button>
+                  {searchQuery && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setSearchInput("");
+                        setSearchQuery("");
+                      }}
+                      className="h-8 px-2"
+                      aria-label="Clear job search"
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
                 <Label className="text-[10px] text-muted-foreground">Source</Label>
                 <Select value={sourceFilter || "any"} onValueChange={(v) => setSourceFilter(v === "any" ? "" : v)}>
                   <SelectTrigger className="w-40 h-8 text-xs">
@@ -604,8 +751,8 @@ export default function InboxPage() {
                   key={job.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => setSelectedJobId(job.id)}
-                  onKeyDown={(e) => e.key === "Enter" && setSelectedJobId(job.id)}
+                  onClick={() => openJobDetail(job.id)}
+                  onKeyDown={(e) => e.key === "Enter" && openJobDetail(job.id)}
                   className="text-left border border-border bg-card p-3 flex items-start gap-3 hover:border-primary transition-colors cursor-pointer"
                 >
                   <Checkbox
@@ -691,7 +838,7 @@ export default function InboxPage() {
       )}
 
       {selectedJobId && personaId && (
-        <JobDetailDrawer jobId={selectedJobId} personaId={personaId} onClose={() => setSelectedJobId(null)} />
+        <JobDetailDrawer jobId={selectedJobId} personaId={personaId} onClose={closeJobDetail} />
       )}
     </div>
   );

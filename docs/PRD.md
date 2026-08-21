@@ -190,8 +190,12 @@ Stated so they can be overridden cheaply:
 | F5.5 | Any `UNSUPPORTED` or `INFLATED` claim triggers regeneration with the specific violations fed back. After two failed attempts the document is surfaced to the user with the offending claims highlighted and **cannot be exported until resolved** |
 | F5.6 | The UI presents tailoring as a **side-by-side diff** against the master CV, with per-change rationale and the verifier's report inline |
 | F5.7 | Cover letters and long-form "why this company / why this role" answers are **generated on request, not by default** — a per-application toggle with a global default in settings. When generated they run through the same evidence-linked, verified pipeline. Postings that explicitly require one are flagged in the Composer |
-| F5.8 | Version every generated document, bound to the job and the profile revision that produced it |
+| F5.8 | Version every generated document, bound to the job group and the profile revision that produced it |
 | F5.9 | Never generate claims about protected characteristics, and never alter dates, employers, titles, or degree classifications |
+| F5.10 | Tailoring targets a **job group** — a user-named collection of one or more scored job listings — rather than a single listing, so one CV can serve every listing in the group and version count stays low. Grouping is manual (user assigns listings from the Inbox) for now; auto-suggested clustering by similarity is an explicit, deferred follow-up, not built in this milestone |
+| F5.11 | LaTeX→PDF is the primary renderer and gets a **live preview** in the Composer: the rendered PDF updates as the delta is edited/regenerated, debounced to the renderer's real compile time rather than promised as literal keystroke-level typesetting. HTML/CSS→PDF (F5.2) follows once the LaTeX pipeline is proven end to end |
+| F5.12 | Multiple selectable **CV templates** in a gallery, including at least one user-supplied custom template. Adding a template is a config/asset addition, not a code change, mirroring this codebase's source-adapter extensibility pattern |
+| F5.13 | Per job group, surface a **skill-gap checklist**: skills the group's listings ask for that the evidence bank doesn't yet support, each with a checkbox. Checking one off records a new self-attested evidence item (never a raw CV edit) so the next tailoring pass can honestly cite it — the truthfulness gate (F5.4) is never bypassed for a checked-off skill |
 
 ### F6 — Application execution
 

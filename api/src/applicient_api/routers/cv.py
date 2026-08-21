@@ -50,6 +50,7 @@ from applicient_api.models.agents import AgentRun, AgentStep
 from applicient_api.models.enums import EvidenceCategory
 from applicient_api.models.llm import LlmCall, ModelProfile
 from applicient_api.models.profile import EvidenceItem, Profile
+from applicient_api.object_storage import put_object
 from applicient_api.tier_resolution import TierResolutionError, resolve_embedding_tier, resolve_tier
 
 _VALID_CATEGORIES = {c.value for c in EvidenceCategory}
@@ -114,6 +115,18 @@ async def _parse_cv_stream(
             cv_text = extract_text(file.filename or "", content)
             if not cv_text.strip():
                 raise ExtractionError("no extractable text found in the uploaded file")
+
+            # M3 §1 — the raw file itself was never actually persisted
+            # before this (raw_cv_object_key was only ever set to
+            # None); stored here, alongside text extraction, rather
+            # than gating the whole parse on the upload succeeding —
+            # object storage being briefly unavailable shouldn't block
+            # a CV parse that has already read the file into memory.
+            ext = (file.filename or "").rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else "bin"
+            object_key = f"cv/{profile_id}/{uuid.uuid4()}.{ext}"
+            await to_thread(put_object, object_key, content, file.content_type or "application/octet-stream")
+            profile.raw_cv_object_key = object_key
+
             emit_step("extracting", t0, {"chars": len(cv_text)})
             yield _event("extracting", "done", f"Extracted {len(cv_text):,} characters")
 

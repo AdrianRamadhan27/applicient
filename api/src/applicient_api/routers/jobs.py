@@ -23,6 +23,7 @@ import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
@@ -78,6 +79,7 @@ def list_inbox_jobs(
     persona_id: uuid.UUID,
     recommendation: list[str] | None = Query(default=None, description="strong_apply/apply/stretch/skip/unscored, repeatable"),
     source_id: uuid.UUID | None = None,
+    search: str | None = Query(default=None, description="case-insensitive match against job title or company name"),
     location: str | None = None,
     min_score: float | None = None,
     max_score: float | None = None,
@@ -89,6 +91,10 @@ def list_inbox_jobs(
     _owned_persona(db, persona_id, user_id)
 
     jobs_query = db.query(Job).filter(Job.user_id == user_id)
+    search_term = search.strip() if search else ""
+    if search_term:
+        pattern = f"%{search_term}%"
+        jobs_query = jobs_query.filter(or_(Job.title.ilike(pattern), Job.company_name_raw.ilike(pattern)))
     if location:
         jobs_query = jobs_query.filter(Job.location.ilike(f"%{location}%"))
     if source_id is not None:
