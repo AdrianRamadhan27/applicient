@@ -30,12 +30,15 @@ def run_saved_search(
     if not saved_search.source_ids:
         raise HTTPException(409, "saved search has no sources selected")
 
-    profile = db.query(Profile).filter_by(user_id=user_id).one_or_none()
-    if profile is None or not profile.confirmed:
-        raise HTTPException(409, "profile must be confirmed before running a search")
-
     persona = db.get(Persona, saved_search.persona_id)
     if persona is None or not persona.active:
         raise HTTPException(409, "saved search's persona is missing or inactive")
+
+    # Every persona owns its own Profile exclusively — check that
+    # persona's specific profile, not "the" user's (there can be
+    # several, one per persona).
+    profile = db.get(Profile, persona.profile_id)
+    if profile is None or not profile.confirmed:
+        raise HTTPException(409, "profile must be confirmed before running a search")
 
     return EventSourceResponse(run_radar_search(saved_search_id, user_id, get_session_factory()))

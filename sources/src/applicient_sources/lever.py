@@ -36,6 +36,13 @@ no key, no auth — `requires_auth = False`), not assumed:
     always have this shape; `interval` (e.g. "year" vs "hour") is
     read but not normalized — F3.1a's "leave null when ambiguous"
     covers exactly this case if it ever needs to.
+
+M2 §6 — retrofitted onto the same `company_identifiers` (list) scan
+model the four M2 §4 adapters already use: `search()`/`test_connection()`
+loop over every identifier, one Source scanning every company on the
+list rather than one Source per company. The legacy singular
+`board_token` key is still read as a one-element list — every Source
+row created back in M1 keeps working unchanged, nothing to migrate.
 """
 
 from __future__ import annotations
@@ -77,6 +84,18 @@ def _salary(job: dict[str, Any]) -> tuple[float | None, float | None, str | None
         return None, None, None
     currency = salary_range.get("currency")
     return float(lo), float(hi), (currency.upper() if isinstance(currency, str) else None)
+
+
+def _identifiers(config: dict[str, Any]) -> list[str]:
+    """M2 §6 — see greenhouse.py's matching helper for the same
+    reasoning: one Source scans every identifier here, and the legacy
+    singular `board_token` is read as a one-element list."""
+
+    ids = config.get("company_identifiers")
+    if isinstance(ids, list) and ids:
+        return [str(i) for i in ids]
+    single = config.get("board_token") or config.get("company_identifier")
+    return [str(single)] if single else []
 
 
 def _job_to_posting(job: dict[str, Any], board_token: str) -> RawPosting:
@@ -123,14 +142,16 @@ class LeverAdapter(SourceAdapter):
     default_rate_limit_per_minute = 60
 
     async def test_connection(self, config: dict[str, Any]) -> ConnectionTestResult:
-        board_token = config.get("board_token")
-        if not board_token:
-            return ConnectionTestResult(ok=False, status="unreachable", error="config.board_token is required")
+        identifiers = _identifiers(config)
+        if not identifiers:
+            return ConnectionTestResult(
+                ok=False, status="unreachable", error="config.company_identifiers is required"
+            )
 
         rlc = RateLimitedClient(base_headers={}, rate_per_minute=self.default_rate_limit_per_minute)
         try:
             async with httpx.AsyncClient() as client:
-                resp = await rlc.get(client, f"{BASE_URL}/{board_token}", params={"mode": "json"})
+                resp = await rlc.get(client, f"{BASE_URL}/{identifiers[0]}", params={"mode": "json"})
         except SourceHTTPError as e:
             status = "auth_failed" if e.status_code == 401 else "unreachable"
             return ConnectionTestResult(ok=False, status=status, error=str(e))
@@ -141,16 +162,23 @@ class LeverAdapter(SourceAdapter):
         return ConnectionTestResult(ok=True, status="ok")
 
     async def search(self, query: str, filters: dict[str, Any], config: dict[str, Any]) -> list[RawPosting]:
-        board_token = config.get("board_token")
-        if not board_token:
-            raise ValueError("config.board_token is required for the lever adapter")
+        identifiers = _identifiers(config)
+        if not identifiers:
+            raise ValueError("config.company_identifiers is required for the lever adapter")
 
         rlc = RateLimitedClient(base_headers={}, rate_per_minute=self.default_rate_limit_per_minute)
+        postings: list[RawPosting] = []
         async with httpx.AsyncClient() as client:
-            resp = await rlc.get(client, f"{BASE_URL}/{board_token}", params={"mode": "json"})
-        data = resp.json()
-
-        postings = [_job_to_posting(job, board_token) for job in data]
+            for board_token in identifiers:
+                # Per-identifier isolation — see greenhouse.py's
+                # matching comment (no per-company SourceRun telemetry
+                # yet, M2 §6's own stated remaining gap).
+                try:
+                    resp = await rlc.get(client, f"{BASE_URL}/{board_token}", params={"mode": "json"})
+                    data = resp.json()
+                    postings.extend(_job_to_posting(job, board_token) for job in data)
+                except (SourceHTTPError, TypeError, ValueError):
+                    continue
 
         query_lower = query.lower().strip()
         if query_lower:
@@ -164,9 +192,12 @@ class LeverAdapter(SourceAdapter):
         return postings
 
     async def fetch_detail(self, url: str, config: dict[str, Any]) -> RawPosting:
-        board_token = config.get("board_token")
-        if not board_token:
-            raise ValueError("config.board_token is required for the lever adapter")
+        identifiers = _identifiers(config)
+        if not identifiers:
+            raise ValueError("config.company_identifiers is required for the lever adapter")
+        # Never called by the pipeline today — best-effort against the
+        # first identifier only, same reasoning as greenhouse.py's.
+        board_token = identifiers[0]
 
         posting_id = url.rstrip("/").rsplit("/", 1)[-1]
         rlc = RateLimitedClient(base_headers={}, rate_per_minute=self.default_rate_limit_per_minute)

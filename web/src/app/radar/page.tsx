@@ -6,8 +6,8 @@ import {
   api,
   SOURCE_ADAPTERS,
   type AgentRunSummary,
+  type CompanyCandidate,
   type JobSummary,
-  type Persona,
   type RadarRunProgressEvent,
   type SavedSearch,
   type Source,
@@ -36,11 +36,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { Loader2, Radar as RadarIcon } from "lucide-react";
+import { usePersona } from "@/components/persona-provider";
+import { ChevronDown, ChevronUp, Loader2, Radar as RadarIcon } from "lucide-react";
 
 const ADAPTER_LABEL: Record<SourceAdapterKey, string> = {
   greenhouse: "Greenhouse (ATS board)",
   lever: "Lever (ATS board)",
+  workable: "Workable (ATS board)",
+  ashby: "Ashby (ATS board)",
+  smartrecruiters: "SmartRecruiters (ATS board)",
+  recruitee: "Recruitee (ATS board)",
   remoteok: "RemoteOK (free aggregator)",
   jsearch: "JSearch (aggregator, needs RapidAPI key)",
   jobspy: "Multi-board scraper (LinkedIn/Indeed/Glassdoor/Google/ZipRecruiter)",
@@ -52,17 +57,37 @@ const ADAPTER_LABEL: Record<SourceAdapterKey, string> = {
 // looking identical to Greenhouse/Lever/RemoteOK.
 const SCRAPING_ADAPTERS: SourceAdapterKey[] = ["jobspy", "socialfetch"];
 
-// Which config field(s) each adapter needs — greenhouse/lever are
-// both per-company boards (board_token), jsearch/socialfetch need an
-// API key, remoteok needs nothing at all (public, keyless), jobspy
-// needs a site selection.
-const ADAPTER_CONFIG: Record<SourceAdapterKey, "board_token" | "api_key" | "none" | "jobspy"> = {
-  greenhouse: "board_token",
-  lever: "board_token",
+// Which config field(s) each adapter needs. All six ATS boards share
+// the `company_identifiers` scan-list shape (M2 §6 retrofitted
+// greenhouse/lever onto it too, matching the four M2 §4 adapters that
+// started on it directly) — one Source scans every identifier the
+// list holds, growable by discovery (PRD F2.10) or by hand here.
+// Existing M1-era Source rows still carry the older singular
+// `board_token` key; the adapters themselves read it as a one-element
+// list (no data migration needed), but this form only ever writes the
+// new `company_identifiers` shape going forward. jsearch/socialfetch
+// need an API key, remoteok needs nothing at all (public, keyless),
+// jobspy needs a site selection.
+const ADAPTER_CONFIG: Record<SourceAdapterKey, "company_identifiers" | "api_key" | "none" | "jobspy"> = {
+  greenhouse: "company_identifiers",
+  lever: "company_identifiers",
+  workable: "company_identifiers",
+  ashby: "company_identifiers",
+  smartrecruiters: "company_identifiers",
+  recruitee: "company_identifiers",
   remoteok: "none",
   jsearch: "api_key",
   jobspy: "jobspy",
   socialfetch: "api_key",
+};
+
+const COMPANY_IDENTIFIER_HINT: Record<string, string> = {
+  greenhouse: "the board token, e.g. job-boards.greenhouse.io/gitlab",
+  lever: "the board token, e.g. jobs.lever.co/palantir",
+  workable: "the account slug, e.g. apply.workable.com/huggingface",
+  ashby: "the board name, e.g. jobs.ashbyhq.com/ramp",
+  smartrecruiters: "the company identifier, e.g. jobs.smartrecruiters.com/Equinox",
+  recruitee: "the subdomain, e.g. channable.recruitee.com",
 };
 
 const API_KEY_PLACEHOLDER: Partial<Record<SourceAdapterKey, string>> = {
@@ -97,9 +122,23 @@ function money(v: number) {
 
 type RunState = {
   savedSearchId: string;
+  // Captured from the "run_started" event so a Cancel button can call
+  // POST /agent-runs/{id}/cancel without threading the id through
+  // separately — null only for the brief instant before that event
+  // arrives.
+  agentRunId: string | null;
+  cancelled: boolean;
   sourceProgress: Record<
     string,
-    { name: string; status: "running" | "completed" | "failed"; seen?: number; new?: number; deduped?: number; message?: string }
+    {
+      name: string;
+      status: "running" | "completed" | "failed";
+      seen?: number;
+      new?: number;
+      deduped?: number;
+      companyBreakdown?: Record<string, { seen: number; new: number; deduped: number }>;
+      message?: string;
+    }
   >;
   fallbacks: string[];
   sourceErrors: string[];
@@ -123,17 +162,29 @@ type RunState = {
 };
 
 export default function RadarPage() {
-  const [personas, setPersonas] = React.useState<Persona[]>([]);
+  // Persona list/selection is app-wide now (AppShell's sidebar
+  // switcher) — this page only fetches what's actually its own
+  // (sources, saved searches).
+  const { personas, selectedPersonaId } = usePersona();
   const [sources, setSources] = React.useState<Source[]>([]);
   const [savedSearches, setSavedSearches] = React.useState<SavedSearch[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   const [setupOpen, setSetupOpen] = React.useState(false);
-  const [newPersonaName, setNewPersonaName] = React.useState("");
-  const [creatingPersona, setCreatingPersona] = React.useState(false);
+  // M2 §5 — F2.10 discovery review/approval. Its own dialog, always
+  // scoped to the globally-selected persona — discovery acts *for*
+  // that persona, so there's no separate local override here.
+  const [discoveryOpen, setDiscoveryOpen] = React.useState(false);
+  const [candidates, setCandidates] = React.useState<CompanyCandidate[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = React.useState(false);
+  const [discovering, setDiscovering] = React.useState(false);
+  const [updatingCandidateId, setUpdatingCandidateId] = React.useState<string | null>(null);
   const [newSourceName, setNewSourceName] = React.useState("");
   const [newSourceAdapter, setNewSourceAdapter] = React.useState<SourceAdapterKey>("greenhouse");
-  const [newSourceBoardToken, setNewSourceBoardToken] = React.useState("");
+  // Comma-separated, same tag-input convention as Preference's
+  // target_roles/locations — one Source scans every identifier here
+  // (M2 §4/§6), not one Source per company.
+  const [newSourceCompanyIdentifiers, setNewSourceCompanyIdentifiers] = React.useState("");
   const [newSourceApiKey, setNewSourceApiKey] = React.useState("");
   const [newSourceJobspySites, setNewSourceJobspySites] = React.useState<Set<string>>(new Set(["indeed"]));
   const [newSourceJobspyCountry, setNewSourceJobspyCountry] = React.useState("");
@@ -164,6 +215,21 @@ export default function RadarPage() {
   const [expandedJobsFor, setExpandedJobsFor] = React.useState<string | null>(null);
   const [jobsCache, setJobsCache] = React.useState<Record<string, JobSummary[]>>({});
   const [loadingJobs, setLoadingJobs] = React.useState(false);
+  // The live/replayed per-source detail (scored-job list, raw log
+  // lines) is verbose and, per Adrian, should default to collapsed —
+  // separate from expandedJobsFor, which is the older stand-in job
+  // list fetch (still used for the legacy "no replayable events at
+  // all" fallback row, see the `!rowRun` branch below).
+  const [expandedDetailFor, setExpandedDetailFor] = React.useState<Set<string>>(new Set());
+
+  function toggleDetail(savedSearchId: string) {
+    setExpandedDetailFor((prev) => {
+      const next = new Set(prev);
+      if (next.has(savedSearchId)) next.delete(savedSearchId);
+      else next.add(savedSearchId);
+      return next;
+    });
+  }
   // One cancellation token per saved search (not a single shared one)
   // — a fresh handleRun/watchRun for a given saved search cancels only
   // that search's previous poller, never another search's.
@@ -177,6 +243,8 @@ export default function RadarPage() {
   function initialRunState(savedSearchId: string): RunState {
     return {
       savedSearchId,
+      agentRunId: null,
+      cancelled: false,
       sourceProgress: {},
       fallbacks: [],
       sourceErrors: [],
@@ -189,8 +257,7 @@ export default function RadarPage() {
   }
 
   const loadAll = React.useCallback(async () => {
-    const [p, s, ss] = await Promise.all([api.listPersonas(), api.listSources(), api.listSavedSearches()]);
-    setPersonas(p);
+    const [s, ss] = await Promise.all([api.listSources(), api.listSavedSearches()]);
     setSources(s);
     setSavedSearches(ss);
 
@@ -295,18 +362,51 @@ export default function RadarPage() {
     };
   }, [loadAll]);
 
-  async function handleCreatePersona() {
-    if (!newPersonaName.trim()) return;
-    setCreatingPersona(true);
+  function openDiscovery() {
+    setDiscoveryOpen(true);
+  }
+
+  const loadCandidates = React.useCallback(async (personaId: string) => {
+    if (!personaId) return;
+    setLoadingCandidates(true);
     try {
-      const persona = await api.createPersona({ name: newPersonaName.trim() });
-      setPersonas((prev) => [...prev, persona]);
-      setNewPersonaName("");
-      toast.success("Persona created");
+      const list = await api.listCompanyCandidates(personaId);
+      setCandidates(list);
     } catch (e) {
       toast.error(String(e));
     } finally {
-      setCreatingPersona(false);
+      setLoadingCandidates(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (discoveryOpen && selectedPersonaId) loadCandidates(selectedPersonaId);
+  }, [discoveryOpen, selectedPersonaId, loadCandidates]);
+
+  async function handleRunDiscovery() {
+    if (!selectedPersonaId) return;
+    setDiscovering(true);
+    try {
+      const created = await api.discoverCompanyCandidates(selectedPersonaId);
+      toast.success(`${created.length} new candidate${created.length === 1 ? "" : "s"} found`);
+      await loadCandidates(selectedPersonaId);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
+  async function handleUpdateCandidate(id: string, approved: boolean) {
+    setUpdatingCandidateId(id);
+    try {
+      const updated = await api.updateCompanyCandidate(id, { approved });
+      setCandidates((prev) => prev.map((c) => (c.id === id ? updated : c)));
+      if (approved) toast.success("Added to the scan list");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setUpdatingCandidateId(null);
     }
   }
 
@@ -314,9 +414,13 @@ export default function RadarPage() {
     if (!newSourceName.trim()) return;
     const configKind = ADAPTER_CONFIG[newSourceAdapter];
     const jobspySitesNeedingCountry = ["indeed", "glassdoor"];
-    const config: Record<string, string> =
-      configKind === "board_token"
-        ? { board_token: newSourceBoardToken.trim() }
+    const companyIdentifiers = newSourceCompanyIdentifiers
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const config: Record<string, string | string[]> =
+      configKind === "company_identifiers"
+        ? { company_identifiers: companyIdentifiers }
         : configKind === "api_key"
           ? { api_key: newSourceApiKey.trim() }
           : configKind === "jobspy"
@@ -325,8 +429,8 @@ export default function RadarPage() {
                 ...(newSourceJobspyCountry.trim() ? { country: newSourceJobspyCountry.trim() } : {}),
               }
             : {};
-    if (configKind === "board_token" && !config.board_token) {
-      toast.error(`Board token is required for ${ADAPTER_LABEL[newSourceAdapter]}`);
+    if (configKind === "company_identifiers" && companyIdentifiers.length === 0) {
+      toast.error(`At least one company identifier is required for ${ADAPTER_LABEL[newSourceAdapter]}`);
       return;
     }
     if (configKind === "api_key" && !config.api_key) {
@@ -355,7 +459,7 @@ export default function RadarPage() {
       });
       setSources((prev) => [...prev, source]);
       setNewSourceName("");
-      setNewSourceBoardToken("");
+      setNewSourceCompanyIdentifiers("");
       setNewSourceApiKey("");
       setNewSourceJobspyCountry("");
       toast.success("Source added — test it to verify");
@@ -393,22 +497,10 @@ export default function RadarPage() {
     }
   }
 
-  async function handleDeletePersona(id: string) {
-    try {
-      await api.deletePersona(id);
-      // Personas cascade-delete any saved search bound to them at the
-      // DB level — a full reload (not a local filter) is what keeps
-      // the saved-search list from silently going stale here.
-      await loadAll();
-    } catch (e) {
-      toast.error(String(e));
-    }
-  }
-
   function openCreateSearch() {
     setDraftName("");
     setDraftRoleTitles("");
-    setDraftPersonaId(personas.find((p) => p.active)?.id ?? "");
+    setDraftPersonaId(selectedPersonaId);
     setDraftSourceIds(new Set());
     setDraftLocation("");
     setCreateOpen(true);
@@ -446,6 +538,21 @@ export default function RadarPage() {
     try {
       await api.deleteSavedSearch(id);
       setSavedSearches((prev) => prev.filter((s) => s.id !== id));
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+
+  async function handleCancelRun(agentRunId: string) {
+    try {
+      await api.cancelAgentRun(agentRunId);
+      // Cooperative, not instant — the run notices at its next
+      // checkpoint (between sources, or between individually
+      // completing scored jobs), so this doesn't flip the UI to
+      // "cancelled" itself. The real transition arrives through the
+      // same "run_cancelled" SSE/replay event every other progress
+      // update already goes through.
+      toast.success("Cancelling — this takes effect at the run's next checkpoint, not instantly");
     } catch (e) {
       toast.error(String(e));
     }
@@ -506,6 +613,12 @@ export default function RadarPage() {
       if (!prev) return prevAll;
 
       const next = ((): RunState => {
+      if (event.type === "run_started") {
+        return { ...prev, agentRunId: event.agent_run_id };
+      }
+      if (event.type === "run_cancelled") {
+        return { ...prev, cancelled: true };
+      }
       if (event.type === "source_started") {
         return {
           ...prev,
@@ -527,6 +640,7 @@ export default function RadarPage() {
               seen: event.seen,
               new: event.new,
               deduped: event.deduped,
+              companyBreakdown: event.company_breakdown,
               message: event.message,
             },
           },
@@ -614,6 +728,9 @@ export default function RadarPage() {
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center gap-3 px-5">
         <span className="text-sm font-semibold">Radar</span>
         <div className="ml-auto flex gap-2">
+          <Button size="sm" variant="outline" disabled={!personas.length} onClick={openDiscovery}>
+            Discover companies
+          </Button>
           <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
             <DialogTrigger asChild>
               <Button size="sm" variant="outline">
@@ -622,39 +739,13 @@ export default function RadarPage() {
             </DialogTrigger>
             <DialogContent className="max-w-xl">
               <DialogHeader>
-                <DialogTitle>Personas &amp; sources</DialogTitle>
+                <DialogTitle>Sources</DialogTitle>
                 <DialogDescription>
-                  A saved search runs against a persona and one or more sources — set those up here first.
+                  A saved search runs against a persona (switch personas from the sidebar) and one or more
+                  sources — set sources up here.
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-5 py-2 max-h-[60vh] overflow-auto">
-                <div className="flex flex-col gap-2">
-                  <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                    Personas
-                  </span>
-                  {personas.map((p) => (
-                    <div key={p.id} className="flex items-center gap-2 border border-border px-3 py-1.5 text-sm">
-                      <span className="flex-1">{p.name}</span>
-                      <Badge variant="secondary" className={cn("text-[9px] font-mono", p.active ? "bg-ok-bg text-ok" : "bg-muted text-muted-foreground")}>
-                        {p.active ? "active" : "inactive"}
-                      </Badge>
-                      <Button size="sm" variant="outline" onClick={() => handleDeletePersona(p.id)}>
-                        Delete
-                      </Button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="e.g. Backend Engineer track"
-                      value={newPersonaName}
-                      onChange={(e) => setNewPersonaName(e.target.value)}
-                    />
-                    <Button size="sm" onClick={handleCreatePersona} disabled={creatingPersona || !newPersonaName.trim()}>
-                      Add
-                    </Button>
-                  </div>
-                </div>
-
                 <div className="flex flex-col gap-2">
                   <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
                     Sources
@@ -695,20 +786,16 @@ export default function RadarPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    {ADAPTER_CONFIG[newSourceAdapter] === "board_token" && (
+                    {ADAPTER_CONFIG[newSourceAdapter] === "company_identifiers" && (
                       <div className="flex flex-col gap-1">
                         <Input
-                          placeholder={newSourceAdapter === "greenhouse" ? "e.g. gitlab" : "e.g. palantir"}
-                          value={newSourceBoardToken}
-                          onChange={(e) => setNewSourceBoardToken(e.target.value)}
+                          placeholder="e.g. huggingface, notion, ..."
+                          value={newSourceCompanyIdentifiers}
+                          onChange={(e) => setNewSourceCompanyIdentifiers(e.target.value)}
                         />
                         <span className="text-xs text-muted-foreground">
-                          Not a secret, no signup — it&apos;s just the company&apos;s slug from their careers
-                          URL: {newSourceAdapter === "greenhouse" ? "job-boards.greenhouse.io/" : "jobs.lever.co/"}
-                          <span className="font-mono">
-                            {newSourceAdapter === "greenhouse" ? "gitlab" : "palantir"}
-                          </span>
-                          .
+                          Comma-separated — this one source scans every company listed, all in one run. Not a
+                          secret, no signup: {COMPANY_IDENTIFIER_HINT[newSourceAdapter]}.
                         </span>
                       </div>
                     )}
@@ -775,6 +862,85 @@ export default function RadarPage() {
               </div>
             </DialogContent>
           </Dialog>
+          <Dialog open={discoveryOpen} onOpenChange={setDiscoveryOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Discover companies</DialogTitle>
+                <DialogDescription>
+                  Proposes real companies from this persona&apos;s preferences and resolves each against the six
+                  ATS boards this app knows how to scan. Nothing gets queried until you approve it — resolved
+                  candidates you approve join that ATS&apos;s scan list for this persona.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    For: <span className="font-medium text-foreground">{personas.find((p) => p.id === selectedPersonaId)?.name ?? "?"}</span>
+                    {" "}— switch personas from the sidebar to run discovery for a different one.
+                  </span>
+                  <Button size="sm" onClick={handleRunDiscovery} disabled={discovering || !selectedPersonaId} className="ml-auto">
+                    {discovering && <Loader2 className="size-3.5 animate-spin" />}
+                    Run discovery
+                  </Button>
+                </div>
+
+                <div className="flex flex-col gap-2 max-h-[55vh] overflow-auto">
+                  {loadingCandidates ? (
+                    <div className="text-sm text-muted-foreground font-mono">loading…</div>
+                  ) : candidates.length === 0 ? (
+                    <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center">
+                      No candidates yet — set preferences for this persona in Profile Studio, then run discovery.
+                    </div>
+                  ) : (
+                    candidates.map((c) => {
+                      const resolved = c.status !== "unresolved";
+                      return (
+                        <div key={c.id} className="border border-border px-3 py-2 flex flex-col gap-1.5">
+                          <div className="flex items-start gap-2">
+                            <span className="text-sm font-medium flex-1">{c.company_name}</span>
+                            <Badge
+                              variant="secondary"
+                              className={cn(
+                                "text-[9px] font-mono shrink-0",
+                                resolved ? "bg-ok-bg text-ok" : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {resolved ? c.status.replace("resolved_", "") : "unresolved"}
+                            </Badge>
+                            <Badge variant="secondary" className="text-[9px] font-mono shrink-0">
+                              {c.origin === "apply_link" ? "from a job's apply link" : "proposed"}
+                            </Badge>
+                          </div>
+                          {c.rationale && <p className="text-xs text-muted-foreground">{c.rationale}</p>}
+                          {resolved && c.discovered_url && (
+                            <span className="font-mono text-[10px] text-muted-foreground break-all">
+                              {c.discovered_url}
+                            </span>
+                          )}
+                          <div className="flex justify-end">
+                            {resolved ? (
+                              <Button
+                                size="sm"
+                                variant={c.approved ? "outline" : "default"}
+                                disabled={updatingCandidateId === c.id}
+                                onClick={() => handleUpdateCandidate(c.id, !c.approved)}
+                              >
+                                {c.approved ? "Approved — remove from scan list" : "Approve — add to scan list"}
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                No known ATS matched — nothing to scan yet.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           <Button size="sm" disabled={!personas.length || !sources.length} onClick={openCreateSearch}>
             New saved search
           </Button>
@@ -791,7 +957,8 @@ export default function RadarPage() {
         ) : (
           savedSearches.map((s) => {
             const rowRun = runs[s.id];
-            const rowRunning = rowRun !== undefined && rowRun.result === null && rowRun.error === null;
+            const rowRunning =
+              rowRun !== undefined && rowRun.result === null && rowRun.error === null && !rowRun.cancelled;
             const persona = personas.find((p) => p.id === s.persona_id);
             return (
               <div key={s.id} className="border border-border bg-card">
@@ -826,6 +993,11 @@ export default function RadarPage() {
                     >
                       {rowRunning ? "Running…" : "Run"}
                     </Button>
+                    {rowRunning && rowRun?.agentRunId && (
+                      <Button size="sm" variant="outline" onClick={() => handleCancelRun(rowRun.agentRunId!)}>
+                        Cancel
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => handleDeleteSearch(s.id)}>
                       Delete
                     </Button>
@@ -834,27 +1006,44 @@ export default function RadarPage() {
 
                 {rowRun && (
                   <div className="border-t border-border bg-secondary/40 px-4 py-3 flex flex-col gap-2">
-                    {Object.entries(rowRun.sourceProgress).map(([id, p]) => (
-                      <div key={id} className="flex items-center gap-2 text-xs">
-                        {p.status === "running" ? (
-                          <Loader2 className="size-3 animate-spin text-primary shrink-0" />
-                        ) : (
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full shrink-0",
-                              p.status === "completed" ? "bg-ok" : "bg-crit",
+                    {Object.entries(rowRun.sourceProgress).map(([id, p]) => {
+                      const companies = Object.entries(p.companyBreakdown ?? {});
+                      return (
+                        <div key={id} className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 text-xs">
+                            {p.status === "running" ? (
+                              <Loader2 className="size-3 animate-spin text-primary shrink-0" />
+                            ) : (
+                              <span
+                                className={cn(
+                                  "size-1.5 rounded-full shrink-0",
+                                  p.status === "completed" ? "bg-ok" : "bg-crit",
+                                )}
+                              />
                             )}
-                          />
-                        )}
-                        <span className="font-mono">{p.name}</span>
-                        {p.status === "completed" && (
-                          <span className="text-muted-foreground">
-                            seen {p.seen} · new {p.new} · deduped {p.deduped}
-                          </span>
-                        )}
-                        {p.status === "failed" && <span className="text-crit">{p.message}</span>}
-                      </div>
-                    ))}
+                            <span className="font-mono">{p.name}</span>
+                            {p.status === "completed" && (
+                              <span className="text-muted-foreground">
+                                seen {p.seen} · new {p.new} · deduped {p.deduped}
+                              </span>
+                            )}
+                            {p.status === "failed" && <span className="text-crit">{p.message}</span>}
+                          </div>
+                          {/* M2 §6 — a scan-list source covers many companies at
+                              once; only worth its own breakdown when there's more
+                              than one to distinguish. */}
+                          {companies.length > 1 && (
+                            <div className="ml-3.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                              {companies.map(([company, stats]) => (
+                                <span key={company} className="font-mono">
+                                  {company}: {stats.seen}/{stats.new}n/{stats.deduped}d
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                     {rowRun.embedding && (
                       <div className="flex items-center gap-2 text-xs">
                         {rowRun.embedding.status === "running" ? (
@@ -874,53 +1063,18 @@ export default function RadarPage() {
                       </div>
                     )}
                     {rowRun.scoring && (
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2 text-xs">
-                          {rowRun.scoring.status === "running" ? (
-                            <Loader2 className="size-3 animate-spin text-primary shrink-0" />
-                          ) : (
-                            <span className="size-1.5 rounded-full shrink-0 bg-ok" />
-                          )}
-                          <span className="font-mono">scoring</span>
-                          <span className="text-muted-foreground">
-                            {rowRun.scoring.summary
-                              ? `${rowRun.scoring.summary.kept} keep · ${rowRun.scoring.summary.review} review · ${rowRun.scoring.summary.dropped} drop${rowRun.scoring.summary.errors ? ` · ${rowRun.scoring.summary.errors} errors` : ""}`
-                              : `${rowRun.scoring.scored.length + rowRun.scoring.scoringErrors.length}/${rowRun.scoring.count} scored`}
-                          </span>
-                        </div>
-                        {rowRun.scoring.scored.length > 0 && (
-                          <div className="max-h-40 overflow-y-auto border border-border">
-                            {rowRun.scoring.scored.map((s) => (
-                              <div
-                                key={s.jobId}
-                                className="flex items-center gap-2 px-2 py-1 text-[11px] border-b border-border last:border-b-0"
-                              >
-                                <Badge
-                                  variant="secondary"
-                                  className={cn(
-                                    "text-[9px] font-mono shrink-0",
-                                    s.decision === "keep"
-                                      ? "bg-ok-bg text-ok"
-                                      : s.decision === "drop"
-                                        ? "bg-muted text-muted-foreground"
-                                        : "bg-warn-bg text-warn",
-                                  )}
-                                >
-                                  {s.recommendation ?? s.decision}
-                                </Badge>
-                                <span className="truncate flex-1">{s.title}</span>
-                                {s.overallScore !== null && (
-                                  <span className="font-mono text-muted-foreground shrink-0">{s.overallScore}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        {rowRun.scoring.status === "running" ? (
+                          <Loader2 className="size-3 animate-spin text-primary shrink-0" />
+                        ) : (
+                          <span className="size-1.5 rounded-full shrink-0 bg-ok" />
                         )}
-                        {rowRun.scoring.scoringErrors.map((e) => (
-                          <div key={e.jobId} className="text-[11px] text-crit font-mono">
-                            scoring failed — {e.title}: {e.message}
-                          </div>
-                        ))}
+                        <span className="font-mono">scoring</span>
+                        <span className="text-muted-foreground">
+                          {rowRun.scoring.summary
+                            ? `${rowRun.scoring.summary.kept} keep · ${rowRun.scoring.summary.review} review · ${rowRun.scoring.summary.dropped} drop${rowRun.scoring.summary.errors ? ` · ${rowRun.scoring.summary.errors} errors` : ""}`
+                            : `${rowRun.scoring.scored.length + rowRun.scoring.scoringErrors.length}/${rowRun.scoring.count} scored`}
+                        </span>
                       </div>
                     )}
                     {rowRun.fallbacks.map((f, i) => (
@@ -933,41 +1087,91 @@ export default function RadarPage() {
                         {e}
                       </div>
                     ))}
-                    {rowRun.logs.length > 0 && (
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                          Live log
-                        </span>
-                        <div
-                          ref={(el) => {
-                            // Auto-scroll-to-bottom on every render (one
-                            // log box per saved search now, not a single
-                            // shared ref) — an inline callback ref like
-                            // this re-fires on every render, which is a
-                            // cheap enough way to keep it pinned to the
-                            // latest line without a per-row ref map.
-                            if (el) el.scrollTop = el.scrollHeight;
-                          }}
-                          className="max-h-40 overflow-y-auto border border-border bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground"
-                        >
-                          {rowRun.logs.map((line, i) => (
-                            <div key={i} className="whitespace-pre-wrap break-all">
-                              {line}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                     {rowRun.error && <div className="text-xs text-crit">{rowRun.error}</div>}
-                    {rowRun.result && (
-                      <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
-                        <span className="text-xs text-muted-foreground">
-                          Run complete — total cost {money(rowRun.result.cost_usd)}. The real Job Inbox screen (§6)
-                          isn&apos;t built yet — this is a stand-in list.
-                        </span>
-                        <Button size="sm" variant="outline" onClick={() => handleToggleJobs(s.id)}>
-                          {expandedJobsFor === s.id ? "Hide jobs" : "View jobs"}
-                        </Button>
+                    {rowRun.cancelled && (
+                      <div className="text-xs text-muted-foreground font-mono">cancelled by you</div>
+                    )}
+
+                    {/* Logs and per-job scores are verbose — collapsed
+                        by default, one toggle for both, raised
+                        directly by Adrian ("by default should be
+                        hidden"). */}
+                    {(rowRun.logs.length > 0 ||
+                      (rowRun.scoring && rowRun.scoring.scored.length > 0) ||
+                      (rowRun.scoring && rowRun.scoring.scoringErrors.length > 0)) && (
+                      <button
+                        onClick={() => toggleDetail(s.id)}
+                        className="self-start flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        {expandedDetailFor.has(s.id) ? "Hide logs & scores" : "Show logs & scores"}
+                        {expandedDetailFor.has(s.id) ? (
+                          <ChevronUp className="size-3.5" />
+                        ) : (
+                          <ChevronDown className="size-3.5" />
+                        )}
+                      </button>
+                    )}
+
+                    {expandedDetailFor.has(s.id) && (
+                      <div className="flex flex-col gap-2">
+                        {rowRun.scoring && rowRun.scoring.scored.length > 0 && (
+                          <div className="max-h-40 overflow-y-auto border border-border">
+                            {rowRun.scoring.scored.map((sc) => (
+                              <div
+                                key={sc.jobId}
+                                className="flex items-center gap-2 px-2 py-1 text-[11px] border-b border-border last:border-b-0"
+                              >
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    "text-[9px] font-mono shrink-0",
+                                    sc.decision === "keep"
+                                      ? "bg-ok-bg text-ok"
+                                      : sc.decision === "drop"
+                                        ? "bg-muted text-muted-foreground"
+                                        : "bg-warn-bg text-warn",
+                                  )}
+                                >
+                                  {sc.recommendation ?? sc.decision}
+                                </Badge>
+                                <span className="truncate flex-1">{sc.title}</span>
+                                {sc.overallScore !== null && (
+                                  <span className="font-mono text-muted-foreground shrink-0">{sc.overallScore}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {rowRun.scoring?.scoringErrors.map((e) => (
+                          <div key={e.jobId} className="text-[11px] text-crit font-mono">
+                            scoring failed — {e.title}: {e.message}
+                          </div>
+                        ))}
+                        {rowRun.logs.length > 0 && (
+                          <div className="flex flex-col gap-1">
+                            <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                              Live log
+                            </span>
+                            <div
+                              ref={(el) => {
+                                // Auto-scroll-to-bottom on every render (one
+                                // log box per saved search now, not a single
+                                // shared ref) — an inline callback ref like
+                                // this re-fires on every render, which is a
+                                // cheap enough way to keep it pinned to the
+                                // latest line without a per-row ref map.
+                                if (el) el.scrollTop = el.scrollHeight;
+                              }}
+                              className="max-h-40 overflow-y-auto border border-border bg-background px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground"
+                            >
+                              {rowRun.logs.map((line, i) => (
+                                <div key={i} className="whitespace-pre-wrap break-all">
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -988,8 +1192,13 @@ export default function RadarPage() {
                       · {new Date(lastRuns[s.id]!.started_at).toLocaleString()} · cost{" "}
                       {money(lastRuns[s.id]!.total_cost_usd)}
                     </span>
-                    <Button size="sm" variant="outline" onClick={() => handleToggleJobs(s.id)}>
-                      {expandedJobsFor === s.id ? "Hide jobs" : "View jobs"}
+                    <Button size="sm" variant="outline" onClick={() => handleToggleJobs(s.id)} className="gap-1.5">
+                      {expandedJobsFor === s.id ? "Hide results" : "View results"}
+                      {expandedJobsFor === s.id ? (
+                        <ChevronUp className="size-3.5" />
+                      ) : (
+                        <ChevronDown className="size-3.5" />
+                      )}
                     </Button>
                   </div>
                 )}

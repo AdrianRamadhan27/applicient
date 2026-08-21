@@ -89,8 +89,63 @@ class SourceRun(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     postings_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     postings_new: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     postings_deduped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # M2 §6 — a scan-list source now covers many companies at once
+    # (company_identifiers), so the aggregate counts above alone can't
+    # tell you which company a problem came from. Keyed by
+    # RawPosting.company_name (the source's own display name, not the
+    # raw slug) since that's what a human actually recognizes; not a
+    # structured per-identifier error channel from inside the adapter
+    # itself (a real, stated gap — a dead identifier is silently
+    # skipped by the adapter's own per-identifier isolation today,
+    # never surfacing here as a distinct error entry).
+    company_breakdown: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     errors: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     cost_usd: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=0)
+
+
+class CompanyCandidate(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
+    """F2.10 — a proposed scan target, before it's ever queried. Two
+    ways one of these gets created: `preference_discovery` (an LLM
+    step proposed this company from a persona's Preference) or
+    `apply_link` (a posting already sighted through some other source
+    had an `apply_url` that resolved to this company's own ATS/site —
+    M2 §5's "the apply link is often the first sign a company runs
+    its own board"). Either way it sits here, reviewable, until the
+    user approves it — the agent proposes, it does not auto-enroll
+    (PRD F2.10).
+
+    `status` is the resolution outcome, not the approval state —
+    `approved` is separate because a `needs_generic_scraping` row can
+    be approved (kept around, worth scraping once M4 builds the real
+    scraper) without there being anything to scan yet."""
+
+    __tablename__ = "company_candidates"
+    __table_args__ = (
+        UniqueConstraint("persona_id", "company_name", name="uq_company_candidates_persona_name"),
+    )
+
+    persona_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("personas.id", ondelete="CASCADE"), nullable=False
+    )
+    # NFKC+casefold+whitespace-collapse before insert, same normalization
+    # discipline as Job.canonical_key (normalization.py) — this is what
+    # makes the unique constraint above actually catch re-proposals of
+    # the same company across repeated discovery runs, not just exact
+    # byte-for-byte name matches.
+    company_name: Mapped[str] = mapped_column(String(250), nullable=False)
+    origin: Mapped[str] = mapped_column(String(30), nullable=False)  # CandidateOrigin: preference_discovery | apply_link
+    rationale: Mapped[str | None] = mapped_column(Text)  # only preference_discovery candidates have one
+    # CandidateStatus: unresolved | resolved_greenhouse | resolved_lever |
+    # resolved_workable | resolved_ashby | resolved_smartrecruiters |
+    # resolved_recruitee | needs_generic_scraping
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="unresolved")
+    resolved_identifier: Mapped[str | None] = mapped_column(String(250))  # the slug/company id that resolved
+    discovered_url: Mapped[str | None] = mapped_column(String(1000))  # resolved ATS board URL, or bespoke career-page URL
+    approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Only set when origin=apply_link — which posting's apply_url led here.
+    origin_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")
+    )
 
 
 class Company(UUIDPKMixin, TimestampMixin, Base):

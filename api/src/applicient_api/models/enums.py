@@ -208,3 +208,30 @@ class SourceRunStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class CandidateOrigin(str, enum.Enum):
+    """M2 §5 — how a CompanyCandidate row came to exist: an LLM
+    proposal from a persona's Preference, or noticed from an already-
+    sighted posting's apply_url resolving to a company site the user
+    didn't already have as a source."""
+
+    PREFERENCE_DISCOVERY = "preference_discovery"
+    APPLY_LINK = "apply_link"
+
+
+class CandidateStatus(str, enum.Enum):
+    """M2 §5 — resolution outcome for a CompanyCandidate. The four
+    ATS-adapter-shaped ATSes M1 already built plus the four added in
+    M2 §4, then the two non-ATS outcomes: a real career-page URL found
+    with no matching ATS pattern (queued for M4's generic scraper,
+    never scraped here), or nothing found at all."""
+
+    UNRESOLVED = "unresolved"
+    RESOLVED_GREENHOUSE = "resolved_greenhouse"
+    RESOLVED_LEVER = "resolved_lever"
+    RESOLVED_WORKABLE = "resolved_workable"
+    RESOLVED_ASHBY = "resolved_ashby"
+    RESOLVED_SMARTRECRUITERS = "resolved_smartrecruiters"
+    RESOLVED_RECRUITEE = "resolved_recruitee"
+    NEEDS_GENERIC_SCRAPING = "needs_generic_scraping"

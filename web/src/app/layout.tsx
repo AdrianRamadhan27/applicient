@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { PersonaProvider } from "@/components/persona-provider";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -38,8 +39,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           already used on <html> above for next-themes. */}
       <body className="min-h-full" suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <AppShell>{children}</AppShell>
-          <Toaster />
+          <PersonaProvider>
+            <AppShell>{children}</AppShell>
+            <Toaster />
+          </PersonaProvider>
         </ThemeProvider>
       </body>
     </html>

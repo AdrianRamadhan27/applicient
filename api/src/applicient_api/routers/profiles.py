@@ -75,23 +75,31 @@ def update_profile(
 def reset_profile(
     profile_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
 ):
-    """Deletes the profile and everything hung off it (evidence items,
-    personas, and — transitively via DB FK cascade — documents, fit
-    scores, prefilter results, and applications), then recreates a
-    blank shell in its place. The app has no "create profile" path and
-    every surface assumes exactly one profile exists per user (see
-    seed.py), so a bare delete would strand the frontend; recreating
-    keeps that invariant intact while giving the user an actual clean
-    slate.
+    """Clears this profile's own fields and deletes its evidence items,
+    in place — does NOT delete-and-recreate the `Profile` row itself.
+
+    That used to be safe because every persona shared the one profile
+    a user had (deleting it cascaded away every persona too, and
+    recreating a fresh shell kept the app's then-standing "exactly one
+    profile" invariant intact). Now that every persona owns its
+    profile exclusively (`Persona.profile_id`, `unique=True`), deleting
+    the row would cascade-delete the very persona resetting it — a
+    "reset my profile" action must never delete the persona. Deleting
+    a persona entirely (which *should* take its profile down with it)
+    is `routers/personas.py`'s `delete_persona`, a distinct action.
     """
     profile = db.query(Profile).filter_by(id=profile_id, user_id=user_id).one_or_none()
     if profile is None:
         raise HTTPException(404, "profile not found")
 
-    db.delete(profile)
-    db.flush()
-    fresh = Profile(user_id=user_id, revision=1, confirmed=False)
-    db.add(fresh)
+    db.query(EvidenceItem).filter_by(profile_id=profile_id).delete()
+    profile.raw_cv_object_key = None
+    profile.parsed_profile = {}
+    profile.parsed_at = None
+    profile.confirmed = False
+    profile.visa_status = None
+    profile.notice_period_days = None
+    profile.revision += 1
     db.commit()
-    db.refresh(fresh)
-    return fresh
+    db.refresh(profile)
+    return profile

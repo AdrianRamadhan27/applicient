@@ -1,0 +1,480 @@
+{
+  "offers": [
+    {
+      "experience_code": "mid_level",
+      "slug": "product-manager-core-ai",
+      "position": 608,
+      "category_code": "internet",
+      "cover_image": null,
+      "options_phone": "required",
+      "company_name": "Channable",
+      "hybrid": true,
+      "options_photo": "off",
+      "guid": "t8y5h",
+      "options_title": "off",
+      "options_cover_letter": "off",
+      "state_code": "UT",
+      "translations": {
+        "en": {
+          "description": "<p style=\"text-align:justify;\"><span style=\"color:#121317\">Deadline for applying: September 2nd at 17:00 CET</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\"><br>Are you looking for an exciting Product Management opportunity in one of the fastest-growing SaaS scale-ups in the Netherlands? Then look no further.<br></span></p><h4><strong><span style=\"color:#1B1A3A\">Your job</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#121317\">As the Product Manager for the Core AI team, you are responsible for enabling our customers to harness the power of AI directly within Channable.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">We have already taken big steps by successfully automating feed setup workflows for major advertising platforms like Google and Meta, but this is just the beginning. Your focus will be extending these intelligent capabilities across complex e-commerce marketplaces, with major channels like Bol.com and Amazon serving as examples of what\u2019s next on the roadmap.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">Your main goal is to leverage AI to eliminate manual friction, automate repetitive user tasks, and radically elevate the user experience. By making feed mapping and categorization effortless through AI, your team will play a direct role in solving one of our biggest product objectives: radically reducing the time to value for customers expanding into new sales channels.</span></p><h4><span style=\"color:#121317\"><br></span><strong><span style=\"color:#121317\">Your challenges</span></strong></h4><ul><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Translate customer insights into clear product strategies, user-centric features, and well-defined roadmap items.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Proactively identify opportunities to leverage AI, finding innovative ways to automate repetitive workflows and eliminate setup friction.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Lead the full product development lifecycle, guiding features from discovery through design to delivery.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Write clear specifications and collaborate daily with Engineers, Product Designers, and QA to ensure AI features are both powerful and seamless to use.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Foster an empowered, collaborative environment that aligns AI innovation with Channable\u2019s broader business goals.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Serve as an internal and external thought leader on how AI can empower our customers.</span></p></li></ul><h4><span style=\"color:#121317\"><br></span><strong><span style=\"color:#121317\">Who are you?</span></strong></h4><ul><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">You have at least 3 years of experience as a Product Owner or Product Manager, ideally in a B2B SaaS company.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Familiarity with solving technical problems that strengthen customer-facing features.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">A proven track record of bringing solutions from 0-1 and iterating based on feedback.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Demonstrable experience with product discovery, design, and delivery activities.&nbsp;</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Demonstrated ability to think strategically and anticipate future opportunities and challenges. </span><span style=\"color:#1B1A3A\">You should also be able to bring internal stakeholders along on the journey, securing enthusiasm and support for your identified opportunities.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Experience working in an e-commerce platform company or in a company within the e-commerce industry is a strong plus.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Experience working with 3rd-party integrations and APIs is a strong plus.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">You have excellent written and verbal communication skills in English.</span></p></li><li><p><span style=\"color:#121317\">Practical requirements:</span></p><ul><li><p><span style=\"color:#121317\">EU citizenship or a valid work permit for the Netherlands; you are preferably already living in the Netherlands.</span></p></li><li><p><span style=\"color:#121317\">Available for at least 32 hours a week, with two days spent at the Utrecht office.</span></p></li></ul></li></ul><p style=\"min-height: 1.7em;\"></p><p style=\"text-align:justify;\"><strong><span style=\"color:#1B1A3A\">Important note:</span></strong><span style=\"color:#1B1A3A\"> we understand that studies show women may only apply for roles when they feel they meet 100% of the requirements; therefore, we strongly encourage you to apply even if you don't check every box, as we are looking for passionate individuals with potential and a willingness to grow.</span></p>",
+          "title": "Product Manager - Core AI",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<h4><strong><span style=\"color:#1B1A3A\">Your team</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#121317\">You will lead the product strategy for our dedicated Core AI team, working alongside talented Machine Learning Engineers and Fullstack Engineers, as well as collaborating closely with Product Designers and QA to ensure our intelligent features are both intuitive and rock-solid.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">While your team focuses on building smart, proprietary models under the hood, you won't work in isolation. You will collaborate with Product Managers across other domains to ensure AI functionality is seamlessly embedded into the broader user journey.</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong><span style=\"color:#1B1A3A\">Who are we? </span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#000000\">Channable was founded in 2014 in the heart of Utrecht and is a fast-growing B2B SaaS platform that offers a fully integrated way to market your products online. We empower marketers and online businesses to manage, scale, and optimize their marketing. We are now a strong team of 320+ diverse individuals from more than 40+ nationalities.</span></p><p style=\"text-align:justify;\"><span style=\"color:#000000\">Joining Channable means you\u2019re looking for a bit more than just a job. Diverse as we are, we all share our love for growth, helping, taking ownership, and creating an awesome journey together. Feel free to take a further look at who we are here and on our Instagram or LinkedIn! Wanna get to know us even more? Give our</span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://online.fliphtml5.com/qtfug/wxhm/#p=1\"><span style=\"color:#1155CC\"> Culture Playbook</span></a></u><span style=\"color:#000000\"> a read.</span></p><p style=\"text-align:justify;min-height: 1.7em;\"></p><h4 style=\"text-align:justify;\"><strong><span style=\"color:#121317\">Why Channable?</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#000000\">At Channable, you\u2019ll find a culture that values openness, craftsmanship, and collaboration. We invest in our people and give them the autonomy to drive meaningful change. You'll work on technical challenges that matter, with colleagues who care deeply about the product and each other.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">Want to read more about our development adventures? Then visit our inspiring tech blog: </span><a rel=\"noopener\" target=\"_blank\" href=\"https://tech.channable.com/\"><span style=\"color:#121317\">https://tech.channable.com/</span></a></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">And if this makes you enthusiastic, you can also take a look at some of our open-source work at </span><a rel=\"noopener\" target=\"_blank\" href=\"https://github.com/channable\"><span style=\"color:#121317\">https://github.com/channable</span></a><span style=\"color:#121317\"> to get a feeling for how we work together and what our code looks like.</span></p><h4><br><strong><span style=\"color:#121317\">What do we offer?</span></strong></h4><ul><li><p><span style=\"color:#000000\">Gross monthly salary ranging from </span><span style=\"color:#121317\">\u20ac 4.500- \u20ac 6.000, </span><span style=\"color:#000000\">based on a 40-hour work week. This salary range reflects our career framework. Your final role level will be determined throughout the recruitment process, based on alignment with this framework.</span></p></li><li><p><span style=\"color:#000000\">8% holiday allowance - 8% of your yearly salary, which is paid together with your May salary.</span></p></li></ul><ul><li><p><span style=\"color:#000000\">Savings for old age: we have a savings scheme for old age, which can accrue up to 5% of your monthly salary, or you can get an additional +2.5% to your monthly base salary.</span></p></li><li><p><span style=\"color:#000000\">Annual L&amp;D budget of \u20ac1000 to spend on your professional growth.</span></p></li><li><p><span style=\"color:#000000\">Stock Appreciation Rights: you can profit from Channable\u2019s success.</span></p></li><li><p><span style=\"color:#000000\">Company-wide performance bonus, up to 10% of your annual salary, determined yearly by our founders based on financial planning and targets.</span></p></li><li><p><span style=\"color:#000000\">26 vacation days + 2 reload days based on 40 hours, with the possibility of buying up to 5 extra vacation days per year.</span></p></li><li><p><span style=\"color:#000000\">Are you going to become a parent? Enjoy 5 weeks of 100% paid partner leave!</span></p></li><li><p><span style=\"color:#000000\">Commuting to our office? Choose between an NS Business Card or a \u20ac0.25/km travel allowance for alternative transport.&nbsp;</span></p></li><li><p><span style=\"color:#000000\">Work from our office in central Utrecht at least 2 days a week, and from home for the rest (we'll provide the gear and a budget for extra supplies). Plus, enjoy flexible working hours with a morning start window between 8:00 AM and 10:00 AM.&nbsp;</span></p></li><li><p><span style=\"color:#000000\">We offer a 3-week-long workcation; and an additional 3 weeks if you live as an expat in the Netherlands!</span></p></li><li><p><span style=\"color:#000000\">Your well-being matters: we offer a discounted Urban Sports Club subscription and anonymous access to OpenUp psychologists and resources.</span></p></li><li><p><span style=\"color:#000000\">Fresh daily lunch: enjoy fresh meals prepared Monday to Thursday by our in-house Chef (fully catering to vegan, vegetarian, and gluten-free diets). On Fridays, we switch it up by ordering in tasty sandwiches and salads.</span></p></li><li><p><span style=\"color:#000000\">Additional working conditions include massages, even personal training sessions at our Channagym, video games, an in-office bar, and many more!</span></p></li><li><p><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.linkedin.com/posts/channable_channable-channaweek-workculture-activity-7426540961326895105-EXff?utm_source=share&utm_medium=member_desktop&rcm=ACoAAASoXJgBHdq4CVsQCH0PpnYcTQNs3ymnPIk\"><span style=\"color:#1155CC\">Channaweek</span></a></u><span style=\"color:#434343\"> &amp;</span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.linkedin.com/posts/channable_channaweekend-teambuilding-employee-activity-7472609865060978688-4yrx?utm_source=share&utm_medium=member_desktop&rcm=ACoAABZ4BZEBIP93wvMbEFJl-McVwLtU2nhZoao\"><span style=\"color:#1155CC\"> Channaweekend:</span></a><span style=\"color:#1155CC\"> </span></u><span style=\"color:#000000\">connect with your global colleagues at our annual team gathering in Utrecht, and pack your bags for Channaweekend, our annual company-wide getaway.&nbsp;</span></p></li></ul><h4><br><strong><span style=\"color:#1B1A3A\">How can you introduce yourself to us?</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#000000\">Are you interested? Please apply by clicking on the \"apply now\" button below. Please send your application in English. We look forward to hearing from you as soon as possible!</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">Interview steps:</span></p><ol><li><p><span style=\"color:#121317\">If it's a match, Ioana (Tech Talent Acquisition Partner) will get in touch with you for an introductory call (30 minutes)</span></p></li><li><p><span style=\"color:#121317\">Then you are going to have a culture and role fit interview&nbsp; (1h)</span></p></li><li><p><span style=\"color:#121317\">After that, we will schedule a case study presentation (1h)</span></p></li></ol><p style=\"text-align:justify;\"><span style=\"color:#121317\">Please note that after the interviews and before the offer stage, we\u2019ll conduct reference checks.</span></p><p style=\"text-align:justify;\"><span style=\"color:#1B1A3A\"><br><br></span><em><span style=\"color:#1B1A3A\">Important note: We know that in the current AI era, it's tempting to use technology to polish your interview performance. While we value your ambition, please do not use AI assistance during the first screening, so we can get to know the real person behind the resume.</span></em></p><p><em><span style=\"color:#1B1A3A\">Contact from job agencies and recruiters will not be appreciated. Each recruiter or headhunter who approaches us agrees to a donation of \u20ac250 for Make-A-Wish.</span></em></p><p><em><span style=\"color:#1B1A3A\">At Channable, we strive to create and foster an environment of belonging and collaboration, and we believe in diverse and inclusive teams.</span></em></p>",
+          "locations_question": "What is your preferred work location?",
+          "sharing_description": "Deadline for applying: September 2nd at 17:00 CETAre you looking for an exciting Product Management opportunity in one of the fastest-growing SaaS scale-ups in the Netherlands? Then look no further.Yo",
+          "sharing_title": "Product Manager - Core AI"
+        }
+      },
+      "locations_question_type": "multiple_choice",
+      "location": "Utrecht, Utrecht, Netherlands",
+      "requirements": "<h4><strong><span style=\"color:#1B1A3A\">Your team</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#121317\">You will lead the product strategy for our dedicated Core AI team, working alongside talented Machine Learning Engineers and Fullstack Engineers, as well as collaborating closely with Product Designers and QA to ensure our intelligent features are both intuitive and rock-solid.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">While your team focuses on building smart, proprietary models under the hood, you won't work in isolation. You will collaborate with Product Managers across other domains to ensure AI functionality is seamlessly embedded into the broader user journey.</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong><span style=\"color:#1B1A3A\">Who are we? </span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#000000\">Channable was founded in 2014 in the heart of Utrecht and is a fast-growing B2B SaaS platform that offers a fully integrated way to market your products online. We empower marketers and online businesses to manage, scale, and optimize their marketing. We are now a strong team of 320+ diverse individuals from more than 40+ nationalities.</span></p><p style=\"text-align:justify;\"><span style=\"color:#000000\">Joining Channable means you\u2019re looking for a bit more than just a job. Diverse as we are, we all share our love for growth, helping, taking ownership, and creating an awesome journey together. Feel free to take a further look at who we are here and on our Instagram or LinkedIn! Wanna get to know us even more? Give our</span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://online.fliphtml5.com/qtfug/wxhm/#p=1\"><span style=\"color:#1155CC\"> Culture Playbook</span></a></u><span style=\"color:#000000\"> a read.</span></p><p style=\"text-align:justify;min-height: 1.7em;\"></p><h4 style=\"text-align:justify;\"><strong><span style=\"color:#121317\">Why Channable?</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#000000\">At Channable, you\u2019ll find a culture that values openness, craftsmanship, and collaboration. We invest in our people and give them the autonomy to drive meaningful change. You'll work on technical challenges that matter, with colleagues who care deeply about the product and each other.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">Want to read more about our development adventures? Then visit our inspiring tech blog: </span><a rel=\"noopener\" target=\"_blank\" href=\"https://tech.channable.com/\"><span style=\"color:#121317\">https://tech.channable.com/</span></a></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">And if this makes you enthusiastic, you can also take a look at some of our open-source work at </span><a rel=\"noopener\" target=\"_blank\" href=\"https://github.com/channable\"><span style=\"color:#121317\">https://github.com/channable</span></a><span style=\"color:#121317\"> to get a feeling for how we work together and what our code looks like.</span></p><h4><br><strong><span style=\"color:#121317\">What do we offer?</span></strong></h4><ul><li><p><span style=\"color:#000000\">Gross monthly salary ranging from </span><span style=\"color:#121317\">\u20ac 4.500- \u20ac 6.000, </span><span style=\"color:#000000\">based on a 40-hour work week. This salary range reflects our career framework. Your final role level will be determined throughout the recruitment process, based on alignment with this framework.</span></p></li><li><p><span style=\"color:#000000\">8% holiday allowance - 8% of your yearly salary, which is paid together with your May salary.</span></p></li></ul><ul><li><p><span style=\"color:#000000\">Savings for old age: we have a savings scheme for old age, which can accrue up to 5% of your monthly salary, or you can get an additional +2.5% to your monthly base salary.</span></p></li><li><p><span style=\"color:#000000\">Annual L&amp;D budget of \u20ac1000 to spend on your professional growth.</span></p></li><li><p><span style=\"color:#000000\">Stock Appreciation Rights: you can profit from Channable\u2019s success.</span></p></li><li><p><span style=\"color:#000000\">Company-wide performance bonus, up to 10% of your annual salary, determined yearly by our founders based on financial planning and targets.</span></p></li><li><p><span style=\"color:#000000\">26 vacation days + 2 reload days based on 40 hours, with the possibility of buying up to 5 extra vacation days per year.</span></p></li><li><p><span style=\"color:#000000\">Are you going to become a parent? Enjoy 5 weeks of 100% paid partner leave!</span></p></li><li><p><span style=\"color:#000000\">Commuting to our office? Choose between an NS Business Card or a \u20ac0.25/km travel allowance for alternative transport.&nbsp;</span></p></li><li><p><span style=\"color:#000000\">Work from our office in central Utrecht at least 2 days a week, and from home for the rest (we'll provide the gear and a budget for extra supplies). Plus, enjoy flexible working hours with a morning start window between 8:00 AM and 10:00 AM.&nbsp;</span></p></li><li><p><span style=\"color:#000000\">We offer a 3-week-long workcation; and an additional 3 weeks if you live as an expat in the Netherlands!</span></p></li><li><p><span style=\"color:#000000\">Your well-being matters: we offer a discounted Urban Sports Club subscription and anonymous access to OpenUp psychologists and resources.</span></p></li><li><p><span style=\"color:#000000\">Fresh daily lunch: enjoy fresh meals prepared Monday to Thursday by our in-house Chef (fully catering to vegan, vegetarian, and gluten-free diets). On Fridays, we switch it up by ordering in tasty sandwiches and salads.</span></p></li><li><p><span style=\"color:#000000\">Additional working conditions include massages, even personal training sessions at our Channagym, video games, an in-office bar, and many more!</span></p></li><li><p><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.linkedin.com/posts/channable_channable-channaweek-workculture-activity-7426540961326895105-EXff?utm_source=share&utm_medium=member_desktop&rcm=ACoAAASoXJgBHdq4CVsQCH0PpnYcTQNs3ymnPIk\"><span style=\"color:#1155CC\">Channaweek</span></a></u><span style=\"color:#434343\"> &amp;</span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.linkedin.com/posts/channable_channaweekend-teambuilding-employee-activity-7472609865060978688-4yrx?utm_source=share&utm_medium=member_desktop&rcm=ACoAABZ4BZEBIP93wvMbEFJl-McVwLtU2nhZoao\"><span style=\"color:#1155CC\"> Channaweekend:</span></a><span style=\"color:#1155CC\"> </span></u><span style=\"color:#000000\">connect with your global colleagues at our annual team gathering in Utrecht, and pack your bags for Channaweekend, our annual company-wide getaway.&nbsp;</span></p></li></ul><h4><br><strong><span style=\"color:#1B1A3A\">How can you introduce yourself to us?</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#000000\">Are you interested? Please apply by clicking on the \"apply now\" button below. Please send your application in English. We look forward to hearing from you as soon as possible!</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">Interview steps:</span></p><ol><li><p><span style=\"color:#121317\">If it's a match, Ioana (Tech Talent Acquisition Partner) will get in touch with you for an introductory call (30 minutes)</span></p></li><li><p><span style=\"color:#121317\">Then you are going to have a culture and role fit interview&nbsp; (1h)</span></p></li><li><p><span style=\"color:#121317\">After that, we will schedule a case study presentation (1h)</span></p></li></ol><p style=\"text-align:justify;\"><span style=\"color:#121317\">Please note that after the interviews and before the offer stage, we\u2019ll conduct reference checks.</span></p><p style=\"text-align:justify;\"><span style=\"color:#1B1A3A\"><br><br></span><em><span style=\"color:#1B1A3A\">Important note: We know that in the current AI era, it's tempting to use technology to polish your interview performance. While we value your ambition, please do not use AI assistance during the first screening, so we can get to know the real person behind the resume.</span></em></p><p><em><span style=\"color:#1B1A3A\">Contact from job agencies and recruiters will not be appreciated. Each recruiter or headhunter who approaches us agrees to a donation of \u20ac250 for Make-A-Wish.</span></em></p><p><em><span style=\"color:#1B1A3A\">At Channable, we strive to create and foster an environment of belonging and collaboration, and we believe in diverse and inclusive teams.</span></em></p>",
+      "careers_url": "https://jobs.channable.com/o/product-manager-core-ai",
+      "country_code": "NL",
+      "min_hours": 32,
+      "open_questions": [
+        {
+          "id": 4316379,
+          "position": 1,
+          "options": {},
+          "required": true,
+          "body": "How did you find out about Channable?",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "How did you find out about Channable?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4316381,
+          "position": 2,
+          "options": {},
+          "required": true,
+          "body": "Where do you live? (City)",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "Where do you live? (City)"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4316380,
+          "position": 3,
+          "options": {},
+          "required": true,
+          "body": "Do you have EU citizenship or a valid work permit for the Netherlands? ",
+          "kind": "single_choice",
+          "translations": {
+            "en": {
+              "body": "Do you have EU citizenship or a valid work permit for the Netherlands? "
+            }
+          },
+          "open_question_options": [
+            {
+              "id": 6641939,
+              "position": 0,
+              "body": "EU citizenship ",
+              "translations": {
+                "en": {
+                  "body": "EU citizenship "
+                }
+              }
+            },
+            {
+              "id": 6641940,
+              "position": 1,
+              "body": "Valid work permit",
+              "translations": {
+                "en": {
+                  "body": "Valid work permit"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 4316392,
+          "position": 4,
+          "options": {},
+          "required": true,
+          "body": "If you selected valid work permit, please specify what type ",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "If you selected valid work permit, please specify what type "
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4316382,
+          "position": 5,
+          "options": {},
+          "required": true,
+          "body": "I confirm my availability for at least 32 hours per week, with a minimum of 2 days spent in the Utrecht office",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "I confirm my availability for at least 32 hours per week, with a minimum of 2 days spent in the Utrecht office"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4316384,
+          "position": 6,
+          "options": {},
+          "required": false,
+          "body": "Which one of our company values resonates the most with you and why?",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "Which one of our company values resonates the most with you and why?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4316385,
+          "position": 7,
+          "options": {},
+          "required": false,
+          "body": "Can you please attach your motivational letter?",
+          "kind": "file",
+          "translations": {
+            "en": {
+              "body": "Can you please attach your motivational letter?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4316386,
+          "position": 8,
+          "options": {
+            "length": 120
+          },
+          "required": false,
+          "body": "Want to impress us even more? Take your chance to introduce yourself to us (max. 2 mins)!\n\n",
+          "kind": "video",
+          "translations": {
+            "en": {
+              "body": "Want to impress us even more? Take your chance to introduce yourself to us (max. 2 mins)!\n\n"
+            }
+          },
+          "open_question_options": []
+        }
+      ],
+      "locations_question": "What is your preferred work location?",
+      "postal_code": "3512 HL",
+      "sharing_description": "Deadline for applying: September 2nd at 17:00 CETAre you looking for an exciting Product Management opportunity in one of the fastest-growing SaaS scale-ups in the Netherlands? Then look no further.Yo",
+      "options_salutation": "off",
+      "on_site": false,
+      "location_question_visible": false,
+      "updated_at": "2026-08-19 10:58:28 UTC",
+      "careers_apply_url": "https://jobs.channable.com/o/product-manager-core-ai/c/new",
+      "description": "<p style=\"text-align:justify;\"><span style=\"color:#121317\">Deadline for applying: September 2nd at 17:00 CET</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\"><br>Are you looking for an exciting Product Management opportunity in one of the fastest-growing SaaS scale-ups in the Netherlands? Then look no further.<br></span></p><h4><strong><span style=\"color:#1B1A3A\">Your job</span></strong></h4><p style=\"text-align:justify;\"><span style=\"color:#121317\">As the Product Manager for the Core AI team, you are responsible for enabling our customers to harness the power of AI directly within Channable.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">We have already taken big steps by successfully automating feed setup workflows for major advertising platforms like Google and Meta, but this is just the beginning. Your focus will be extending these intelligent capabilities across complex e-commerce marketplaces, with major channels like Bol.com and Amazon serving as examples of what\u2019s next on the roadmap.</span></p><p style=\"text-align:justify;\"><span style=\"color:#121317\">Your main goal is to leverage AI to eliminate manual friction, automate repetitive user tasks, and radically elevate the user experience. By making feed mapping and categorization effortless through AI, your team will play a direct role in solving one of our biggest product objectives: radically reducing the time to value for customers expanding into new sales channels.</span></p><h4><span style=\"color:#121317\"><br></span><strong><span style=\"color:#121317\">Your challenges</span></strong></h4><ul><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Translate customer insights into clear product strategies, user-centric features, and well-defined roadmap items.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Proactively identify opportunities to leverage AI, finding innovative ways to automate repetitive workflows and eliminate setup friction.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Lead the full product development lifecycle, guiding features from discovery through design to delivery.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Write clear specifications and collaborate daily with Engineers, Product Designers, and QA to ensure AI features are both powerful and seamless to use.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Foster an empowered, collaborative environment that aligns AI innovation with Channable\u2019s broader business goals.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Serve as an internal and external thought leader on how AI can empower our customers.</span></p></li></ul><h4><span style=\"color:#121317\"><br></span><strong><span style=\"color:#121317\">Who are you?</span></strong></h4><ul><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">You have at least 3 years of experience as a Product Owner or Product Manager, ideally in a B2B SaaS company.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Familiarity with solving technical problems that strengthen customer-facing features.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">A proven track record of bringing solutions from 0-1 and iterating based on feedback.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Demonstrable experience with product discovery, design, and delivery activities.&nbsp;</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Demonstrated ability to think strategically and anticipate future opportunities and challenges. </span><span style=\"color:#1B1A3A\">You should also be able to bring internal stakeholders along on the journey, securing enthusiasm and support for your identified opportunities.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Experience working in an e-commerce platform company or in a company within the e-commerce industry is a strong plus.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">Experience working with 3rd-party integrations and APIs is a strong plus.</span></p></li><li><p style=\"text-align:justify;\"><span style=\"color:#121317\">You have excellent written and verbal communication skills in English.</span></p></li><li><p><span style=\"color:#121317\">Practical requirements:</span></p><ul><li><p><span style=\"color:#121317\">EU citizenship or a valid work permit for the Netherlands; you are preferably already living in the Netherlands.</span></p></li><li><p><span style=\"color:#121317\">Available for at least 32 hours a week, with two days spent at the Utrecht office.</span></p></li></ul></li></ul><p style=\"min-height: 1.7em;\"></p><p style=\"text-align:justify;\"><strong><span style=\"color:#1B1A3A\">Important note:</span></strong><span style=\"color:#1B1A3A\"> we understand that studies show women may only apply for roles when they feel they meet 100% of the requirements; therefore, we strongly encourage you to apply even if you don't check every box, as we are looking for passionate individuals with potential and a willingness to grow.</span></p>",
+      "department": "Product",
+      "highlight": null,
+      "education_code": "bachelor_degree",
+      "max_hours": 40,
+      "employment_type_code": "fulltime_permanent",
+      "tags": [],
+      "locations_question_required": true,
+      "remote": false,
+      "max_hours_per_week": "40",
+      "salary": {
+        "max": "6000",
+        "min": "4500",
+        "period": "month",
+        "currency": "EUR"
+      },
+      "id": 2715078,
+      "published_at": "2026-08-19 10:48:22 UTC",
+      "created_at": "2026-08-19 09:02:14 UTC",
+      "sharing_title": "Product Manager - Core AI",
+      "city": "Utrecht",
+      "locations": [
+        {
+          "id": 64463,
+          "name": "Utrecht",
+          "state": "Utrecht",
+          "country": "Netherlands",
+          "city": "Utrecht",
+          "translations": {
+            "en": {
+              "name": "Utrecht",
+              "city": "Utrecht",
+              "postal_code": "3512 HL",
+              "street": "Kromme Nieuwegracht 66",
+              "note": null
+            }
+          },
+          "country_code": "NL",
+          "postal_code": "3512 HL",
+          "state_code": "UT",
+          "street": "Kromme Nieuwegracht 66",
+          "note": null
+        }
+      ],
+      "status": "published",
+      "close_at": null,
+      "mailbox_email": "job.t8y5h@channable.recruitee.com",
+      "min_hours_per_week": "32",
+      "options_cv": "required",
+      "dynamic_fields": [],
+      "country": "Netherlands",
+      "sharing_image": null,
+      "state_name": "Utrecht",
+      "title": "Product Manager - Core AI"
+    },
+    {
+      "experience_code": "entry_level",
+      "slug": "technischer-kundensupport-dach-deutschsprachig",
+      "position": 607,
+      "category_code": "customer_service",
+      "cover_image": null,
+      "options_phone": "required",
+      "company_name": "Channable",
+      "hybrid": true,
+      "options_photo": "off",
+      "guid": "hs67b",
+      "options_title": "off",
+      "options_cover_letter": "optional",
+      "state_code": "UT",
+      "translations": {
+        "en": {
+          "description": "<p><span style=\"color:#000000\">Du sprichst flie\u00dfend Deutsch und hast Spa\u00df daran, komplexe Probleme f\u00fcr eine Vielzahl von Kunden zu l\u00f6sen? Du m\u00f6chtest E-Commerce-Unternehmen durch hochwertigen technischen Support beim Wachstum unterst\u00fctzen? Dann k\u00f6nnte diese Stelle genau das Richtige f\u00fcr dich sein!</span></p><p><span style=\"color:#000000\">Werde Teil unserer internationalen Support-Abteilung (6 Teams, 9 M\u00e4rkte) als Mitglied des DACH-Support-Teams, einer unserer gr\u00f6\u00dften und am schnellsten wachsenden Regionen. Das Team besteht derzeit aus 7 technischen Support-MitarbeiterInnen, die Kunden in Deutschland, \u00d6sterreich und der Schweiz betreuen.</span></p><p><span style=\"color:#000000\">Wir sind ein aufgeschlossenes und kooperatives Team von Support-Experten. Wir glauben, dass es beim Support nicht nur darum geht, Probleme zu beheben, sondern unseren Kunden zum Erfolg zu verhelfen, und das tun wir gemeinsam. Wir lernen voneinander, sind ehrlich und direkt und haben dabei auch regelm\u00e4\u00dfig Spa\u00df zusammen. Es erwarten dich flache Hierarchien, Raum f\u00fcr Ihre Ideen und ein Team, das dir den R\u00fccken st\u00e4rkt!</span></p><h4><strong><span style=\"color:#000000\">Dein Job</span></strong></h4><p><span style=\"color:#000000\">Als Mitarbeiter im technischen Support bist du der erste Kontaktpunkt f\u00fcr Kunden, die Fragen oder Probleme zu unserem Tool haben. Channable hilft Online-H\u00e4ndlern und Agenturen dabei, ihre Produktlistings auf Kan\u00e4len wie </span><strong><span style=\"color:#000000\">Kaufland, OTTO, Amazon, Google</span></strong><span style=\"color:#000000\"> und </span><strong><span style=\"color:#000000\">Meta</span></strong><span style=\"color:#000000\"> zu automatisieren und zu optimieren.</span></p><p><span style=\"color:#000000\">Wir unterst\u00fctzen derzeit \u00fcber 2.500 Marketingkan\u00e4le, darunter Preisvergleichsseiten, Affiliate-Netzwerke und Marktpl\u00e4tze. Zu unseren Kunden z\u00e4hlen unabh\u00e4ngige Webshop-Betreiber ebenso wie internationale Marken und Agenturen, die jeweils ganz individuelle Anforderungen haben.</span></p><p><span style=\"color:#000000\">Du hast noch keine Erfahrung mit E-Commerce-Tools wie Produkt-Feeds oder APIs? Kein Problem! Wir bieten dir eine umfassende Einarbeitung und Training, damit du schnell auf dem Laufenden bist.</span></p><p><span style=\"color:#000000\">Nach deinem Onboarding beginnst du mit unserem First-Level-Support, bearbeitest eingehende Tickets, diagnostizierst die Situation, l\u00f6st sie im Idealfall oder leitest sie bei Bedarf an unseren erfahrenen Second-Level-Support weiter.</span></p><p><span style=\"color:#000000\">Deine Aufgaben:</span></p><ul><li><p><span style=\"color:#000000\">Du bearbeitest eingehende Tickets per E-Mail und Telefon (auf Deutsch und Englisch), l\u00f6st Probleme, behebst Fehler und schulst Nutzer darin, Channable selbstst\u00e4ndiger zu nutzen.</span></p></li><li><p><span style=\"color:#000000\">Fehlerbehebung von Probleme im Zusammenhang mit Produkt-Feeds, APIs und Marktplatzintegrationen.</span></p></li><li><p><span style=\"color:#000000\">Du eskalierst komplexe F\u00e4lle bei Bedarf an den Second-Line-Support.</span></p></li><li><p><span style=\"color:#000000\">Du verstehst die Gesch\u00e4ftsziele unserer Nutzer und hilfst ihnen, das Beste aus Channable herauszuholen.</span></p></li><li><p><span style=\"color:#000000\">Du erkennst wiederkehrende Probleme und teilst deine Erkenntnisse intern, um unser Produkt und unsere Prozesse zu verbessern.</span></p></li><li><p><span style=\"color:#000000\">Du tr\u00e4gst zu Teambildungsma\u00dfnahmen, Wissensaustausch und der Einarbeitung neuer Kollegen bei.</span></p></li></ul><h4><strong><span style=\"color:#000000\">Deine Herausforderungen</span></strong></h4><p><span style=\"color:#000000\">Channable ist ein leistungsstarkes, flexibles Tool mit einer Vielzahl von Funktionen. Die Beherrschung des Tools und das Verst\u00e4ndnis daf\u00fcr, wie unsere Kunden es nutzen, sind entscheidend f\u00fcr einen qualitativ hochwertigen Support.</span></p><p><span style=\"color:#000000\">Du wirst sowohl mit technischen als auch mit nicht-technischen Nutzern kommunizieren, daher ist deine F\u00e4higkeit, deinen Kommunikationsstil anzupassen, von entscheidender Bedeutung. Au\u00dferdem musst du ein Gleichgewicht zwischen </span><strong><span style=\"color:#000000\">Schnelligkeit</span></strong><span style=\"color:#000000\">, </span><strong><span style=\"color:#000000\">klarer Kommunikation</span></strong><span style=\"color:#000000\"> und </span><strong><span style=\"color:#000000\">Kundenzufriedenheit </span></strong><span style=\"color:#000000\">finden und dabei von Anfang bis Ende Eigenverantwortung zeigen.</span></p><p><span style=\"color:#000000\">Diese Position bietet viel Raum f\u00fcr deine pers\u00f6nliche Entwicklung. Du kannst zus\u00e4tzliche Aufgaben \u00fcbernehmen, z. B. die Einarbeitung neuer Teammitglieder, die Spezialisierung auf einen Produktbereich oder den Aufstieg in unseren Second-Line-Support.</span></p><h4><strong><span style=\"color:#000000\">Wie Erfolg aussieht</span></strong></h4><ul><li><p><span style=\"color:#000000\">Du reagierst schnell, klar und einf\u00fchlsam, das Team kann sich auf dich verlassen, du lieferst unseren Kunden hochwertige Antworten und erzielst hohe CSAT- und IQS-Werte</span></p></li><li><p><span style=\"color:#000000\">Du gehst souver\u00e4n mit auftretenden Problemen um und eskalierst nur, wenn es notwendig ist.</span></p></li><li><p><span style=\"color:#000000\">Du entwickelst ein tiefes Verst\u00e4ndnis sowohl f\u00fcr das Tool als auch f\u00fcr die Anwendungsf\u00e4lle unserer Kunden.</span></p></li><li><p><span style=\"color:#000000\">Du teilst proaktiv Erkenntnisse, hilfst deinen Teamkollegen und tr\u00e4gst zum Lernen im Team bei.</span></p></li><li><p><span style=\"color:#000000\">Du bist zuverl\u00e4ssig, konsequent und \u00fcbernimmst die volle Verantwortung f\u00fcr deine Arbeit.</span></p></li></ul><h4><strong><span style=\"color:#000000\">Wer bist du?</span></strong></h4><p><span style=\"color:#000000\">Du bist neugierig, analytisch und kannst gut Zusammenh\u00e4nge herstellen. Du hast Spa\u00df am L\u00f6sen von Problemen und verf\u00fcgst \u00fcber ausgepr\u00e4gte Kommunikationsf\u00e4higkeiten. Du bist ein Teamplayer, der in einem kollaborativen Umfeld aufbl\u00fcht und stolz darauf ist, sowohl Kunden als auch Kollegen zum Erfolg zu verhelfen.</span></p><p><span style=\"color:#000000\">Du f\u00fchlst dich in einem flexiblen Umfeld wohl, in dem du dazu ermutigt wirst, Ideen einzubringen und Initiative zu zeigen.</span></p><p><span style=\"color:#000000\">Einige praktische Dinge, die wir von dir erwarten:</span></p><ul><li><p><span style=\"color:#000000\">Du verf\u00fcgst \u00fcber ausgezeichnete Deutsch- und Englischkenntnisse in Wort und Schrift.</span></p></li><li><p><span style=\"color:#000000\">Du bist mindestens 4 Tage pro Woche (32 Stunden) verf\u00fcgbar und kannst mindestens 2 Tage pro Woche in unserem B\u00fcro in Utrecht arbeiten.</span></p></li><li><p><span style=\"color:#000000\">Du wohnst in (oder in der N\u00e4he von) </span><strong><span style=\"color:#000000\">Utrecht </span></strong><span style=\"color:#000000\">oder bist bereit umzuziehen.</span></p></li><li><p><span style=\"color:#000000\">Erfahrung im technischen Support, vorzugsweise im IT- oder E-Commerce-Bereich, ist von Vorteil.</span></p></li></ul>",
+          "title": "Technischer Kundensupport DACH - deutschsprachig",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<h4><strong><span style=\"color:#000000\">Wer sind wir?</span></strong></h4><p><span style=\"color:#000000\">Teil unseres Teams zu sein bedeutet, mit vielf\u00e4ltigen und sympathischen Menschen zusammenzuarbeiten, die dir vertrauen und dich auf deinem Weg unterst\u00fctzen. Channable wurde 2014 im Herzen von Utrecht gegr\u00fcndet. Heute sind wir ein starkes Team von mehr als 250 vielf\u00e4ltigen Mitarbeitern aus \u00fcber 40 Nationen mit einem brandneuen, lebendigen Hauptsitz in Utrecht, von dem aus wir Kunden auf der ganzen Welt betreuen. Wir sind auch von anderen Standorten aus t\u00e4tig, darunter New York City, Berlin und Aarhus.<br></span></p><p><span style=\"color:#000000\">Wenn du bei Channable einsteigst, suchst du mehr als nur einen Job. Wir verbringen gerne Zeit miteinander. Sei es im B\u00fcro, an unserer Channabar oder in einem unserer internen Chats. Wir sind aufgeschlossene und bodenst\u00e4ndige Menschen. Wir sind sehr stolz darauf, dass jeder seine eigene Note zur Kultur von Channable beitr\u00e4gt. So unterschiedlich wir auch sind, wir alle teilen unsere Liebe zum Wachstum, zum Helfen, zum \u00dcbernehmen von Verantwortung und zum gemeinsamen Gestalten einer gro\u00dfartigen Zukunft. Schau dir gerne unser </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.instagram.com/wearechannable/\"><span style=\"color:#1155CC\">Instagram</span></a></u><span style=\"color:#000000\">, </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.facebook.com/channable/\"><span style=\"color:#1155CC\">Facebook </span></a></u><span style=\"color:#000000\">oder </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.linkedin.com/company/channable/mycompany/?viewAsMember=true\"><span style=\"color:#1155CC\">LinkedIn</span></a></u><span style=\"color:#000000\"> an und lies dir unser </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://heyzine.com/flip-book/b03da65c24.html\"><span style=\"color:#1155CC\">Culture Playbook</span></a></u><span style=\"color:#000000\"> durch!</span></p><h4><strong><span style=\"color:#000000\">Was bieten wir dir?</span></strong></h4><ul><li><p><span style=\"color:#000000\">Die Gehaltsspanne auf Basis von 40 Stunden liegt zwischen 2.850 \u20ac und 2.950 \u20ac brutto innerhalb einer klaren Karriere- und Gehaltsstruktur. \ud83d\udcb8\ud83d\udcb8</span></p></li><li><p><span style=\"color:#000000\">Ein erstklassiges Training und Onboarding, um das Tool, unsere Prozesse und deine Kollegen kennenzulernen. \ud83d\ude0e Danach erh\u00e4ltst du das Vertrauen und die Verantwortung, zu zeigen, was du kannst. Dein Buddy wird dich w\u00e4hrend des gesamten Onboardings unterst\u00fctzen. \u270c\ufe0f</span></p></li><li><p><span style=\"color:#000000\">Arbeite f\u00fcr ein engagiertes Unternehmen mit \u00fcber 250 internationalen Mitarbeitern! \ud83d\ude4c \ud83e\uddd1\u200d\ud83e\udd1d\u200d\ud83e\uddd1Wir haben eine offene und informelle Kultur und eine flache Organisationsstruktur, in der sich alle gegenseitig gerne helfen. \ud83e\udd17\ud83c\udf89</span></p></li><li><p><span style=\"color:#000000\">Die M\u00f6glichkeit, eigene Ideen zu entwickeln und umzusetzen. \ud83d\udc9c\ud83c\udf1f</span></p></li><li><p><span style=\"color:#000000\">Arbeite in einem wundersch\u00f6nen, historischen und komplett renovierten B\u00fcro im Herzen von Utrecht \ud83c\udfe1 &amp; mit einer flexiblen Hybrid-Arbeitsregelung (2 Tage im B\u00fcro)\u2728</span></p></li><li><p><span style=\"color:#000000\">Da du von zu Hause aus arbeiten kannst, stellen wir dir Homeoffice-Ausstattung zur Verf\u00fcgung\ud83d\udda5\ufe0f\u2328\ufe0f</span></p></li><li><p><span style=\"color:#000000\">26 Urlaubstage \ud83c\udf1e + 2 Reload-Tage \ud83c\udf6d auf Basis von 40 Stunden, und obendrein kannst du eine dreiw\u00f6chige Workcation machen\ud83c\udf79</span></p></li><li><p><span style=\"color:#000000\">Unternehmensweiter Bonus (au\u00dfer du arbeitest im Sales oder CS) \ud83d\udcb0</span></p></li><li><p><span style=\"color:#000000\">Stock Appreciation Rights: berechtigte Mitarbeiter k\u00f6nnen finanziell vom Erfolg von Channable profitieren \ud83d\udde0</span></p></li><li><p><span style=\"color:#000000\">Wir m\u00f6chten, dass du fit bleibst \u2013 nutze gerne unser verg\u00fcnstigtes OneFit-Abonnement.\ud83d\udc5f\ud83d\udeb4Au\u00dferdem hast du kostenlosen und anonymen Zugang zur OpenUp-Plattform und zu Psychologen \u262e\ufe0f</span></p></li><li><p><span style=\"color:#000000\">Du pendelst zu unserem B\u00fcro? Kein Problem, wir k\u00fcmmern uns darum\ud83d\ude86</span></p></li><li><p><span style=\"color:#000000\">Altersvorsorge \u2013 ja, wir zahlen dir 5 % deines monatlichen Grundgehalts \ud83d\udc75\ud83d\udc74</span></p></li><li><p><span style=\"color:#000000\">Channaweekend (ja, wir fahren 2026 mit Kollegen aus aller Welt f\u00fcr ein langes Wochenende ins Ausland \ud83d\udc9c\ud83d\udd25)</span></p></li><li><p><span style=\"color:#000000\">Zus\u00e4tzliche Benefits wie leckeres Mittagessen, Massagen, eine Bar im B\u00fcro (Channabar), Partys, Sportteams, Videospiele und vieles mehr! \ud83d\udc95\ud83d\udc4c</span></p></li></ul><h4><strong><span style=\"color:#000000\">Wie kannst du dich bei uns vorstellen?</span></strong></h4><p><span style=\"color:#000000\">Bist du interessiert? Dann bewirb dich bitte \u00fcber den Button \u201eApply now\u201c unter dieser Anzeige. Bitte sende deine Bewerbung auf Englisch. Wenn deine Bewerbung zu uns passt, wird Judit dich f\u00fcr ein Kennenlerngespr\u00e4ch kontaktieren. Danach wirst du zu einem Vorstellungsgespr\u00e4ch eingeladen. Wir freuen uns darauf, bald von dir zu h\u00f6ren!</span></p><p><em><span style=\"color:#000000\">Kontaktaufnahmen durch Personalvermittlungsagenturen und Headhunter werden nicht erw\u00fcnscht. Jeder Personalvermittler oder Headhunter, der sich an uns wendet, erkl\u00e4rt sich mit einer Spende in H\u00f6he von 250 \u20ac an Make-A-Wish einverstanden.</span></em></p><p><span style=\"color:#000000\">Bei Channable bem\u00fchen wir uns, ein Umfeld der Zugeh\u00f6rigkeit und Zusammenarbeit zu schaffen und zu f\u00f6rdern. Wir glauben an vielf\u00e4ltige und inklusive Teams.</span></p>",
+          "locations_question": "What is your preferred work location?",
+          "sharing_description": "Du sprichst flie\u00dfend Deutsch und hast Spa\u00df daran, komplexe Probleme f\u00fcr eine Vielzahl von Kunden zu l\u00f6sen? Du m\u00f6chtest E-Commerce-Unternehmen durch hochwertigen technischen Support beim Wachstum unter",
+          "sharing_title": "Technischer Kundensupport DACH - deutschsprachig"
+        }
+      },
+      "locations_question_type": "multiple_choice",
+      "location": "Utrecht, Utrecht, Netherlands",
+      "requirements": "<h4><strong><span style=\"color:#000000\">Wer sind wir?</span></strong></h4><p><span style=\"color:#000000\">Teil unseres Teams zu sein bedeutet, mit vielf\u00e4ltigen und sympathischen Menschen zusammenzuarbeiten, die dir vertrauen und dich auf deinem Weg unterst\u00fctzen. Channable wurde 2014 im Herzen von Utrecht gegr\u00fcndet. Heute sind wir ein starkes Team von mehr als 250 vielf\u00e4ltigen Mitarbeitern aus \u00fcber 40 Nationen mit einem brandneuen, lebendigen Hauptsitz in Utrecht, von dem aus wir Kunden auf der ganzen Welt betreuen. Wir sind auch von anderen Standorten aus t\u00e4tig, darunter New York City, Berlin und Aarhus.<br></span></p><p><span style=\"color:#000000\">Wenn du bei Channable einsteigst, suchst du mehr als nur einen Job. Wir verbringen gerne Zeit miteinander. Sei es im B\u00fcro, an unserer Channabar oder in einem unserer internen Chats. Wir sind aufgeschlossene und bodenst\u00e4ndige Menschen. Wir sind sehr stolz darauf, dass jeder seine eigene Note zur Kultur von Channable beitr\u00e4gt. So unterschiedlich wir auch sind, wir alle teilen unsere Liebe zum Wachstum, zum Helfen, zum \u00dcbernehmen von Verantwortung und zum gemeinsamen Gestalten einer gro\u00dfartigen Zukunft. Schau dir gerne unser </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.instagram.com/wearechannable/\"><span style=\"color:#1155CC\">Instagram</span></a></u><span style=\"color:#000000\">, </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.facebook.com/channable/\"><span style=\"color:#1155CC\">Facebook </span></a></u><span style=\"color:#000000\">oder </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://www.linkedin.com/company/channable/mycompany/?viewAsMember=true\"><span style=\"color:#1155CC\">LinkedIn</span></a></u><span style=\"color:#000000\"> an und lies dir unser </span><u><a rel=\"noopener\" target=\"_blank\" href=\"https://heyzine.com/flip-book/b03da65c24.html\"><span style=\"color:#1155CC\">Culture Playbook</span></a></u><span style=\"color:#000000\"> durch!</span></p><h4><strong><span style=\"color:#000000\">Was bieten wir dir?</span></strong></h4><ul><li><p><span style=\"color:#000000\">Die Gehaltsspanne auf Basis von 40 Stunden liegt zwischen 2.850 \u20ac und 2.950 \u20ac brutto innerhalb einer klaren Karriere- und Gehaltsstruktur. \ud83d\udcb8\ud83d\udcb8</span></p></li><li><p><span style=\"color:#000000\">Ein erstklassiges Training und Onboarding, um das Tool, unsere Prozesse und deine Kollegen kennenzulernen. \ud83d\ude0e Danach erh\u00e4ltst du das Vertrauen und die Verantwortung, zu zeigen, was du kannst. Dein Buddy wird dich w\u00e4hrend des gesamten Onboardings unterst\u00fctzen. \u270c\ufe0f</span></p></li><li><p><span style=\"color:#000000\">Arbeite f\u00fcr ein engagiertes Unternehmen mit \u00fcber 250 internationalen Mitarbeitern! \ud83d\ude4c \ud83e\uddd1\u200d\ud83e\udd1d\u200d\ud83e\uddd1Wir haben eine offene und informelle Kultur und eine flache Organisationsstruktur, in der sich alle gegenseitig gerne helfen. \ud83e\udd17\ud83c\udf89</span></p></li><li><p><span style=\"color:#000000\">Die M\u00f6glichkeit, eigene Ideen zu entwickeln und umzusetzen. \ud83d\udc9c\ud83c\udf1f</span></p></li><li><p><span style=\"color:#000000\">Arbeite in einem wundersch\u00f6nen, historischen und komplett renovierten B\u00fcro im Herzen von Utrecht \ud83c\udfe1 &amp; mit einer flexiblen Hybrid-Arbeitsregelung (2 Tage im B\u00fcro)\u2728</span></p></li><li><p><span style=\"color:#000000\">Da du von zu Hause aus arbeiten kannst, stellen wir dir Homeoffice-Ausstattung zur Verf\u00fcgung\ud83d\udda5\ufe0f\u2328\ufe0f</span></p></li><li><p><span style=\"color:#000000\">26 Urlaubstage \ud83c\udf1e + 2 Reload-Tage \ud83c\udf6d auf Basis von 40 Stunden, und obendrein kannst du eine dreiw\u00f6chige Workcation machen\ud83c\udf79</span></p></li><li><p><span style=\"color:#000000\">Unternehmensweiter Bonus (au\u00dfer du arbeitest im Sales oder CS) \ud83d\udcb0</span></p></li><li><p><span style=\"color:#000000\">Stock Appreciation Rights: berechtigte Mitarbeiter k\u00f6nnen finanziell vom Erfolg von Channable profitieren \ud83d\udde0</span></p></li><li><p><span style=\"color:#000000\">Wir m\u00f6chten, dass du fit bleibst \u2013 nutze gerne unser verg\u00fcnstigtes OneFit-Abonnement.\ud83d\udc5f\ud83d\udeb4Au\u00dferdem hast du kostenlosen und anonymen Zugang zur OpenUp-Plattform und zu Psychologen \u262e\ufe0f</span></p></li><li><p><span style=\"color:#000000\">Du pendelst zu unserem B\u00fcro? Kein Problem, wir k\u00fcmmern uns darum\ud83d\ude86</span></p></li><li><p><span style=\"color:#000000\">Altersvorsorge \u2013 ja, wir zahlen dir 5 % deines monatlichen Grundgehalts \ud83d\udc75\ud83d\udc74</span></p></li><li><p><span style=\"color:#000000\">Channaweekend (ja, wir fahren 2026 mit Kollegen aus aller Welt f\u00fcr ein langes Wochenende ins Ausland \ud83d\udc9c\ud83d\udd25)</span></p></li><li><p><span style=\"color:#000000\">Zus\u00e4tzliche Benefits wie leckeres Mittagessen, Massagen, eine Bar im B\u00fcro (Channabar), Partys, Sportteams, Videospiele und vieles mehr! \ud83d\udc95\ud83d\udc4c</span></p></li></ul><h4><strong><span style=\"color:#000000\">Wie kannst du dich bei uns vorstellen?</span></strong></h4><p><span style=\"color:#000000\">Bist du interessiert? Dann bewirb dich bitte \u00fcber den Button \u201eApply now\u201c unter dieser Anzeige. Bitte sende deine Bewerbung auf Englisch. Wenn deine Bewerbung zu uns passt, wird Judit dich f\u00fcr ein Kennenlerngespr\u00e4ch kontaktieren. Danach wirst du zu einem Vorstellungsgespr\u00e4ch eingeladen. Wir freuen uns darauf, bald von dir zu h\u00f6ren!</span></p><p><em><span style=\"color:#000000\">Kontaktaufnahmen durch Personalvermittlungsagenturen und Headhunter werden nicht erw\u00fcnscht. Jeder Personalvermittler oder Headhunter, der sich an uns wendet, erkl\u00e4rt sich mit einer Spende in H\u00f6he von 250 \u20ac an Make-A-Wish einverstanden.</span></em></p><p><span style=\"color:#000000\">Bei Channable bem\u00fchen wir uns, ein Umfeld der Zugeh\u00f6rigkeit und Zusammenarbeit zu schaffen und zu f\u00f6rdern. Wir glauben an vielf\u00e4ltige und inklusive Teams.</span></p>",
+      "careers_url": "https://jobs.channable.com/o/technischer-kundensupport-dach-deutschsprachig",
+      "country_code": "NL",
+      "min_hours": 32,
+      "open_questions": [
+        {
+          "id": 4317231,
+          "position": 1,
+          "options": {},
+          "required": false,
+          "body": "Do you speak the German language on a C2 (Native Proficiency) level?",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "Do you speak the German language on a C2 (Native Proficiency) level?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4317223,
+          "position": 2,
+          "options": {},
+          "required": true,
+          "body": "How did you find out about Channable?",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "How did you find out about Channable?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4317224,
+          "position": 3,
+          "options": {},
+          "required": true,
+          "body": "Do you have EU citizenship or a valid work permit for the Netherlands? Or do you need sponsorship from us?",
+          "kind": "single_choice",
+          "translations": {
+            "en": {
+              "body": "Do you have EU citizenship or a valid work permit for the Netherlands? Or do you need sponsorship from us?"
+            }
+          },
+          "open_question_options": [
+            {
+              "id": 6643250,
+              "position": 0,
+              "body": "EU citizenship ",
+              "translations": {
+                "en": {
+                  "body": "EU citizenship "
+                }
+              }
+            },
+            {
+              "id": 6643251,
+              "position": 1,
+              "body": "Valid work permit",
+              "translations": {
+                "en": {
+                  "body": "Valid work permit"
+                }
+              }
+            },
+            {
+              "id": 6643252,
+              "position": 2,
+              "body": "I need sponsorship",
+              "translations": {
+                "en": {
+                  "body": "I need sponsorship"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 4317225,
+          "position": 4,
+          "options": {},
+          "required": true,
+          "body": "Where do you live? (City)",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "Where do you live? (City)"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4317226,
+          "position": 5,
+          "options": {
+            "length": 120
+          },
+          "required": true,
+          "body": "Are you willing and able to work from our Utrecht office at least 2 days per week?",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "Are you willing and able to work from our Utrecht office at least 2 days per week?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4317227,
+          "position": 6,
+          "options": {},
+          "required": true,
+          "body": "How many hours per week are you available to work?",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "How many hours per week are you available to work?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4317228,
+          "position": 7,
+          "options": {},
+          "required": true,
+          "body": "Which one of our company values resonates the most with you and why?",
+          "kind": "string",
+          "translations": {
+            "en": {
+              "body": "Which one of our company values resonates the most with you and why?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4317229,
+          "position": 8,
+          "options": {
+            "length": 120
+          },
+          "required": true,
+          "body": "Can you please attach your motivational letter?",
+          "kind": "file",
+          "translations": {
+            "en": {
+              "body": "Can you please attach your motivational letter?"
+            }
+          },
+          "open_question_options": []
+        }
+      ],
+      "locations_question": "What is your preferred work location?",
+      "postal_code": "3512 HL",
+      "sharing_description": "Du sprichst flie\u00dfend Deutsch und hast Spa\u00df daran, komplexe Probleme f\u00fcr eine Vielzahl von Kunden zu l\u00f6sen? Du m\u00f6chtest E-Commerce-Unternehmen durch hochwertigen technischen Support beim Wachstum unter",
+      "options_salutation": "off",
+      "on_site": false,
+      "location_question_visible": false,
+      "updated_at": "2026-08-20 12:03:01 UTC",
+      "careers_apply_url": "https://jobs.channable.com/o/technischer-kundensupport-dach-deutschsprachig/c/new",
+      "description": "<p><span style=\"color:#000000\">Du sprichst flie\u00dfend Deutsch und hast Spa\u00df daran, komplexe Probleme f\u00fcr eine Vielzahl von Kunden zu l\u00f6sen? Du m\u00f6chtest E-Commerce-Unternehmen durch hochwertigen technischen Support beim Wachstum unterst\u00fctzen? Dann k\u00f6nnte diese Stelle genau das Richtige f\u00fcr dich sein!</span></p><p><span style=\"color:#000000\">Werde Teil unserer internationalen Support-Abteilung (6 Teams, 9 M\u00e4rkte) als Mitglied des DACH-Support-Teams, einer unserer gr\u00f6\u00dften und am schnellsten wachsenden Regionen. Das Team besteht derzeit aus 7 technischen Support-MitarbeiterInnen, die Kunden in Deutschland, \u00d6sterreich und der Schweiz betreuen.</span></p><p><span style=\"color:#000000\">Wir sind ein aufgeschlossenes und kooperatives Team von Support-Experten. Wir glauben, dass es beim Support nicht nur darum geht, Probleme zu beheben, sondern unseren Kunden zum Erfolg zu verhelfen, und das tun wir gemeinsam. Wir lernen voneinander, sind ehrlich und direkt und haben dabei auch regelm\u00e4\u00dfig Spa\u00df zusammen. Es erwarten dich flache Hierarchien, Raum f\u00fcr Ihre Ideen und ein Team, das dir den R\u00fccken st\u00e4rkt!</span></p><h4><strong><span style=\"color:#000000\">Dein Job</span></strong></h4><p><span style=\"color:#000000\">Als Mitarbeiter im technischen Support bist du der erste Kontaktpunkt f\u00fcr Kunden, die Fragen oder Probleme zu unserem Tool haben. Channable hilft Online-H\u00e4ndlern und Agenturen dabei, ihre Produktlistings auf Kan\u00e4len wie </span><strong><span style=\"color:#000000\">Kaufland, OTTO, Amazon, Google</span></strong><span style=\"color:#000000\"> und </span><strong><span style=\"color:#000000\">Meta</span></strong><span style=\"color:#000000\"> zu automatisieren und zu optimieren.</span></p><p><span style=\"color:#000000\">Wir unterst\u00fctzen derzeit \u00fcber 2.500 Marketingkan\u00e4le, darunter Preisvergleichsseiten, Affiliate-Netzwerke und Marktpl\u00e4tze. Zu unseren Kunden z\u00e4hlen unabh\u00e4ngige Webshop-Betreiber ebenso wie internationale Marken und Agenturen, die jeweils ganz individuelle Anforderungen haben.</span></p><p><span style=\"color:#000000\">Du hast noch keine Erfahrung mit E-Commerce-Tools wie Produkt-Feeds oder APIs? Kein Problem! Wir bieten dir eine umfassende Einarbeitung und Training, damit du schnell auf dem Laufenden bist.</span></p><p><span style=\"color:#000000\">Nach deinem Onboarding beginnst du mit unserem First-Level-Support, bearbeitest eingehende Tickets, diagnostizierst die Situation, l\u00f6st sie im Idealfall oder leitest sie bei Bedarf an unseren erfahrenen Second-Level-Support weiter.</span></p><p><span style=\"color:#000000\">Deine Aufgaben:</span></p><ul><li><p><span style=\"color:#000000\">Du bearbeitest eingehende Tickets per E-Mail und Telefon (auf Deutsch und Englisch), l\u00f6st Probleme, behebst Fehler und schulst Nutzer darin, Channable selbstst\u00e4ndiger zu nutzen.</span></p></li><li><p><span style=\"color:#000000\">Fehlerbehebung von Probleme im Zusammenhang mit Produkt-Feeds, APIs und Marktplatzintegrationen.</span></p></li><li><p><span style=\"color:#000000\">Du eskalierst komplexe F\u00e4lle bei Bedarf an den Second-Line-Support.</span></p></li><li><p><span style=\"color:#000000\">Du verstehst die Gesch\u00e4ftsziele unserer Nutzer und hilfst ihnen, das Beste aus Channable herauszuholen.</span></p></li><li><p><span style=\"color:#000000\">Du erkennst wiederkehrende Probleme und teilst deine Erkenntnisse intern, um unser Produkt und unsere Prozesse zu verbessern.</span></p></li><li><p><span style=\"color:#000000\">Du tr\u00e4gst zu Teambildungsma\u00dfnahmen, Wissensaustausch und der Einarbeitung neuer Kollegen bei.</span></p></li></ul><h4><strong><span style=\"color:#000000\">Deine Herausforderungen</span></strong></h4><p><span style=\"color:#000000\">Channable ist ein leistungsstarkes, flexibles Tool mit einer Vielzahl von Funktionen. Die Beherrschung des Tools und das Verst\u00e4ndnis daf\u00fcr, wie unsere Kunden es nutzen, sind entscheidend f\u00fcr einen qualitativ hochwertigen Support.</span></p><p><span style=\"color:#000000\">Du wirst sowohl mit technischen als auch mit nicht-technischen Nutzern kommunizieren, daher ist deine F\u00e4higkeit, deinen Kommunikationsstil anzupassen, von entscheidender Bedeutung. Au\u00dferdem musst du ein Gleichgewicht zwischen </span><strong><span style=\"color:#000000\">Schnelligkeit</span></strong><span style=\"color:#000000\">, </span><strong><span style=\"color:#000000\">klarer Kommunikation</span></strong><span style=\"color:#000000\"> und </span><strong><span style=\"color:#000000\">Kundenzufriedenheit </span></strong><span style=\"color:#000000\">finden und dabei von Anfang bis Ende Eigenverantwortung zeigen.</span></p><p><span style=\"color:#000000\">Diese Position bietet viel Raum f\u00fcr deine pers\u00f6nliche Entwicklung. Du kannst zus\u00e4tzliche Aufgaben \u00fcbernehmen, z. B. die Einarbeitung neuer Teammitglieder, die Spezialisierung auf einen Produktbereich oder den Aufstieg in unseren Second-Line-Support.</span></p><h4><strong><span style=\"color:#000000\">Wie Erfolg aussieht</span></strong></h4><ul><li><p><span style=\"color:#000000\">Du reagierst schnell, klar und einf\u00fchlsam, das Team kann sich auf dich verlassen, du lieferst unseren Kunden hochwertige Antworten und erzielst hohe CSAT- und IQS-Werte</span></p></li><li><p><span style=\"color:#000000\">Du gehst souver\u00e4n mit auftretenden Problemen um und eskalierst nur, wenn es notwendig ist.</span></p></li><li><p><span style=\"color:#000000\">Du entwickelst ein tiefes Verst\u00e4ndnis sowohl f\u00fcr das Tool als auch f\u00fcr die Anwendungsf\u00e4lle unserer Kunden.</span></p></li><li><p><span style=\"color:#000000\">Du teilst proaktiv Erkenntnisse, hilfst deinen Teamkollegen und tr\u00e4gst zum Lernen im Team bei.</span></p></li><li><p><span style=\"color:#000000\">Du bist zuverl\u00e4ssig, konsequent und \u00fcbernimmst die volle Verantwortung f\u00fcr deine Arbeit.</span></p></li></ul><h4><strong><span style=\"color:#000000\">Wer bist du?</span></strong></h4><p><span style=\"color:#000000\">Du bist neugierig, analytisch und kannst gut Zusammenh\u00e4nge herstellen. Du hast Spa\u00df am L\u00f6sen von Problemen und verf\u00fcgst \u00fcber ausgepr\u00e4gte Kommunikationsf\u00e4higkeiten. Du bist ein Teamplayer, der in einem kollaborativen Umfeld aufbl\u00fcht und stolz darauf ist, sowohl Kunden als auch Kollegen zum Erfolg zu verhelfen.</span></p><p><span style=\"color:#000000\">Du f\u00fchlst dich in einem flexiblen Umfeld wohl, in dem du dazu ermutigt wirst, Ideen einzubringen und Initiative zu zeigen.</span></p><p><span style=\"color:#000000\">Einige praktische Dinge, die wir von dir erwarten:</span></p><ul><li><p><span style=\"color:#000000\">Du verf\u00fcgst \u00fcber ausgezeichnete Deutsch- und Englischkenntnisse in Wort und Schrift.</span></p></li><li><p><span style=\"color:#000000\">Du bist mindestens 4 Tage pro Woche (32 Stunden) verf\u00fcgbar und kannst mindestens 2 Tage pro Woche in unserem B\u00fcro in Utrecht arbeiten.</span></p></li><li><p><span style=\"color:#000000\">Du wohnst in (oder in der N\u00e4he von) </span><strong><span style=\"color:#000000\">Utrecht </span></strong><span style=\"color:#000000\">oder bist bereit umzuziehen.</span></p></li><li><p><span style=\"color:#000000\">Erfahrung im technischen Support, vorzugsweise im IT- oder E-Commerce-Bereich, ist von Vorteil.</span></p></li></ul>",
+      "department": "Support",
+      "highlight": null,
+      "education_code": "bachelor_degree",
+      "max_hours": 40,
+      "employment_type_code": "fulltime_permanent",
+      "tags": [],
+      "locations_question_required": true,
+      "remote": false,
+      "max_hours_per_week": "40",
+      "salary": {
+        "max": "2950",
+        "min": "2850",
+        "period": "month",
+        "currency": "EUR"
+      },
+      "id": 2714984,
+      "published_at": "2026-08-19 13:55:09 UTC",
+      "created_at": "2026-08-19 08:17:13 UTC",
+      "sharing_title": "Technischer Kundensupport DACH - deutschsprachig",
+      "city": "Utrecht",
+      "locations": [
+        {
+          "id": 64463,
+          "name": "Utrecht",
+          "state": "Utrecht",
+          "country": "Netherlands",
+          "city": "Utrecht",
+          "translations": {
+            "en": {
+              "name": "Utrecht",
+              "city": "Utrecht",
+              "postal_code": "3512 HL",
+              "street": "Kromme Nieuwegracht 66",
+              "note": null
+            }
+          },
+          "country_code": "NL",
+          "postal_code": "3512 HL",
+          "state_code": "UT",
+          "street": "Kromme Nieuwegracht 66",
+          "note": null
+        }
+      ],
+      "status": "published",
+      "close_at": null,
+      "mailbox_email": "job.hs67b@channable.recruitee.com",
+      "min_hours_per_week": "32",
+      "options_cv": "required",
+      "dynamic_fields": [],
+      "country": "Netherlands",
+      "sharing_image": null,
+      "state_name": "Utrecht",
+      "title": "Technischer Kundensupport DACH - deutschsprachig"
+    }
+  ]
+}

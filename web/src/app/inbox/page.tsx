@@ -2,11 +2,13 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { api, type InboxJob, type InboxJobDetail, type Persona, type Recommendation, type Source } from "@/lib/api";
+import { api, type InboxJob, type InboxJobDetail, type Recommendation, type Source } from "@/lib/api";
+import { usePersona } from "@/components/persona-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -22,6 +24,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { Trash2 } from "lucide-react";
+
+// Skills come straight from the model's own free-form output, not a
+// controlled vocabulary — sometimes that's a real short skill name,
+// sometimes it's a whole clause like "Linux/Windows environment (not
+// stated above, but candidate has cloud experience with GCP/AWS –
+// partial, not exact)". Badge's own base classes force `whitespace-nowrap`
+// and a fixed `h-5`, both correct for every OTHER badge in this app
+// (short, known-length tags) but wrong here — overridden per-instance
+// rather than changed on the shared component, since changing Badge
+// itself would affect every short tag elsewhere that's fine as-is.
+const SKILL_BADGE_CLASS = "text-[9px] font-mono whitespace-normal h-auto max-w-full break-words text-left leading-snug py-1";
 
 const RECOMMENDATIONS: (Recommendation | "unscored")[] = ["strong_apply", "apply", "stretch", "skip", "unscored"];
 
@@ -106,7 +120,15 @@ function JobDetailDrawer({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      {/* `w-fit` (shrink-to-fit) doesn't work here: browsers size a
+          shrink-to-fit box from children's max-content width, which
+          IGNORES text-overflow/truncate — a truncated element still
+          contributes its full untruncated width to that calculation,
+          so a long URL/skill string blew the dialog past the viewport
+          with truncation never actually engaging. A bounded `w-full`
+          (fills up to max-w, never exceeds it) is what lets
+          truncation/wrapping work inside a fixed width instead. */}
+      <DialogContent className="w-full max-w-[min(92vw,56rem)] max-h-[85vh] overflow-y-auto overflow-x-hidden">
         {loading || !detail ? (
           <div className="text-sm text-muted-foreground font-mono py-8 text-center">loading…</div>
         ) : (
@@ -161,7 +183,10 @@ function JobDetailDrawer({
                       {fs.skills_matched.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {fs.skills_matched.map((s) => (
-                            <Badge key={s} className="text-[9px] font-mono bg-ok-bg text-ok">
+                            <Badge
+                              key={s}
+                              className={cn(SKILL_BADGE_CLASS, "bg-ok-bg text-ok")}
+                            >
                               {s}
                             </Badge>
                           ))}
@@ -170,7 +195,10 @@ function JobDetailDrawer({
                       {fs.skills_partial.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {fs.skills_partial.map((s) => (
-                            <Badge key={s} className="text-[9px] font-mono bg-warn-bg text-warn">
+                            <Badge
+                              key={s}
+                              className={cn(SKILL_BADGE_CLASS, "bg-warn-bg text-warn")}
+                            >
                               {s}
                             </Badge>
                           ))}
@@ -179,7 +207,11 @@ function JobDetailDrawer({
                       {fs.skills_missing.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {fs.skills_missing.map((s) => (
-                            <Badge key={s} variant="secondary" className="text-[9px] font-mono text-muted-foreground">
+                            <Badge
+                              key={s}
+                              variant="secondary"
+                              className={cn(SKILL_BADGE_CLASS, "text-muted-foreground")}
+                            >
                               {s}
                             </Badge>
                           ))}
@@ -195,9 +227,9 @@ function JobDetailDrawer({
                       </span>
                       <div className="flex flex-col gap-1.5">
                         {fs.evidence_spans.map((span, i) => (
-                          <div key={i} className="border border-border px-2 py-1.5 text-xs">
+                          <div key={i} className="border border-border px-2 py-1.5 text-xs break-words">
                             <div className="italic text-muted-foreground">&ldquo;{span.quote}&rdquo;</div>
-                            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{span.supports}</div>
+                            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground break-words">{span.supports}</div>
                           </div>
                         ))}
                       </div>
@@ -267,10 +299,10 @@ function JobDetailDrawer({
                     rel="noopener noreferrer"
                     className="text-xs hover:underline flex items-center gap-2"
                   >
-                    <Badge variant="secondary" className="text-[9px] font-mono">
+                    <Badge variant="secondary" className="text-[9px] font-mono shrink-0">
                       {s.source_name}
                     </Badge>
-                    <span className="text-muted-foreground truncate">{s.source_url}</span>
+                    <span className="text-muted-foreground truncate flex-1 min-w-0">{s.source_url}</span>
                   </a>
                 ))}
               </div>
@@ -291,14 +323,26 @@ function JobDetailDrawer({
 }
 
 export default function InboxPage() {
-  const [personas, setPersonas] = React.useState<Persona[]>([]);
+  // Persona selection is app-wide now (AppShell's sidebar switcher) —
+  // used directly, not mirrored into a second local override. An
+  // earlier version seeded a separate local selector from this once
+  // and let it drift independently after that; Adrian correctly
+  // pointed out that meant the sidebar switcher looked broken from
+  // here (it had no further effect once this page's own copy diverged).
+  const { personas, selectedPersonaId } = usePersona();
+  const personaId = selectedPersonaId;
   const [sources, setSources] = React.useState<Source[]>([]);
-  const [personaId, setPersonaId] = React.useState<string>("");
   const [jobs, setJobs] = React.useState<InboxJob[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadingList, setLoadingList] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
+  // General-purpose multi-select, not delete-specific — the same set
+  // is meant to back later bulk actions (bulk apply, etc.), raised
+  // directly by Adrian with that in mind, so this isn't named or
+  // shaped around delete alone.
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = React.useState(false);
 
   const [recFilter, setRecFilter] = React.useState<Set<Recommendation | "unscored">>(new Set());
   const [sourceFilter, setSourceFilter] = React.useState<string>("");
@@ -311,11 +355,9 @@ export default function InboxPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, s] = await Promise.all([api.listPersonas(), api.listSources()]);
+        const s = await api.listSources();
         if (cancelled) return;
-        setPersonas(p);
         setSources(s);
-        setPersonaId(p.find((x) => x.active)?.id ?? p[0]?.id ?? "");
       } catch (e) {
         if (!cancelled) setError(String(e));
       } finally {
@@ -341,6 +383,10 @@ export default function InboxPage() {
         limit: 200,
       });
       setJobs(result);
+      // A fresh filtered list may no longer contain some (or any) of
+      // the previously selected jobs — clearing avoids "select all"
+      // silently carrying over stale ids from a different filter.
+      setSelectedIds(new Set());
     } catch (e) {
       setError(String(e));
     } finally {
@@ -363,6 +409,57 @@ export default function InboxPage() {
     });
   }
 
+  function toggleSelected(jobId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
+  // "Select all" only ever means "all jobs currently matching the
+  // active filters" — `jobs` already IS that filtered set (it's what
+  // the API returned for the current filter params), so this never
+  // needs to know about filters directly.
+  function toggleSelectAll() {
+    if (!jobs) return;
+    setSelectedIds((prev) => (prev.size === jobs.length ? new Set() : new Set(jobs.map((j) => j.id))));
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedIds.size} job${selectedIds.size === 1 ? "" : "s"}? This can't be undone.`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const { deleted } = await api.bulkDeleteJobs(Array.from(selectedIds));
+      setJobs((prev) => (prev ? prev.filter((j) => !selectedIds.has(j.id)) : prev));
+      setSelectedIds(new Set());
+      toast.success(`Deleted ${deleted} job${deleted === 1 ? "" : "s"}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleDeleteOne(jobId: string) {
+    try {
+      await api.bulkDeleteJobs([jobId]);
+      setJobs((prev) => (prev ? prev.filter((j) => j.id !== jobId) : prev));
+      setSelectedIds((prev) => {
+        if (!prev.has(jobId)) return prev;
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center gap-3 px-5">
@@ -370,22 +467,12 @@ export default function InboxPage() {
         <span className="font-mono text-[11px] text-muted-foreground">
           ranked by fit — real API data only, no sample jobs
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <Label htmlFor="inbox-persona" className="text-xs text-muted-foreground">
-            Persona
-          </Label>
-          <Select value={personaId} onValueChange={setPersonaId}>
-            <SelectTrigger id="inbox-persona" className="w-44">
-              <SelectValue placeholder="Choose a persona" />
-            </SelectTrigger>
-            <SelectContent>
-              {personas.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>Persona:</span>
+          <span className="font-medium text-foreground">
+            {personas.find((p) => p.id === personaId)?.name ?? "?"}
+          </span>
+          <span>— switch from the sidebar</span>
         </div>
       </header>
 
@@ -398,8 +485,39 @@ export default function InboxPage() {
           No personas yet — set one up from Radar first.
         </div>
       ) : (
-        <div className="flex-1 overflow-auto p-5 flex flex-col gap-4">
-          <div className="border border-border bg-card p-3 flex flex-col gap-3">
+        // No padding on the scroll container itself — see profile/page.tsx's
+        // identical comment for why a padded scroll container leaves a
+        // gutter around a sticky child that scrolled content can peek
+        // through instead of being covered by it. The sticky filter bar
+        // goes edge-to-edge instead and re-applies p-5's horizontal
+        // rhythm internally; the job list gets its own padded wrapper.
+        <div className="flex-1 overflow-auto flex flex-col isolate">
+          <div className="sticky top-0 z-20 border-b border-border bg-card px-5 py-3 flex flex-col gap-3 shadow-md">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={!!jobs && jobs.length > 0 && selectedIds.size === jobs.length}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={!jobs || jobs.length === 0}
+                  aria-label="Select all filtered jobs"
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {selectedIds.size > 0 ? `${selectedIds.size} selected` : "select all"}
+                </span>
+              </div>
+              {selectedIds.size > 0 && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={deleting}
+                  onClick={handleDeleteSelected}
+                  className="h-7 text-xs gap-1.5"
+                >
+                  <Trash2 className="size-3.5" />
+                  {deleting ? "Deleting…" : `Delete ${selectedIds.size}`}
+                </Button>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground mr-1">
                 Recommendation
@@ -470,6 +588,7 @@ export default function InboxPage() {
             </div>
           </div>
 
+          <div className="p-5 pt-4 flex flex-col gap-4">
           {error ? (
             <div className="text-sm text-crit font-mono">{error}</div>
           ) : loadingList || jobs === null ? (
@@ -481,11 +600,21 @@ export default function InboxPage() {
           ) : (
             <div className="flex flex-col gap-2">
               {jobs.map((job) => (
-                <button
+                <div
                   key={job.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedJobId(job.id)}
-                  className="text-left border border-border bg-card p-3 flex items-start gap-3 hover:border-primary transition-colors"
+                  onKeyDown={(e) => e.key === "Enter" && setSelectedJobId(job.id)}
+                  className="text-left border border-border bg-card p-3 flex items-start gap-3 hover:border-primary transition-colors cursor-pointer"
                 >
+                  <Checkbox
+                    checked={selectedIds.has(job.id)}
+                    onCheckedChange={() => toggleSelected(job.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-1 shrink-0"
+                    aria-label={`Select ${job.title}`}
+                  />
                   <Badge
                     className={cn(
                       "text-[10px] font-mono shrink-0 mt-0.5",
@@ -528,6 +657,16 @@ export default function InboxPage() {
                     )}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteOne(job.id);
+                      }}
+                      className="text-muted-foreground hover:text-crit transition-colors"
+                      aria-label={`Delete ${job.title}`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
                     {job.fit_score && (
                       <span className="font-mono text-lg font-semibold tabular">{job.fit_score.overall_score}</span>
                     )}
@@ -543,10 +682,11 @@ export default function InboxPage() {
                       </a>
                     )}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}
+          </div>
         </div>
       )}
 

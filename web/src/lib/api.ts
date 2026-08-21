@@ -279,7 +279,59 @@ export type Persona = {
   active: boolean;
 };
 
-export const SOURCE_ADAPTERS = ["greenhouse", "lever", "remoteok", "jsearch", "jobspy", "socialfetch"] as const;
+export type Preference = {
+  id: string;
+  persona_id: string;
+  target_roles: string[];
+  seniority: string[];
+  salary_floor: number | null;
+  salary_target: number | null;
+  salary_currency: string;
+  locations: string[];
+  willing_to_relocate: boolean;
+  remote_policy: string[];
+  industries_include: string[];
+  industries_exclude: string[];
+  company_size_pref: string[];
+  deal_breakers: string[];
+};
+
+export type PreferenceUpsert = Partial<Omit<Preference, "id" | "persona_id">>;
+
+export type CompanyCandidateStatus =
+  | "resolved_greenhouse"
+  | "resolved_lever"
+  | "resolved_workable"
+  | "resolved_ashby"
+  | "resolved_smartrecruiters"
+  | "resolved_recruitee"
+  | "unresolved";
+
+export type CompanyCandidate = {
+  id: string;
+  persona_id: string;
+  company_name: string;
+  origin: "preference_discovery" | "apply_link";
+  rationale: string | null;
+  status: CompanyCandidateStatus;
+  resolved_identifier: string | null;
+  discovered_url: string | null;
+  approved: boolean;
+  origin_job_id: string | null;
+};
+
+export const SOURCE_ADAPTERS = [
+  "greenhouse",
+  "lever",
+  "workable",
+  "ashby",
+  "smartrecruiters",
+  "recruitee",
+  "remoteok",
+  "jsearch",
+  "jobspy",
+  "socialfetch",
+] as const;
 export type SourceAdapterKey = (typeof SOURCE_ADAPTERS)[number];
 
 export type Source = {
@@ -287,7 +339,7 @@ export type Source = {
   name: string;
   tier: string;
   adapter_key: string;
-  config: Record<string, string | number>;
+  config: Record<string, string | number | string[]>;
   rate_limit_config: Record<string, number>;
   enabled: boolean;
   circuit_breaker_tripped: boolean;
@@ -317,6 +369,9 @@ export type SourceRun = {
   postings_seen: number;
   postings_new: number;
   postings_deduped: number;
+  // M2 §6 — a scan-list source can cover many companies at once;
+  // keyed by the source's own display company name.
+  company_breakdown: Record<string, { seen: number; new: number; deduped: number }>;
   errors: { message: string; at: string }[];
   cost_usd: number;
 };
@@ -437,9 +492,11 @@ export type RadarRunProgressEvent =
       seen?: number;
       new?: number;
       deduped?: number;
+      company_breakdown?: Record<string, { seen: number; new: number; deduped: number }>;
       message?: string;
     }
   | { type: "source_error"; source_id: string; message: string }
+  | { type: "run_cancelled"; agent_run_id: string }
   | { type: "query_expansion_fallback"; source_run_id: string; role_title: string; reason: string }
   | { type: "log"; source_run_id: string; message: string }
   | { type: "embedding_started"; count: number }
@@ -494,6 +551,7 @@ export const api = {
     request<ModelCatalogEntry[]>(`/provider-connections/${id}/catalog`),
 
   listProfiles: () => request<Profile[]>("/profiles"),
+  getProfile: (id: string) => request<Profile>(`/profiles/${id}`),
   updateProfile: (
     id: string,
     body: {
@@ -605,6 +663,7 @@ export const api = {
   },
   /** Run Console — the generic per-run trace (AgentStep), any run type. */
   getAgentRun: (runId: string) => request<AgentRunDetail>(`/agent-runs/${runId}`),
+  cancelAgentRun: (runId: string) => request<AgentRunDetail>(`/agent-runs/${runId}/cancel`, { method: "POST" }),
 
   listPersonas: () => request<Persona[]>("/personas"),
   createPersona: (body: { name: string; base_cv_template?: string }) =>
@@ -613,14 +672,41 @@ export const api = {
     request<Persona>(`/personas/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deletePersona: (id: string) => request<void>(`/personas/${id}`, { method: "DELETE" }),
 
+  /** Returns `null` for the expected "nothing saved yet" case rather than
+   * throwing — a fresh persona with no preferences is a normal first-run
+   * state (M2 §2), not an error the caller should surface as one. */
+  getPreference: async (personaId: string): Promise<Preference | null> => {
+    try {
+      return await request<Preference>(`/personas/${personaId}/preferences`);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("-> 404")) return null;
+      throw err;
+    }
+  },
+  upsertPreference: (personaId: string, body: PreferenceUpsert) =>
+    request<Preference>(`/personas/${personaId}/preferences`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  listCompanyCandidates: (personaId: string) =>
+    request<CompanyCandidate[]>(`/personas/${personaId}/company-candidates`),
+  discoverCompanyCandidates: (personaId: string) =>
+    request<CompanyCandidate[]>(`/personas/${personaId}/company-candidates/discover`, { method: "POST" }),
+  updateCompanyCandidate: (candidateId: string, body: { approved: boolean }) =>
+    request<CompanyCandidate>(`/company-candidates/${candidateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
   listSources: () => request<Source[]>("/sources"),
   createSource: (body: {
     name: string;
     tier: string;
     adapter_key: string;
-    config: Record<string, string>;
+    config: Record<string, string | string[]>;
   }) => request<Source>("/sources", { method: "POST", body: JSON.stringify(body) }),
-  updateSource: (id: string, body: { enabled?: boolean; config?: Record<string, string> }) =>
+  updateSource: (id: string, body: { enabled?: boolean; config?: Record<string, string | string[]> }) =>
     request<Source>(`/sources/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSource: (id: string) => request<void>(`/sources/${id}`, { method: "DELETE" }),
   testSource: (id: string) => request<Source>(`/sources/${id}/test`, { method: "POST" }),
@@ -667,6 +753,11 @@ export const api = {
   },
   getInboxJob: (jobId: string, personaId: string) =>
     request<InboxJobDetail>(`/jobs/${jobId}?persona_id=${personaId}`),
+  bulkDeleteJobs: (jobIds: string[]) =>
+    request<{ deleted: number }>("/jobs/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ job_ids: jobIds }),
+    }),
 
   getActiveModelProfile: () => request<ModelProfile | null>("/model-profiles/active"),
   saveActiveModelProfile: (body: {

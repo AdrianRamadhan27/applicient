@@ -133,6 +133,7 @@ Stated so they can be overridden cheaply:
 | F1.6 | **Form answer memory:** persist every question the user has ever answered on an application, keyed by semantic similarity, so recurring questions are pre-answered and never re-asked |
 | F1.7 | Store supporting documents (portfolio links, transcripts, certificates, references, ID docs) for attachment during application |
 | F1.8 | Semantic retrieval over the evidence bank (pgvector) so tailoring can pull the most relevant evidence for a given JD |
+| F1.9 | **Preferences are captured as a guided questionnaire, not free text** — each `Preference` field (F1.4) is presented as its own plain-language question with structured input (choice, multi-select, range, tag list), aliased so the underlying schema stays typed. Includes an explicit **willing-to-relocate** flag (global or per-target-location), which F4.3 and F2.10 both read |
 
 ### F2 — Job discovery
 
@@ -142,11 +143,12 @@ Stated so they can be overridden cheaply:
 | F2.2 | **Tier 1 — structured APIs (no scraping):** Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee board APIs; Adzuna; JSearch; SerpAPI Google Jobs; arbitrary RSS/Atom |
 | F2.3 | **Tier 2 — portals via browser agent:** LinkedIn Jobs, Jobstreet ID, Glints, Kalibrr, Indeed ID, Dealls, KitaLulus, TopKarir |
 | F2.4 | **Tier 3 — social signal:** LinkedIn posts, X, Instagram and Facebook groups. A dedicated extractor converts unstructured posts into structured leads with an `apply_via` field (`dm` / `email` / `form` / `link`). Messaging-app *loker* channels (Telegram, WhatsApp) are explicitly **out of scope** as a source |
-| F2.5 | **Company career-site resolution:** given a company name, probe known ATS URL patterns (`boards.greenhouse.io/{slug}`, `jobs.lever.co/{slug}`, `{slug}.ashbyhq.com`, `apply.workable.com/{slug}`, …). If no ATS is detected, fall back to the browser agent crawling `/careers` |
+| F2.5 | **Company career-site resolution:** given a company name (typed directly, or produced by F2.10), probe known ATS URL patterns (`boards.greenhouse.io/{slug}`, `jobs.lever.co/{slug}`, `{slug}.ashbyhq.com`, `apply.workable.com/{slug}`, …). If no ATS is detected, fall back to the browser agent crawling `/careers` |
 | F2.6 | User supplies a plain list of target role titles; the agent expands each into source-appropriate query variants (synonyms, seniority variants, ID/EN equivalents) |
 | F2.7 | Saved searches, each with its own sources, filters, schedule and persona binding |
 | F2.8 | Every run records `SourceRun` telemetry: postings seen, new, deduped, errors, duration, cost |
 | F2.9 | Honor `robots.txt` by default for Tier 2/3 crawling; overridable per source with an explicit acknowledgment |
+| F2.10 | **Preference-driven company discovery.** Given a persona's `Preference` (target roles, industries, company-size band, locations/relocation), a discovery step proposes a ranked candidate company list with its rationale, then feeds each candidate through F2.5 resolution across every Tier-1 ATS pattern. Resolved candidates join a persona-scoped scan list per ATS type the user reviews and approves before they're ever queried — the agent proposes, it does not silently start scraping. This is the primary path for Tier-1 ATS sources; manually typing a company identifier (as today) remains available as a direct-add fallback. A company resolving to no known ATS is recorded as needing generic career-site scraping rather than dropped — the same classification also runs against the `apply_url` of any posting already surfaced by an aggregator or social source, since that link is often the first sign a company runs its own board or bespoke site |
 
 ### F3 — Normalization, deduplication and enrichment
 
@@ -168,6 +170,7 @@ Stated so they can be overridden cheaply:
 | F4.1 | Two-stage cascade: a cheap **prefilter** pass produces a coarse keep/drop with a one-line reason; survivors get the full rubric. Cost rationale in §11.2 |
 | F4.2 | Full rubric emits **structured, schema-validated** output — never a bare number |
 | F4.3 | Dimensions scored independently: hard requirements met/missed, years-of-experience delta, skill match (matched / partial / missing), seniority fit, domain fit, location & work-authorization fit, salary overlap, company-stage fit, language requirements. Where salary is not stated (F3.1a) that dimension is marked *unknown* and excluded from the weighted total rather than scored as zero |
+| F4.3a | **Location fit reads the persona's `Preference`, not just the profile's home address.** A job far from the user's stated location is only penalized if it's *also* outside `Preference.locations` and the user hasn't set willing-to-relocate (F1.9) for that job's location; onsite roles in a location the user wants to relocate to score on merit, not distance |
 | F4.4 | **Experience gap is a penalty multiplier, not a disqualifier.** A role asking 3–5 years against a 1-year profile is ranked low but stays visible and stays applicable — stretch applications are a legitimate user choice |
 | F4.5 | Hard blockers (work authorization, mandatory certification, on-site in an excluded city) drop the recommendation to `skip` regardless of other dimensions, and say which blocker fired |
 | F4.6 | Every score carries **evidence spans**: the exact JD text that drove each dimension, so the user can audit the judgment |
@@ -579,7 +582,7 @@ Core entities. Every table carries `user_id`.
 |---|---|
 | `User`, `Profile`, `Persona` | Profile is versioned; documents bind to the revision that produced them |
 | `EvidenceItem` | The atomic accomplishment record. `id`, text, skills, metrics, employer, dates, embedding |
-| `Preference` | Per-persona search and filtering criteria |
+| `Preference` | Per-persona search and filtering criteria, surfaced through the guided questionnaire (F1.9). Includes `willing_to_relocate` and feeds both F2.10 (company discovery) and F4.3a (location fit) |
 | `SavedSearch`, `Source`, `SourceRun` | Discovery configuration and telemetry |
 | `Company` | Enrichment cache with TTL |
 | `Job` | The canonical, deduplicated posting |
@@ -709,11 +712,12 @@ All five run in CI on pull request against LangSmith datasets. Regressions block
 |---|---|---|
 | **M0 — Foundation** | Repo, docker-compose, schema, migrations, CV ingest → structured profile + evidence bank, GUI shell, Profile Studio, **Models & Providers surface with two working adapters, tier resolution, and the `LlmCall` ledger** | Paste an API key in the GUI, upload a CV, get a confirmed structured profile — and see what that parse cost |
 | **M1 — Walking skeleton** | One ATS adapter + one aggregator, normalization, dedup, prefilter + full rubric, Job Inbox with score breakdown, Cost & Usage dashboard v1, remaining provider adapters | End-to-end: role list in, ranked scored jobs out, per-run cost visible, and the whole loop re-runnable on a different provider by changing one dropdown |
-| **M2 — Tailoring** | CV delta generation, both renderers, claim verifier + gate, Application Composer diff UI, Answer Pack | A verified tailored CV with zero unsupported claims, exportable |
-| **M3 — Execution** | Browser worker, form introspection, fill-and-review, live handoff, form answer memory, Pipeline board | A real application submitted through the agent with a human at the submit button |
-| **M4 — Radar & Inbox** | Scheduler, new-since-last-run, Gmail polling + Pub/Sub webhook, classification, transitions, notifications, `.ics` | Wake up to "9 new, 2 strong" and an interview on the calendar |
-| **M5 — Breadth & proof** | Social-lead extractor, more SEA adapters, already-applied import, all five eval suites in CI across at least two profiles, README + demo video | Someone else clones the repo and runs it in under 10 minutes |
-| **M6 — Demo dataset** *(lowest priority, build last)* | Seeded fixture data so the full loop is visible without API keys or a Gmail connection | A reader sees the product work before configuring anything |
+| **M2 — Preferences & targeted discovery** | Wire `Preference` (F1.4/F1.9) into a real API + a guided-questionnaire UI in Profile Studio; feed it into fit scoring (F4.3a) so location/relocation is preference-aware, not profile-address-only; build company discovery (F2.10) — propose candidate companies from stated preferences, resolve each through F2.5's existing ATS-probing, surface for approval as `Source` rows instead of hand-typed slugs | A user answers the preference questionnaire once; radar scores relocation-friendly jobs correctly, and can propose + resolve a candidate company list into working Greenhouse/Lever sources without the user typing a single slug |
+| **M3 — Tailoring** | CV delta generation, both renderers, claim verifier + gate, Application Composer diff UI, Answer Pack | A verified tailored CV with zero unsupported claims, exportable |
+| **M4 — Execution** | Browser worker, form introspection, fill-and-review, live handoff, form answer memory, Pipeline board | A real application submitted through the agent with a human at the submit button |
+| **M5 — Radar & Inbox** | Scheduler, new-since-last-run, Gmail polling + Pub/Sub webhook, classification, transitions, notifications, `.ics` | Wake up to "9 new, 2 strong" and an interview on the calendar |
+| **M6 — Breadth & proof** | Social-lead extractor, more SEA adapters, already-applied import, all five eval suites in CI across at least two profiles, README + demo video | Someone else clones the repo and runs it in under 10 minutes |
+| **M7 — Demo dataset** *(lowest priority, build last)* | Seeded fixture data so the full loop is visible without API keys or a Gmail connection | A reader sees the product work before configuring anything |
 
 **v2 candidates:** interview prep briefs generated from the detected invitation; recruiter outreach drafting for social leads; salary negotiation support; referral-path discovery through the user's network; multi-user with auth.
 
@@ -774,7 +778,7 @@ All five run in CI on pull request against LangSmith datasets. Regressions block
 | Salary when a posting omits it | **Leave blank.** Never estimated or inferred; the fit dimension is marked *unknown* and excluded from the weighted total |
 | Cover letters | **Optional**, per-application toggle with a global default. Postings that require one are flagged |
 | Persona count | Two or three. Managed inside Profile Studio, no dedicated surface |
-| Seeded demo dataset | **Yes, but last** — M6, after everything else works |
+| Seeded demo dataset | **Yes, but last** — M7, after everything else works |
 | Shipped default chat preset | **`openrouter-budget`** — cheap open models across all tiers. Claude preset ships alongside as the quality reference |
 | Default embedding model | **`nvidia/nemotron-3-embed-1b:free`** via OpenRouter — 2,048 dims, 32k input, multilingual, free tier |
 

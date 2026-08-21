@@ -280,6 +280,72 @@ class PersonaUpdate(BaseModel):
     active: bool | None = None
 
 
+# --- M2 §1/§2 Preferences (F1.4/F1.9) ---
+
+
+class PreferenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    persona_id: uuid.UUID
+    target_roles: list[str]
+    seniority: list[str]
+    salary_floor: float | None
+    salary_target: float | None
+    salary_currency: str
+    locations: list[str]
+    willing_to_relocate: bool
+    remote_policy: list[str]
+    industries_include: list[str]
+    industries_exclude: list[str]
+    company_size_pref: list[str]
+    deal_breakers: list[str]
+
+
+class PreferenceUpsert(BaseModel):
+    """Every field optional — an unset field means "no opinion," not
+    an error (M2 §2's own stated decision: preferences don't carry a
+    CV-parse-style confirm gate, since every one of them is optional
+    by nature). PATCH-shaped semantics via `exclude_unset` even though
+    this backs a PUT-style upsert route, since the row may not exist
+    yet on first save."""
+
+    target_roles: list[str] | None = None
+    seniority: list[str] | None = None
+    salary_floor: float | None = None
+    salary_target: float | None = None
+    salary_currency: str | None = None
+    locations: list[str] | None = None
+    willing_to_relocate: bool | None = None
+    remote_policy: list[str] | None = None
+    industries_include: list[str] | None = None
+    industries_exclude: list[str] | None = None
+    company_size_pref: list[str] | None = None
+    deal_breakers: list[str] | None = None
+
+
+# --- M2 §5 CompanyCandidate (F2.10) ---
+
+
+class CompanyCandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    persona_id: uuid.UUID
+    company_name: str
+    origin: str
+    rationale: str | None
+    status: str
+    resolved_identifier: str | None
+    discovered_url: str | None
+    approved: bool
+    origin_job_id: uuid.UUID | None
+
+
+class CompanyCandidateUpdate(BaseModel):
+    approved: bool
+
+
 class SourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -354,6 +420,7 @@ class SourceRunOut(BaseModel):
     postings_seen: int
     postings_new: int
     postings_deduped: int
+    company_breakdown: dict
     errors: list
     cost_usd: float
 
@@ -517,3 +584,11 @@ class InboxJobDetailOut(InboxJobOut):
     responsibilities: str | None
     benefits: str | None
     sightings: list[JobSightingOut]
+
+
+class BulkDeleteJobsIn(BaseModel):
+    job_ids: list[uuid.UUID]
+
+
+class BulkDeleteJobsOut(BaseModel):
+    deleted: int

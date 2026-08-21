@@ -89,9 +89,51 @@ async def test_missing_salary_range_is_null_not_zero(adapter, monkeypatch):
     assert all(p.salary_min is None and p.salary_max is None for p in postings)
 
 
-async def test_missing_board_token_raises(adapter):
-    with pytest.raises(ValueError, match="board_token"):
+async def test_missing_company_identifiers_raises(adapter):
+    with pytest.raises(ValueError, match="company_identifiers"):
         await adapter.search("", {}, {})
+
+
+async def test_legacy_board_token_still_works(adapter, monkeypatch):
+    """M2 §6 — every M1-era Source row used `board_token`, singular;
+    it must keep working unchanged, not require a data migration."""
+
+    client = _mock_client(_fixture_data())
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: client)
+
+    postings = await adapter.search("", {}, {"board_token": "palantir"})
+    assert len(postings) == len(_fixture_data())
+
+
+async def test_multi_identifier_fan_out(adapter, monkeypatch):
+    """The whole point of M2 §6 — one Source scans every company in
+    the list, not one Source per company."""
+
+    data = _fixture_data()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=data, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: client)
+
+    postings = await adapter.search("", {}, {"company_identifiers": ["palantir", "some-other-board"]})
+    assert len(postings) == len(data) * 2
+
+
+async def test_one_bad_identifier_does_not_stop_the_others(adapter, monkeypatch):
+    data = _fixture_data()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "dead-board" in str(request.url):
+            return httpx.Response(404, request=request)
+        return httpx.Response(200, json=data, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: client)
+
+    postings = await adapter.search("", {}, {"company_identifiers": ["dead-board", "palantir"]})
+    assert len(postings) == len(data)
 
 
 async def test_connection_failure_surfaces_cleanly(adapter, monkeypatch):

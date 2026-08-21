@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from applicient_api.routers import (
+    company_candidates,
     cost,
     cv,
     evidence,
@@ -14,6 +15,7 @@ from applicient_api.routers import (
     jobs,
     model_profiles,
     personas,
+    preferences,
     profiles,
     providers,
     radar,
@@ -49,6 +51,9 @@ app.include_router(model_profiles.router)
 app.include_router(cost.router)
 app.include_router(streaming.router)
 app.include_router(personas.router)
+app.include_router(preferences.router)
+app.include_router(company_candidates.router)
+app.include_router(company_candidates.candidate_router)
 app.include_router(sources.router)
 app.include_router(saved_searches.router)
 app.include_router(radar.router)

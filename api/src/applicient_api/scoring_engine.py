@@ -26,10 +26,18 @@ than an incomplete evidence list.
 
 Hard blockers (F4.5) are inferred from `Profile.visa_status` against
 whatever the job text itself states about authorization/location,
-not from a dedicated "excluded locations"/"required certifications"
-config list — no such field exists on Persona/Profile yet, and adding
-one wasn't asked for here; noted as a real scope limit rather than
-silently assumed comprehensive.
+plus (M2 §3, F4.3a) the persona's stated `Preference.deal_breakers`/
+`industries_exclude` when one clearly matches the job/company.
+
+Location/remote fit (F4.3a, M2 §3) reads `Preference.locations`/
+`willing_to_relocate` where a preference row exists — a job isn't
+penalized for distance from the profile's home address if it's in
+the candidate's stated target locations, or if they've said they're
+open to relocating generally. Without a `Preference` row (persona
+has never filled one in), this falls back to the old profile-only
+behavior, which is a real, stated degradation for personas that
+haven't gone through Profile Studio's Preferences panel yet — not
+silently assumed equivalent.
 """
 
 from __future__ import annotations
@@ -43,7 +51,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from applicient_api.models.discovery import Job
-from applicient_api.models.profile import EvidenceItem, Profile
+from applicient_api.models.profile import EvidenceItem, Preference, Profile
 
 # --- Structured LLM output contracts ---
 
@@ -102,7 +110,9 @@ class FitRubricOutput(BaseModel):
 
 _PREFILTER_SYSTEM_PROMPT = """You are the cheap first pass of a two-stage job-fit filter. Given a candidate's profile summary and a job posting, decide fast: keep (send to the expensive full rubric), drop (clearly not worth it), or review (genuinely ambiguous — let the full pass decide).
 
-Be decisive about clear cases (obviously wrong seniority, obviously unrelated domain, obviously excluded by location/authorization) but do not drop anything merely uncertain — false negatives here are permanent, the job never gets a second look. When in doubt, keep or review, don't drop."""
+Be decisive about clear cases (obviously wrong seniority, obviously unrelated domain, obviously excluded by authorization) but do not drop anything merely uncertain — false negatives here are permanent, the job never gets a second look. When in doubt, keep or review, don't drop.
+
+Location: if the candidate's profile lists stated job-search preferences, a job located somewhere in their target locations — or anywhere at all, if they've said they're open to relocating — is NOT a reason to drop on location grounds. Only weigh location against the candidate when it's outside their stated targets and they haven't said they're open to relocating."""
 
 _RUBRIC_SYSTEM_PROMPT = """You are scoring how well a candidate fits one specific job posting, using only the candidate data given to you and the job's own posting text. Never invent a fact about the candidate or the job that isn't stated.
 
@@ -110,7 +120,9 @@ Every evidence_spans quote must be copied VERBATIM from the job posting text you
 
 Salary: if the job's salary is not stated, salary_overlap MUST be "unknown" — never estimate or compare against a number the posting doesn't give.
 
-Hard blockers: only set hard_blocker when the job text or the candidate's stated visa/authorization status makes this job genuinely unworkable regardless of skill fit (e.g. job requires authorization the candidate's profile says they don't have, with no stated sponsorship). A hard blocker forces recommendation=skip. Do not invent a blocker from mere uncertainty. When there is no blocker, leave the field null/omitted — do not answer it with "no", "none", "n/a", or any other word, since any non-empty text there is treated as a real blocker being present.
+Location/remote fit: if the candidate's profile lists stated job-search preferences, judge location_fit against THOSE, not against raw distance from the candidate's home address. A job in one of the candidate's stated target locations is "match" on location regardless of how far it is from home. If the candidate has said they're open to relocating generally, a job outside their stated target locations is still not a "mismatch" purely for distance — judge it on the role/company, and only mark "mismatch" or "blocked" when the location is genuinely unworkable (e.g. on-site somewhere the candidate has separately excluded, or relocation was never mentioned as acceptable at all). Without any stated preferences, fall back to judging location fit against the candidate's home location as before.
+
+Hard blockers: only set hard_blocker when the job text or the candidate's stated visa/authorization status makes this job genuinely unworkable regardless of skill fit (e.g. job requires authorization the candidate's profile says they don't have, with no stated sponsorship), OR when the job/company clearly matches one of the candidate's stated deal-breakers or excluded industries. A hard blocker forces recommendation=skip. Do not invent a blocker from mere uncertainty. When there is no blocker, leave the field null/omitted — do not answer it with "no", "none", "n/a", or any other word, since any non-empty text there is treated as a real blocker being present.
 
 Experience gaps are a ranking penalty, not a blocker — a candidate short on stated years can still be "apply" or "stretch", never automatically "skip" for that reason alone."""
 
@@ -139,7 +151,7 @@ def _job_summary(job: Job) -> str:
     return "\n".join(lines)
 
 
-def _profile_summary(profile: Profile, persona_name: str) -> str:
+def _profile_summary(profile: Profile, persona_name: str, preference: Preference | None = None) -> str:
     p = profile.parsed_profile or {}
     lines = [
         f"Persona/target track: {persona_name}",
@@ -150,6 +162,32 @@ def _profile_summary(profile: Profile, persona_name: str) -> str:
         f"Visa/work-authorization status: {profile.visa_status or 'not stated'}",
         f"Notice period (days): {profile.notice_period_days if profile.notice_period_days is not None else 'not stated'}",
     ]
+    # M2 §3/F4.3a — only add this block when a Preference row actually
+    # exists; an empty block would read as "no preferences stated" to
+    # the model, which is a different (and wrong) signal from "this
+    # persona never filled the questionnaire in at all."
+    if preference is not None:
+        lines.append("\nStated job-search preferences — weigh these over raw distance from the profile location above:")
+        if preference.target_roles:
+            lines.append(f"Target roles: {', '.join(preference.target_roles)}")
+        if preference.seniority:
+            lines.append(f"Acceptable seniority levels: {', '.join(preference.seniority)}")
+        if preference.locations:
+            lines.append(f"Target locations: {', '.join(preference.locations)}")
+        lines.append(
+            f"Open to relocating beyond the target locations above: "
+            f"{'yes' if preference.willing_to_relocate else 'not stated'}"
+        )
+        if preference.remote_policy:
+            lines.append(f"Acceptable remote-work arrangements: {', '.join(preference.remote_policy)}")
+        if preference.industries_include:
+            lines.append(f"Industries wanted: {', '.join(preference.industries_include)}")
+        if preference.industries_exclude:
+            lines.append(f"Industries to avoid: {', '.join(preference.industries_exclude)}")
+        if preference.company_size_pref:
+            lines.append(f"Acceptable company sizes: {', '.join(preference.company_size_pref)}")
+        if preference.deal_breakers:
+            lines.append(f"Deal-breakers: {', '.join(preference.deal_breakers)}")
     return "\n".join(lines)
 
 
@@ -183,13 +221,44 @@ def _evidence_summary(items: list[EvidenceItem]) -> str:
     return "\n".join(lines)
 
 
-def run_prefilter(model: BaseChatModel, *, job: Job, profile: Profile, persona_name: str) -> PrefilterOutput:
+# A free/cheap reasoning-capable model occasionally spends its whole
+# completion budget on internal reasoning and never emits the actual
+# structured answer — confirmed live: `nvidia/nemotron-3.5-lightning:free`
+# (the fast tier) returned `content=''` with no `parsed` or `refusal`
+# field after 3,270 real completion tokens, which langchain_openai
+# surfaces as a plain `ValueError` with this exact message (checked
+# against its own source, chat_models/base.py). This is nondeterministic
+# model flakiness, not a real conversation error — a retry immediately
+# after often succeeds where the first attempt didn't, since nothing
+# about the prompt changed. Retried once, not looped indefinitely: a
+# job that fails twice in a row gets no `PrefilterResult`/`FitScore`
+# row, same as before this existed, and is naturally retried again on
+# a later run rather than blocking this one.
+_EMPTY_STRUCTURED_OUTPUT_MARKER = "does not have a 'parsed' field nor a 'refusal' field"
+
+
+def _invoke_structured(structured, messages):
+    try:
+        return structured.invoke(messages)
+    except ValueError as e:
+        if _EMPTY_STRUCTURED_OUTPUT_MARKER not in str(e):
+            raise
+        return structured.invoke(messages)
+
+
+def run_prefilter(
+    model: BaseChatModel, *, job: Job, profile: Profile, persona_name: str, preference: Preference | None = None
+) -> PrefilterOutput:
     structured = model.with_structured_output(PrefilterOutput)
-    result = structured.invoke(
+    result = _invoke_structured(
+        structured,
         [
             ("system", _PREFILTER_SYSTEM_PROMPT),
-            ("user", f"CANDIDATE:\n{_profile_summary(profile, persona_name)}\n\nJOB:\n{_job_summary(job)}"),
-        ]
+            (
+                "user",
+                f"CANDIDATE:\n{_profile_summary(profile, persona_name, preference)}\n\nJOB:\n{_job_summary(job)}",
+            ),
+        ],
     )
     if not isinstance(result, PrefilterOutput):
         raise RuntimeError(f"prefilter structured output call returned unexpected type: {type(result)}")
@@ -197,15 +266,21 @@ def run_prefilter(model: BaseChatModel, *, job: Job, profile: Profile, persona_n
 
 
 def run_fit_rubric(
-    model: BaseChatModel, *, job: Job, profile: Profile, persona_name: str, evidence_items: list[EvidenceItem]
+    model: BaseChatModel,
+    *,
+    job: Job,
+    profile: Profile,
+    persona_name: str,
+    evidence_items: list[EvidenceItem],
+    preference: Preference | None = None,
 ) -> FitRubricOutput:
     structured = model.with_structured_output(FitRubricOutput)
     prompt = (
-        f"CANDIDATE:\n{_profile_summary(profile, persona_name)}\n\n"
+        f"CANDIDATE:\n{_profile_summary(profile, persona_name, preference)}\n\n"
         f"CANDIDATE'S MOST RELEVANT EVIDENCE FOR THIS JOB:\n{_evidence_summary(evidence_items)}\n\n"
         f"JOB:\n{_job_summary(job)}"
     )
-    result = structured.invoke([("system", _RUBRIC_SYSTEM_PROMPT), ("user", prompt)])
+    result = _invoke_structured(structured, [("system", _RUBRIC_SYSTEM_PROMPT), ("user", prompt)])
     if not isinstance(result, FitRubricOutput):
         raise RuntimeError(f"fit rubric structured output call returned unexpected type: {type(result)}")
     return result

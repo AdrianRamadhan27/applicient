@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from applicient_api.models.discovery import Job
 from applicient_api.models.llm import LlmCall
-from applicient_api.models.profile import Persona, Profile
+from applicient_api.models.profile import Persona, Preference, Profile
 from applicient_api.models.scoring import FitScore, PrefilterResult
 from applicient_api.scoring_engine import (
     normalize_hard_blocker,
@@ -85,6 +85,10 @@ def score_job(
         job = db.get(Job, job_id)
         persona = db.get(Persona, persona_id)
         profile = db.get(Profile, profile_id)
+        # M2 §3/F4.3a — one row per persona (Preference.persona_id is
+        # unique), and genuinely optional: a persona that's never used
+        # Profile Studio's Preferences panel scores exactly as before.
+        preference = db.query(Preference).filter_by(persona_id=persona.id).one_or_none()
 
         fast_model = resolve_tier(
             db,
@@ -96,7 +100,9 @@ def score_job(
             job_id=job.id,
             session_factory=session_factory,
         )
-        prefilter_output = run_prefilter(fast_model, job=job, profile=profile, persona_name=persona.name)
+        prefilter_output = run_prefilter(
+            fast_model, job=job, profile=profile, persona_name=persona.name, preference=preference
+        )
         prefilter_call = _latest_llm_call(db, job_id=job.id, stage="fit-prefilter")
 
         prefilter_result = PrefilterResult(
@@ -104,6 +110,7 @@ def score_job(
             job_id=job.id,
             persona_id=persona.id,
             profile_revision=profile.revision,
+            persona_revision=persona.revision,
             decision=prefilter_output.decision,
             reason=prefilter_output.reason,
             prefilter_version=PREFILTER_VERSION,
@@ -135,7 +142,12 @@ def score_job(
         )
         evidence_items = retrieve_relevant_evidence(db, profile_id=profile.id, job=job)
         rubric = run_fit_rubric(
-            balanced_model, job=job, profile=profile, persona_name=persona.name, evidence_items=evidence_items
+            balanced_model,
+            job=job,
+            profile=profile,
+            persona_name=persona.name,
+            evidence_items=evidence_items,
+            preference=preference,
         )
         valid_spans = validate_evidence_spans(rubric.evidence_spans, job)
 
@@ -170,6 +182,7 @@ def score_job(
             job_id=job.id,
             persona_id=persona.id,
             profile_revision=profile.revision,
+            persona_revision=persona.revision,
             recommendation=recommendation,
             overall_score=rubric.overall_score,
             hard_requirements_met=rubric.hard_requirements_met,

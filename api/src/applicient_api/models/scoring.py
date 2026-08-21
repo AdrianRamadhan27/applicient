@@ -25,6 +25,10 @@ class FitScore(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
         UUID(as_uuid=True), ForeignKey("personas.id", ondelete="CASCADE"), nullable=False
     )
     profile_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    # M2 §1/§3 — same append-only-rescore reasoning as profile_revision,
+    # extended to cover Persona.revision (bumped on a Preference edit,
+    # since F4.3a now feeds Preference into this score too).
+    persona_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     recommendation: Mapped[str] = mapped_column(String(20), nullable=False)  # Recommendation
     overall_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
@@ -82,6 +86,7 @@ class PrefilterResult(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
         UUID(as_uuid=True), ForeignKey("personas.id", ondelete="CASCADE"), nullable=False
     )
     profile_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    persona_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # M2 §1/§3
 
     decision: Mapped[str] = mapped_column(String(20), nullable=False)  # PrefilterDecision
     reason: Mapped[str] = mapped_column(Text, nullable=False)

@@ -238,3 +238,31 @@ def get_inbox_job(
         benefits=job.benefits,
         sightings=sightings,
     )
+
+
+@router.post("/bulk-delete", response_model=schemas.BulkDeleteJobsOut)
+def bulk_delete_jobs(
+    body: schemas.BulkDeleteJobsIn,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """Inbox multi-select delete, raised directly by Adrian with bulk
+    apply already in mind for later — the frontend's selection
+    mechanism is generic (a plain set of job ids), this is just the
+    first bulk action built on top of it. `JobSighting`/`FitScore`/
+    `PrefilterResult` all cascade-delete with the job (real FKs, not
+    orphaned rows); `LlmCall.job_id` sets to NULL instead, so a job's
+    real cost history in Cost & Usage survives deleting the job
+    itself — deleting a job from your Inbox isn't the same claim as
+    "this cost never happened."
+    """
+
+    if not body.job_ids:
+        return schemas.BulkDeleteJobsOut(deleted=0)
+    deleted = (
+        db.query(Job)
+        .filter(Job.user_id == user_id, Job.id.in_(body.job_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return schemas.BulkDeleteJobsOut(deleted=deleted)

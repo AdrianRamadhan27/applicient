@@ -197,14 +197,29 @@ class JobSpyAdapter(SourceAdapter):
         try:
             from jobspy import scrape_jobs
 
-            df = await to_thread(
-                scrape_jobs,
-                site_name=[sites[0]],
+            kwargs: dict[str, Any] = dict(
                 search_term="software engineer",
                 results_wanted=1,
-                country_indeed=country,
                 proxies=_parse_proxies(config),
             )
+            # JobSpy's own `country_indeed` parameter defaults to
+            # "usa" when omitted, but crashes with "'NoneType' object
+            # has no attribute 'strip'" if explicitly passed `None` —
+            # found live testing a LinkedIn-only source: `_resolve_country`
+            # correctly returns `None` when no country-scoped site
+            # (indeed/glassdoor) is selected, since a bare, unscoped
+            # site genuinely has no country requirement, but that
+            # `None` was still being forwarded into a kwarg JobSpy
+            # insists on receiving as a real string regardless of
+            # which site is actually being scraped. Only include the
+            # kwarg at all when there's a real value — letting
+            # JobSpy fall back to its own default is what avoids this,
+            # not supplying a fake placeholder ourselves.
+            if country is not None:
+                kwargs["country_indeed"] = country
+            if sites[0] == "linkedin":
+                kwargs["linkedin_fetch_description"] = True
+            df = await to_thread(scrape_jobs, site_name=[sites[0]], **kwargs)
         except Exception as e:
             return ConnectionTestResult(ok=False, status="unreachable", error=str(e)[:300])
 
@@ -228,14 +243,36 @@ class JobSpyAdapter(SourceAdapter):
     ):
         from jobspy import scrape_jobs
 
-        kwargs = dict(
+        kwargs: dict[str, Any] = dict(
             search_term=query or None,
             location=(filters or {}).get("location"),
             is_remote=bool((filters or {}).get("remote")),
             results_wanted=int(config.get("results_wanted") or _DEFAULT_RESULTS_WANTED),
-            country_indeed=country,
             proxies=_parse_proxies(config),
         )
+        # JobSpy's LinkedIn scraper only reads the full job description
+        # off a job's own detail page, not the search-results page —
+        # `_process_job()` in jobspy's own source only calls
+        # `_get_job_details()` (the thing that actually sets
+        # `description`) when `linkedin_fetch_description=True`, which
+        # defaults to False. Left at that default, every LinkedIn
+        # posting comes back with `description=None` — confirmed
+        # directly against jobspy's installed source, not a guess or a
+        # secondhand GitHub issue — which is why LinkedIn jobs never
+        # had any text for the scoring rubric to quote as evidence.
+        # Costs one extra page fetch per job (this is what actually
+        # makes it opt-in upstream, not a hidden default), but a
+        # LinkedIn posting with no description is useless for scoring
+        # anyway, so there's no real tradeoff worth preserving here.
+        if "linkedin" in sites:
+            kwargs["linkedin_fetch_description"] = True
+        # See test_connection's identical guard for why `None` can't
+        # just be forwarded as `country_indeed` — a LinkedIn/Google/
+        # ZipRecruiter-only search legitimately has `country is None`
+        # here (no indeed/glassdoor selected), and JobSpy crashes on
+        # an explicit `None`, not just a missing kwarg.
+        if country is not None:
+            kwargs["country_indeed"] = country
         try:
             return await to_thread(scrape_jobs, site_name=sites, **kwargs)
         except Exception as e:

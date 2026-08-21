@@ -10,10 +10,13 @@ import {
   type CVParseStage,
   type EvidenceCategory,
   type EvidenceItem,
+  type Preference,
+  type PreferenceUpsert,
   type Profile,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { usePersona } from "@/components/persona-provider";
 import { Check, Circle, FileText, Loader2, UploadCloud } from "lucide-react";
 
 const CATEGORY_LABEL: Record<EvidenceCategory, string> = {
@@ -128,9 +132,293 @@ function groupDateRange(items: EvidenceItem[]): string | null {
   return `${start} — ${end}`;
 }
 
+const SENIORITY_OPTIONS = ["intern", "junior", "mid", "senior", "lead", "staff", "principal"];
+const REMOTE_POLICY_OPTIONS = ["onsite", "hybrid", "remote"];
+const COMPANY_SIZE_OPTIONS = ["startup", "scale-up", "mid-size", "enterprise"];
+
+type PreferenceDraft = {
+  target_roles: string;
+  seniority: string[];
+  salary_floor: string;
+  salary_target: string;
+  salary_currency: string;
+  locations: string;
+  willing_to_relocate: boolean;
+  remote_policy: string[];
+  industries_include: string;
+  industries_exclude: string;
+  company_size_pref: string[];
+  deal_breakers: string;
+};
+
+function preferenceDraftFromPreference(pref: Preference | null): PreferenceDraft {
+  return {
+    target_roles: (pref?.target_roles ?? []).join(", "),
+    seniority: pref?.seniority ?? [],
+    salary_floor: pref?.salary_floor != null ? String(pref.salary_floor) : "",
+    salary_target: pref?.salary_target != null ? String(pref.salary_target) : "",
+    salary_currency: pref?.salary_currency ?? "IDR",
+    locations: (pref?.locations ?? []).join(", "),
+    willing_to_relocate: pref?.willing_to_relocate ?? false,
+    remote_policy: pref?.remote_policy ?? [],
+    industries_include: (pref?.industries_include ?? []).join(", "),
+    industries_exclude: (pref?.industries_exclude ?? []).join(", "),
+    company_size_pref: pref?.company_size_pref ?? [],
+    deal_breakers: (pref?.deal_breakers ?? []).join(", "),
+  };
+}
+
+function splitTags(value: string): string[] {
+  return value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function toggleInArray(list: string[], value: string): string[] {
+  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+}
+
+function optionLabel(value: string): string {
+  return value[0].toUpperCase() + value.slice(1);
+}
+
+/** M2 §2 follow-up — Adrian wanted these multi-select, not one-of:
+ * being open to both "senior" and "lead", or both "hybrid" and
+ * "remote", is the common case, not the exception. */
+function CheckboxGroup({
+  legend,
+  options,
+  selected,
+  onToggle,
+}: {
+  legend: string;
+  options: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label>{legend}</Label>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        {options.map((opt) => {
+          const id = `${legend}-${opt}`.replace(/\s+/g, "-").toLowerCase();
+          return (
+            <div key={opt} className="flex items-center gap-1.5">
+              <Checkbox id={id} checked={selected.includes(opt)} onCheckedChange={() => onToggle(opt)} />
+              <Label htmlFor={id} className="font-normal">
+                {optionLabel(opt)}
+              </Label>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** F1.9 — each Preference field as its own plain-language question with
+ * structured input, not one free-text box standing in for the schema.
+ * Persona selection is global now (AppShell's sidebar switcher) — this
+ * just reads `usePersona()` instead of fetching/selecting its own. */
+function PreferencesPanel() {
+  const { selectedPersonaId } = usePersona();
+  const [draft, setDraft] = React.useState<PreferenceDraft>(preferenceDraftFromPreference(null));
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!selectedPersonaId) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const pref = await api.getPreference(selectedPersonaId);
+        if (!cancelled) setDraft(preferenceDraftFromPreference(pref));
+      } catch {
+        if (!cancelled) toast.error("Failed to load preferences");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPersonaId]);
+
+  async function handleSave() {
+    if (!selectedPersonaId) return;
+    setSaving(true);
+    try {
+      const body: PreferenceUpsert = {
+        target_roles: splitTags(draft.target_roles),
+        seniority: draft.seniority,
+        salary_floor: draft.salary_floor ? Number(draft.salary_floor) : null,
+        salary_target: draft.salary_target ? Number(draft.salary_target) : null,
+        salary_currency: draft.salary_currency.trim().toUpperCase() || "IDR",
+        locations: splitTags(draft.locations),
+        willing_to_relocate: draft.willing_to_relocate,
+        remote_policy: draft.remote_policy,
+        industries_include: splitTags(draft.industries_include),
+        industries_exclude: splitTags(draft.industries_exclude),
+        company_size_pref: draft.company_size_pref,
+        deal_breakers: splitTags(draft.deal_breakers),
+      };
+      const saved = await api.upsertPreference(selectedPersonaId, body);
+      setDraft(preferenceDraftFromPreference(saved));
+      toast.success("Preferences saved");
+    } catch {
+      toast.error("Failed to save preferences");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!selectedPersonaId) return null; // no persona selected yet (or none exist) — nothing to attach preferences to
+
+  return (
+    <div className="border border-border bg-card">
+      <div className="h-10 border-b border-border bg-secondary flex items-center px-3">
+        <span className="font-mono text-[11px] tracking-wider uppercase text-muted-foreground">Preferences</span>
+      </div>
+      <div className="p-4 flex flex-col gap-4">
+        {loading ? (
+          <div className="text-sm text-muted-foreground font-mono">loading…</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
+                <Label>What roles are you targeting?</Label>
+                <Input
+                  value={draft.target_roles}
+                  onChange={(e) => setDraft({ ...draft, target_roles: e.target.value })}
+                  placeholder="AI Engineer, ML Engineer, Data Scientist"
+                />
+              </div>
+
+              <CheckboxGroup
+                legend="What seniority levels are acceptable?"
+                options={SENIORITY_OPTIONS}
+                selected={draft.seniority}
+                onToggle={(v) => setDraft({ ...draft, seniority: toggleInArray(draft.seniority, v) })}
+              />
+
+              <CheckboxGroup
+                legend="What remote-work arrangements are acceptable?"
+                options={REMOTE_POLICY_OPTIONS}
+                selected={draft.remote_policy}
+                onToggle={(v) => setDraft({ ...draft, remote_policy: toggleInArray(draft.remote_policy, v) })}
+              />
+
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
+                <Label>Which locations are you targeting?</Label>
+                <Input
+                  value={draft.locations}
+                  onChange={(e) => setDraft({ ...draft, locations: e.target.value })}
+                  placeholder="Jakarta, Singapore, Remote"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <Checkbox
+                  id="willing-to-relocate"
+                  checked={draft.willing_to_relocate}
+                  onCheckedChange={(v) => setDraft({ ...draft, willing_to_relocate: v === true })}
+                />
+                <Label htmlFor="willing-to-relocate" className="font-normal">
+                  I&apos;m open to relocating for the right role, even outside the locations above
+                </Label>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label>Minimum acceptable salary</Label>
+                <div className="flex gap-2">
+                  <Input
+                    className="w-20"
+                    value={draft.salary_currency}
+                    onChange={(e) => setDraft({ ...draft, salary_currency: e.target.value })}
+                    placeholder="IDR"
+                    maxLength={3}
+                  />
+                  <Input
+                    type="number"
+                    value={draft.salary_floor}
+                    onChange={(e) => setDraft({ ...draft, salary_floor: e.target.value })}
+                    placeholder="e.g. 15000000"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label>Target salary</Label>
+                <Input
+                  type="number"
+                  value={draft.salary_target}
+                  onChange={(e) => setDraft({ ...draft, salary_target: e.target.value })}
+                  placeholder="e.g. 25000000"
+                />
+              </div>
+
+              <CheckboxGroup
+                legend="What company sizes do you prefer?"
+                options={COMPANY_SIZE_OPTIONS}
+                selected={draft.company_size_pref}
+                onToggle={(v) => setDraft({ ...draft, company_size_pref: toggleInArray(draft.company_size_pref, v) })}
+              />
+
+              <div className="flex flex-col gap-1.5">
+                <Label>Which industries do you want?</Label>
+                <Input
+                  value={draft.industries_include}
+                  onChange={(e) => setDraft({ ...draft, industries_include: e.target.value })}
+                  placeholder="Fintech, AI/ML"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label>Which industries do you want to avoid?</Label>
+                <Input
+                  value={draft.industries_exclude}
+                  onChange={(e) => setDraft({ ...draft, industries_exclude: e.target.value })}
+                  placeholder="Gambling, MLM"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
+                <Label>Any deal-breakers?</Label>
+                <Input
+                  value={draft.deal_breakers}
+                  onChange={(e) => setDraft({ ...draft, deal_breakers: e.target.value })}
+                  placeholder="No unpaid overtime, no equity-only comp"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving && <Loader2 className="size-3.5 animate-spin" />}
+                Save preferences
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ProfileStudioPage() {
+  // Every persona owns its own profile/evidence bank exclusively now —
+  // this page always operates on whichever persona is selected in the
+  // sidebar, not "the" one global profile.
+  const { selectedPersona, loading: personaLoading } = usePersona();
   const [profile, setProfile] = React.useState<Profile | null>(null);
   const [items, setItems] = React.useState<EvidenceItem[]>([]);
+  // Top-level section — separate from `tab` below (that one filters
+  // WHICH evidence category shows inside the Experience section).
+  // Split out after the page got cramped stacking the profile summary,
+  // preferences questionnaire and evidence bank all in one scroll.
+  const [studioTab, setStudioTab] = React.useState<"profile" | "preferences" | "evidence">("profile");
   const [tab, setTab] = React.useState<"all" | EvidenceCategory>("all");
   const [loading, setLoading] = React.useState(true);
   // `parsing` stays the single source of truth for "a parse is in
@@ -157,18 +445,22 @@ export default function ProfileStudioPage() {
   const modalFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadAll = React.useCallback(async () => {
-    const profiles = await api.listProfiles();
-    const p = profiles[0] ?? null;
-    setProfile(p);
-    if (p) {
-      const evidence = await api.listEvidence(p.id);
-      setItems(evidence);
+    if (!selectedPersona) {
+      setProfile(null);
+      setItems([]);
+      return;
     }
-  }, []);
+    const p = await api.getProfile(selectedPersona.profile_id);
+    setProfile(p);
+    const evidence = await api.listEvidence(p.id);
+    setItems(evidence);
+  }, [selectedPersona]);
 
   React.useEffect(() => {
+    if (personaLoading) return; // wait for the sidebar's persona context to resolve first
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         await loadAll();
       } catch (e) {
@@ -180,7 +472,7 @@ export default function ProfileStudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadAll]);
+  }, [loadAll, personaLoading]);
 
   function openUploadModal() {
     // Reopening while a parse is already running just brings the
@@ -295,8 +587,7 @@ export default function ProfileStudioPage() {
       setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       setEditing(null);
       setDraft(null);
-      const profiles = await api.listProfiles();
-      setProfile(profiles[0] ?? null);
+      setProfile(await api.getProfile(profile.id));
       toast.success("Evidence updated and re-embedded");
     } catch (e) {
       toast.error(String(e));
@@ -310,8 +601,7 @@ export default function ProfileStudioPage() {
     try {
       await api.deleteEvidence(profile.id, id);
       setItems((prev) => prev.filter((it) => it.id !== id));
-      const profiles = await api.listProfiles();
-      setProfile(profiles[0] ?? null);
+      setProfile(await api.getProfile(profile.id));
     } catch (e) {
       toast.error(String(e));
     }
@@ -473,85 +763,119 @@ export default function ProfileStudioPage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-5 flex flex-col gap-4">
+      {profile && !loading && (
+        <div className="shrink-0 border-b border-border bg-card px-5">
+          <Tabs value={studioTab} onValueChange={(v) => setStudioTab(v as typeof studioTab)}>
+            <TabsList>
+              <TabsTrigger value="profile">Profile</TabsTrigger>
+              <TabsTrigger value="preferences">Preferences</TabsTrigger>
+              <TabsTrigger value="evidence">Experience ({items.length})</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      )}
+
+      {/* No padding on the scroll container itself — a sticky child
+          can only ever paint over the space its OWN box covers, and
+          this container's padding would otherwise leave a permanent
+          gutter (top/left/right) around the sticky bar where
+          scrolled-under content is visible, peeking around it rather
+          than being covered by it. The Experience section's sticky
+          toolbar goes edge-to-edge instead (same pattern as the page's
+          own <header>); everything else is wrapped in its own padded div. */}
+      <div className="flex-1 overflow-auto flex flex-col isolate">
         {loading ? (
-          <div className="text-sm text-muted-foreground font-mono">loading…</div>
+          <div className="text-sm text-muted-foreground font-mono p-5">loading…</div>
+        ) : !selectedPersona ? (
+          <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center m-5">
+            No persona yet — every profile belongs to one. Create your first persona from the sidebar to get
+            started.
+          </div>
         ) : !profile ? (
-          <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center">
-            No profile shell exists yet. Run the API seed command first.
+          <div className="text-sm text-muted-foreground font-mono p-5">loading…</div>
+        ) : studioTab === "profile" ? (
+          <section className="p-5 flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                  Structured profile
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Parsed fields are kept with revision {profile.revision} and stay behind the confirmation gate.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {profile.parsed_at && (
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    parsed {new Date(profile.parsed_at).toLocaleDateString()}
+                  </span>
+                )}
+                <Button size="sm" variant="outline" onClick={openProfileEdit}>
+                  Edit
+                </Button>
+              </div>
+            </div>
+            {!hasParsedProfile(profile) ? (
+              <p className="text-sm text-muted-foreground">
+                Upload a CV to populate the structured profile. Configure and verify the deep and embedding tiers in Models &amp; Providers first.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  ["Name", profile.parsed_profile.full_name],
+                  ["Headline", profile.parsed_profile.headline],
+                  ["Email", profile.parsed_profile.email],
+                  ["Phone", profile.parsed_profile.phone],
+                  ["Location", profile.parsed_profile.location],
+                ].map(([label, value]) =>
+                  value ? (
+                    <div key={label} className="flex flex-col gap-1">
+                      <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                        {label}
+                      </span>
+                      <span className="text-sm">{value}</span>
+                    </div>
+                  ) : null,
+                )}
+                {profile.parsed_profile.summary && (
+                  <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
+                    <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                      Summary
+                    </span>
+                    <span className="text-sm leading-relaxed">{profile.parsed_profile.summary}</span>
+                  </div>
+                )}
+                {!!profile.parsed_profile.skills?.length && (
+                  <div className="flex flex-col gap-1 lg:col-span-4">
+                    <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                      Skills
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {profile.parsed_profile.skills.map((skill) => (
+                        <Badge key={skill} variant="secondary" className="text-[9px] font-mono">
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        ) : studioTab === "preferences" ? (
+          <div className="p-5">
+            <PreferencesPanel />
           </div>
         ) : (
           <>
-            <section className="border border-border bg-card p-4 flex flex-col gap-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex flex-col gap-1">
-                  <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                    Structured profile
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Parsed fields are kept with revision {profile.revision} and stay behind the confirmation gate.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {profile.parsed_at && (
-                    <span className="font-mono text-[10px] text-muted-foreground">
-                      parsed {new Date(profile.parsed_at).toLocaleDateString()}
-                    </span>
-                  )}
-                  <Button size="sm" variant="outline" onClick={openProfileEdit}>
-                    Edit
-                  </Button>
-                </div>
-              </div>
-              {!hasParsedProfile(profile) ? (
-                <p className="text-sm text-muted-foreground">
-                  Upload a CV to populate the structured profile. Configure and verify the deep and embedding tiers in Models &amp; Providers first.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {[
-                    ["Name", profile.parsed_profile.full_name],
-                    ["Headline", profile.parsed_profile.headline],
-                    ["Email", profile.parsed_profile.email],
-                    ["Phone", profile.parsed_profile.phone],
-                    ["Location", profile.parsed_profile.location],
-                  ].map(([label, value]) =>
-                    value ? (
-                      <div key={label} className="flex flex-col gap-1">
-                        <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                          {label}
-                        </span>
-                        <span className="text-sm">{value}</span>
-                      </div>
-                    ) : null,
-                  )}
-                  {profile.parsed_profile.summary && (
-                    <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
-                      <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                        Summary
-                      </span>
-                      <span className="text-sm leading-relaxed">{profile.parsed_profile.summary}</span>
-                    </div>
-                  )}
-                  {!!profile.parsed_profile.skills?.length && (
-                    <div className="flex flex-col gap-1 lg:col-span-4">
-                      <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                        Skills
-                      </span>
-                      <div className="flex flex-wrap gap-1">
-                        {profile.parsed_profile.skills.map((skill) => (
-                          <Badge key={skill} variant="secondary" className="text-[9px] font-mono">
-                            {skill}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-
-            <section className="border border-border bg-card px-3 py-2 flex items-center justify-between gap-3">
+            {/* Sticky area covers what you need pinned while scrolling
+                the evidence list below — the evidence-bank stats row
+                AND the category tabs. Only the actual evidence item
+                groups scroll underneath. Lighter now that the profile
+                summary lives in its own tab instead of stacking on
+                top of this. */}
+            <div className="sticky top-0 z-20 border-b border-border bg-card shadow-md flex flex-col">
+            <div className="px-5 py-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
                 <span className="font-mono text-[10px] tracking-wider uppercase">Evidence bank</span>
                 <span>·</span>
@@ -564,16 +888,10 @@ export default function ProfileStudioPage() {
               <span className="font-mono text-[10px] text-muted-foreground">
                 {profile.confirmed ? "verified for downstream use" : "review before confirming"}
               </span>
-            </section>
+            </div>
 
-            {items.length === 0 ? (
-              <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center">
-                No evidence yet. Upload a CV (.pdf or .docx) — it&apos;s parsed into atomic,
-                individually-citable accomplishment records, each one a future CV bullet
-                has to trace back to.
-              </div>
-            ) : (
-              <>
+            {items.length > 0 && (
+              <div className="px-5 pb-2">
                 <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
                   <TabsList>
                     <TabsTrigger value="all">All ({counts.all})</TabsTrigger>
@@ -584,7 +902,19 @@ export default function ProfileStudioPage() {
                     ))}
                   </TabsList>
                 </Tabs>
+              </div>
+            )}
+            </div>
 
+            <div className="p-5 pt-4 flex flex-col gap-4">
+            {items.length === 0 ? (
+              <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center">
+                No evidence yet. Upload a CV (.pdf or .docx) — it&apos;s parsed into atomic,
+                individually-citable accomplishment records, each one a future CV bullet
+                has to trace back to.
+              </div>
+            ) : (
+              <>
                 <div className="flex flex-col gap-4">
                   {groups.map(([employer, titleGroups]) => {
                     const allItems = titleGroups.flatMap(([, groupItems]) => groupItems);
@@ -688,6 +1018,7 @@ export default function ProfileStudioPage() {
                 </div>
               </>
             )}
+            </div>
           </>
         )}
       </div>

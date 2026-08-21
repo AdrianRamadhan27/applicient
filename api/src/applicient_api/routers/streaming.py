@@ -10,6 +10,7 @@ around half-accurate.
 """
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from applicient_api import schemas
 from applicient_api.deps import current_user_id, get_db
 from applicient_api.models.agents import AgentRun, AgentStep
+from applicient_api.models.llm import LlmCall
+from applicient_api.radar import _CANCEL_EVENTS
 
 router = APIRouter(prefix="/agent-runs", tags=["streaming"])
 
@@ -31,6 +34,53 @@ def get_agent_run(
 
     steps = db.query(AgentStep).filter_by(agent_run_id=run_id).order_by(AgentStep.started_at.asc()).all()
 
+    return schemas.AgentRunDetailOut(
+        id=run.id,
+        run_type=run.run_type,
+        status=run.status,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        total_cost_usd=float(run.total_cost_usd),
+        saved_search_id=run.saved_search_id,
+        persona_id=run.persona_id,
+        profile_revision=run.profile_revision,
+        steps=[schemas.AgentStepOut.model_validate(s) for s in steps],
+    )
+
+
+@router.post("/{run_id}/cancel", response_model=schemas.AgentRunDetailOut)
+def cancel_agent_run(run_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)):
+    """Cooperative — see radar.py's `_CANCEL_EVENTS` for why this can't
+    just reach in and force-stop the run's task directly. Two cases:
+
+    - The run's generator is still alive (the common case) — set its
+      event; it notices at its next checkpoint (between sources or
+      between scored jobs, never mid-LLM-call) and exits cleanly via
+      radar.py's own `_RunCancelled` handling, which marks it
+      "cancelled" itself.
+    - No live generator holds this run at all — the exact situation
+      hit live before this endpoint existed: the original stream
+      already disconnected and nothing is left listening for the flag.
+      Mark it directly instead, same real-partial-cost-preserved
+      discipline as radar.py's own disconnect handling.
+    """
+    run = db.query(AgentRun).filter_by(id=run_id, user_id=user_id).one_or_none()
+    if run is None:
+        raise HTTPException(404, "agent run not found")
+    if run.status != "running":
+        raise HTTPException(409, f"run is already {run.status}, nothing to cancel")
+
+    event = _CANCEL_EVENTS.get(run_id)
+    if event is not None:
+        event.set()
+    else:
+        run.status = "cancelled"
+        run.finished_at = datetime.now(timezone.utc)
+        run.total_cost_usd = sum(float(c.cost_usd) for c in db.query(LlmCall).filter_by(agent_run_id=run.id).all())
+        db.commit()
+        db.refresh(run)
+
+    steps = db.query(AgentStep).filter_by(agent_run_id=run_id).order_by(AgentStep.started_at.asc()).all()
     return schemas.AgentRunDetailOut(
         id=run.id,
         run_type=run.run_type,

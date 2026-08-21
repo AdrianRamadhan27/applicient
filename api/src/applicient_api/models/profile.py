@@ -28,7 +28,11 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
 class Profile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     """Versioned (F1.3) — generated documents bind to the revision that
-    produced them (PRD §9)."""
+    produced them (PRD §9). Owned by exactly one `Persona` (see its
+    `profile_id`, `unique=True`) — every persona gets its own CV
+    upload, evidence bank and confirmation state, not a shared one.
+    A `Profile` is never created standalone; it's always created
+    alongside the `Persona` that owns it (`routers/personas.py`)."""
 
     __tablename__ = "profiles"
 
@@ -50,17 +54,31 @@ class Profile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
 
 
 class Persona(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
-    """F1.5 — multiple role tracks over one profile. Expected count is
-    2-3 (PRD §3.1), so this stays a flat table, not a hierarchy."""
+    """F1.5 — each persona owns its own profile and evidence bank
+    (real CV, real accomplishments) rather than sharing one across
+    every persona — a persona is a distinct targeting identity, not
+    just a filtered view over shared material. `profile_id` is
+    `unique=True` so this FK is a genuine 1:1, same pattern as
+    `Preference.persona_id` below. Expected persona count is 2-3
+    (PRD §3.1), so this stays a flat table, not a hierarchy."""
 
     __tablename__ = "personas"
 
     profile_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     base_cv_template: Mapped[str] = mapped_column(String(120), nullable=False, default="ats-plain")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # M2 §1 — mirrors Profile.revision: bumped whenever this persona's
+    # Preference changes, so FitScore/PrefilterResult can stamp what
+    # preference state they were computed against (F4.10). Same passive
+    # invalidation model as profile_revision already has — confirmed
+    # nothing proactively recomputes on a Profile.revision bump either
+    # (radar.py only skips jobs already scored at the *current*
+    # revision when it happens to re-touch them), so this doesn't add
+    # active recompute-on-edit where none exists for profile edits.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class EvidenceItem(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
@@ -116,7 +134,9 @@ class EvidenceItem(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
 
 
 class Preference(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
-    """F1.4 — per-persona search/filter criteria."""
+    """F1.4/F1.9 — per-persona search/filter criteria, captured through
+    a guided questionnaire rather than free text (F1.9). Surfaced to
+    fit scoring (F4.3a) and company discovery (F2.10)."""
 
     __tablename__ = "preferences"
 
@@ -124,13 +144,26 @@ class Preference(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
         UUID(as_uuid=True), ForeignKey("personas.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     target_roles: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
-    seniority: Mapped[str | None] = mapped_column(String(60))
+    # M2 §2 follow-up — Adrian wanted multi-select, not one-of, for
+    # seniority/remote_policy/company_size_pref: a candidate open to
+    # both "senior" and "lead", or both "hybrid" and "remote", isn't a
+    # rare case. Same ARRAY(String) shape as target_roles/locations
+    # above rather than a new pattern for these three specifically.
+    seniority: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     salary_floor: Mapped[float | None] = mapped_column(Numeric(14, 2))
     salary_target: Mapped[float | None] = mapped_column(Numeric(14, 2))
     salary_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="IDR")
     locations: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
-    remote_policy: Mapped[str | None] = mapped_column(String(60))
+    # F1.9 — a global flag, not scoped per-location: distinct from
+    # `locations` above (the places the user actively wants), this
+    # covers the general "I'll move for the right role" case even
+    # outside that list. Deliberately not a per-location structure —
+    # `locations` already lets the user name specific places they
+    # want; a second axis of "which of those need relocating" is
+    # complexity nothing has asked for yet.
+    willing_to_relocate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    remote_policy: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     industries_include: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     industries_exclude: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
-    company_size_pref: Mapped[str | None] = mapped_column(String(60))
+    company_size_pref: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     deal_breakers: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
