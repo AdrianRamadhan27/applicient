@@ -232,6 +232,32 @@ export default function ModelsPage() {
     }
   }
 
+  async function handleDelete(connection: ProviderConnection) {
+    const name = connection.label || connection.provider;
+    if (!window.confirm(`Delete ${name}? Its cached model catalog will also be removed.`)) {
+      return;
+    }
+
+    setBusy(connection.id);
+    try {
+      await api.deleteConnection(connection.id);
+      setConnections((current) => current.filter((item) => item.id !== connection.id));
+      setCatalogs((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      if (selected === connection.id) {
+        setSelected(connections.find((item) => item.id !== connection.id)?.id ?? null);
+      }
+      toast.success(`${name} deleted`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleCreate() {
     if (needsBaseUrl(newProvider) && !newBaseUrl.trim()) {
       toast.error("Base URL is required for this provider");
@@ -460,6 +486,17 @@ export default function ModelsPage() {
                           >
                             Refresh catalog
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={busy === c.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(c);
+                            }}
+                          >
+                            Delete
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -520,6 +557,7 @@ export default function ModelsPage() {
                         <optgroup key={connectionId} label={group.label}>
                           {group.options.map(({ entry }) => (
                             <option key={entry.id} value={entry.id}>
+                              {tier === "embedding" ? `${group.label} · ` : ""}
                               {entry.model_id}
                               {entry.pricing_known
                                 ? ` · $${entry.input_price_per_mtok ?? "?"}/$${entry.output_price_per_mtok ?? "?"} Mtok`
@@ -529,10 +567,19 @@ export default function ModelsPage() {
                         </optgroup>
                       ))}
                     </select>
-                    <span className="w-28 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
-                      {selectedOption?.entry.context_window
-                        ? `${Math.round(selectedOption.entry.context_window / 1000)}k context`
-                        : "—"}
+                    <span className="w-44 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+                      {selectedOption ? (
+                        <>
+                          <span className="block truncate">{selectedOption.connectionLabel}</span>
+                          <span>
+                            {selectedOption.entry.context_window
+                              ? `${Math.round(selectedOption.entry.context_window / 1000)}k context`
+                              : "—"}
+                          </span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </span>
                   </div>
                 );

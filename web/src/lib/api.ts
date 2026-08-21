@@ -623,6 +623,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  deleteConnection: (id: string) =>
+    request<void>(`/provider-connections/${id}`, { method: "DELETE" }),
   testConnection: (id: string) =>
     request<ProviderConnection>(`/provider-connections/${id}/test`, {
       method: "POST",

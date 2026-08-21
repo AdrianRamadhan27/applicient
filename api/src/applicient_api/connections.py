@@ -40,6 +40,19 @@ def create_connection(
     return conn
 
 
+def delete_connection(session: Session, conn: ProviderConnection) -> None:
+    """Delete a provider connection and its catalog rows.
+
+    ``ModelCatalogEntry.provider_connection_id`` has an ``ON DELETE
+    CASCADE`` foreign key, so the database removes the cached catalog in
+    the same transaction as the connection. Callers must validate that no
+    model profile or embedding index still references those rows first.
+    """
+
+    session.delete(conn)
+    session.flush()
+
+
 def test_connection(session: Session, conn: ProviderConnection) -> ProviderConnection:
     """F12.5 — a real minimal call, not a format check. Untested or
     failing connections cannot be bound to a tier (enforced at the

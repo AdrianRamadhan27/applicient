@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from applicient_api import connections, schemas
 from applicient_api.deps import current_user_id, get_db
-from applicient_api.models.llm import ModelCatalogEntry, ProviderConnection
+from applicient_api.models.llm import EmbeddingIndex, ModelCatalogEntry, ModelProfile, ProviderConnection
 
 router = APIRouter(prefix="/provider-connections", tags=["providers"])
 
@@ -44,6 +44,63 @@ def _owned_connection(db: Session, connection_id: uuid.UUID, user_id: uuid.UUID)
     if conn is None:
         raise HTTPException(404, "provider connection not found")
     return conn
+
+
+def _catalog_ids(db: Session, connection_id: uuid.UUID) -> set[uuid.UUID]:
+    return {
+        row[0]
+        for row in db.query(ModelCatalogEntry.id).filter_by(provider_connection_id=connection_id).all()
+    }
+
+
+def _delete_blocker(db: Session, *, user_id: uuid.UUID, connection_id: uuid.UUID) -> str | None:
+    """Return a user-facing reason if deleting this connection would leave
+    a model profile or embedding index pointing at deleted catalog rows."""
+
+    entry_ids = _catalog_ids(db, connection_id)
+    if not entry_ids:
+        return None
+
+    entry_id_strings = {str(entry_id) for entry_id in entry_ids}
+    profile_uses: list[str] = []
+    for profile in db.query(ModelProfile).filter_by(user_id=user_id).all():
+        for tier, entry_id in {**(profile.tier_bindings or {}), **(profile.stage_overrides or {})}.items():
+            if str(entry_id) in entry_id_strings:
+                profile_uses.append(f"{profile.name} ({tier})")
+
+    if profile_uses:
+        return (
+            "rebind or remove these model-profile bindings first: "
+            + ", ".join(profile_uses)
+        )
+
+    indexed = (
+        db.query(EmbeddingIndex.id)
+        .filter(
+            EmbeddingIndex.user_id == user_id,
+            EmbeddingIndex.model_catalog_entry_id.in_(entry_ids),
+        )
+        .first()
+    )
+    if indexed is not None:
+        return "its catalog model is still used by an embedding index"
+
+    return None
+
+
+@router.delete("/{connection_id}", status_code=204)
+def delete_connection(
+    connection_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    conn = _owned_connection(db, connection_id, user_id)
+    blocker = _delete_blocker(db, user_id=user_id, connection_id=connection_id)
+    if blocker:
+        raise HTTPException(409, f"cannot delete provider connection: {blocker}")
+
+    connections.delete_connection(db, conn)
+    db.commit()
 
 
 @router.post("/{connection_id}/test", response_model=schemas.ProviderConnectionOut)
