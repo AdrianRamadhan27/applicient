@@ -9,11 +9,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-applicient}
       POSTGRES_DB: ${POSTGRES_DB:-applicient}
     ports:
-      # Host port 5433, not 5432 — this machine already runs a native
-      # Homebrew postgresql@14 service bound to 127.0.0.1:5432/[::1]:5432,
-      # and macOS resolves "localhost" to that one first. Remapping here
-      # avoids the collision without touching the existing service.
-      - "5433:5432"
+      # Override POSTGRES_PORT when the host already uses 5433.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +23,7 @@ services:
     image: redis:7.4-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -45,8 +42,8 @@ services:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-applicient}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-applicient-dev-only}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Console
+      - "${S3_PORT:-9000}:9000"   # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # Console
     volumes:
       - miniodata:/data
     healthcheck:
@@ -55,43 +52,63 @@ services:
       timeout: 5s
       retries: 10
 
-  # --- Application services: uncommented as each is scaffolded ---
-  # See docs/IMPLEMENTATION.md for build order.
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    environment:
+      # These service names work inside the Compose network. The values
+      # can still be overridden from an optional root .env file.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-applicient}:${POSTGRES_PASSWORD:-applicient}@postgres:5432/${POSTGRES_DB:-applicient}
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-applicient}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-applicient-dev-only}
+      S3_BUCKET: ${S3_BUCKET:-applicient}
+      # Development-only fallback so a fresh clone can save a provider
+      # connection without first generating a Fernet key. Replace this
+      # for any shared or non-local deployment.
+      SECRET_KEY: ${SECRET_KEY:-3bvqp75gEt7Wq7cMXtIedPE-zZEGVCpbUL0DVOqZN0Y=}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-applicient}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
-  # api:
-  #   build: ./api
-  #   env_file: .env
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #
-  # worker:
-  #   build: ./worker
-  #   env_file: .env
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #
-  # browser-worker:
-  #   build: ./browser-worker
-  #   env_file: .env
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #
-  # web:
-  #   build: ./web
-  #   env_file: .env
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - api
+  web:
+    build:
+      context: ./web
+      args:
+        # Baked into the client bundle at build time — this has to be
+        # the browser-reachable address (the api service's published
+        # host port), not the in-network "http://api:8000" the web
+        # container itself would use.
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT:-8000}}"
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # --- Not yet built: still empty stub packages (see worker/,
+  # browser-worker/, scheduler/, metering/, models/) — nothing to
+  # containerize until one of those actually has code in it.
 
 volumes:
   pgdata:

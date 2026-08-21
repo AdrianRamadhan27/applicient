@@ -1,0 +1,35 @@
+# Build context for the api image is the repo root (see api/Dockerfile).
+# Only sources/, renderers/, and api/ are ever COPYed from it, but this
+# still controls what gets uploaded to the Docker daemon and — more
+# importantly — what tags along when a directory is COPYed whole, so
+# host-only virtualenvs and caches must be excluded explicitly here.
+.git/
+web/
+docs/
+design/
+agents/
+worker/
+browser-worker/
+scheduler/
+metering/
+models/
+data/
+.claude/
+applicient-ui-directions.html
+
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store

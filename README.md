@@ -13,20 +13,23 @@ Built on [LangChain deepagents](https://github.com/langchain-ai/deepagents). Pro
 
 ## Setup
 
-Start the local infrastructure, migrate and seed the database, then run the API and web app:
+Docker Compose includes Postgres with pgvector, Redis, MinIO, the API, and the web app. Docker is the only required local dependency. From a fresh clone:
 
 ```bash
-cp .env.example .env
-# Set SECRET_KEY to a Fernet key; provider keys are added in the GUI.
-docker compose up -d
-cd api && uv run alembic upgrade head && uv run python -m applicient_api.seed
-uv run uvicorn applicient_api.main:app --reload
+docker compose up --build
 ```
 
-In a second terminal:
+Then open [http://localhost:3000](http://localhost:3000). The API is available at [http://localhost:8000](http://localhost:8000), and the MinIO console is at [http://localhost:9001](http://localhost:9001).
+
+The first build downloads the pinned Python and Node dependencies; no separate `uv`, `pnpm`, Postgres, Redis, or MinIO installation is required. The API container runs migrations and seeds the demo user automatically.
+
+For local overrides, copy `.env.example` to `.env` before starting. This is optional for the default setup. In particular, set your own `SECRET_KEY` for anything beyond local development; provider API keys are added through the Models & Providers screen.
+
+To run in the background:
 
 ```bash
-cd web && pnpm install && pnpm dev
+docker compose up --build -d
+docker compose logs -f api web
 ```
 
 Open `/models` first to add, test, and catalog a provider, save the `deep` and `embedding` tier bindings, then use `/profile` to upload and confirm a CV. The `/cost` page shows the metered calls. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for current status.

@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // The Docker runtime copies a production-only pnpm dependency tree and
+  // starts the app with `next start`.
 };
 
 export default nextConfig;
