@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import {
   api,
   type ModelCatalogEntry,
-  type ModelProfile,
   type ProviderConnection,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -69,6 +68,7 @@ function needsBaseUrl(provider: string) {
 }
 const TIERS = ["fast", "balanced", "deep", "embedding"] as const;
 type Tier = (typeof TIERS)[number];
+const DEFAULT_PRESET_NAME = "openrouter-budget";
 
 function statusColor(status: ProviderConnection["status"]) {
   switch (status) {
@@ -93,7 +93,7 @@ export default function ModelsPage() {
   const [selected, setSelected] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [modelProfile, setModelProfile] = React.useState<ModelProfile | null>(null);
+  const [presetName, setPresetName] = React.useState(DEFAULT_PRESET_NAME);
   const [bindings, setBindings] = React.useState<Record<string, string>>({});
   const [savingBindings, setSavingBindings] = React.useState(false);
 
@@ -140,7 +140,7 @@ export default function ModelsPage() {
       try {
         const profile = await api.getActiveModelProfile();
         if (!cancelled) {
-          setModelProfile(profile);
+          setPresetName(profile?.name ?? DEFAULT_PRESET_NAME);
           setBindings(profile?.tier_bindings ?? {});
         }
       } catch (e) {
@@ -293,12 +293,12 @@ export default function ModelsPage() {
     setSavingBindings(true);
     try {
       const saved = await api.saveActiveModelProfile({
-        name: modelProfile?.name ?? "openrouter-budget",
+        name: presetName.trim() || DEFAULT_PRESET_NAME,
         tier_bindings: effectiveBindings,
       });
-      setModelProfile(saved);
+      setPresetName(saved.name);
       setBindings(saved.tier_bindings);
-      toast.success("Tier bindings saved — CV ingest is ready");
+      toast.success("Preset saved — CV ingest is ready");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -584,12 +584,22 @@ export default function ModelsPage() {
                   </div>
                 );
               })}
-              <div className="flex items-center justify-between gap-3 border-t border-border bg-secondary px-3 py-2">
-                <span className="text-xs text-muted-foreground">
-                  {modelProfile ? `active preset: ${modelProfile.name}` : "not saved yet"}
-                </span>
+              <div className="flex flex-col gap-2 border-t border-border bg-secondary px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Label htmlFor="model-preset-name" className="shrink-0 text-xs text-muted-foreground">
+                    active preset
+                  </Label>
+                  <Input
+                    id="model-preset-name"
+                    value={presetName}
+                    onChange={(event) => setPresetName(event.target.value)}
+                    maxLength={120}
+                    placeholder={DEFAULT_PRESET_NAME}
+                    className="h-8 max-w-sm text-xs"
+                  />
+                </div>
                 <Button size="sm" onClick={handleSaveBindings} disabled={savingBindings}>
-                  {savingBindings ? "Saving…" : "Save bindings"}
+                  {savingBindings ? "Saving…" : "Save preset"}
                 </Button>
               </div>
             </div>

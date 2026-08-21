@@ -151,7 +151,7 @@ class ModelProfileOut(BaseModel):
 
 
 class ModelProfileUpdate(BaseModel):
-    name: str = "openrouter-budget"
+    name: str = Field(default="openrouter-budget", max_length=120)
     tier_bindings: dict[str, uuid.UUID]
     stage_overrides: dict[str, uuid.UUID] = Field(default_factory=dict)
 

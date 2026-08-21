@@ -24,13 +24,23 @@ def upsert_active_profile(
     """Creates or updates the named profile and makes it the sole
     active one for this user (only one active profile at a time)."""
 
-    session.query(ModelProfile).filter_by(user_id=user_id, is_active=True).update({"is_active": False})
-
-    profile = session.query(ModelProfile).filter_by(user_id=user_id, name=name).one_or_none()
+    # There is one active profile per user in the current GUI. Update that
+    # row in place so editing its name is a real rename instead of silently
+    # creating a second, inactive profile with the new name.
+    profile = session.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
+    if profile is None:
+        profile = session.query(ModelProfile).filter_by(user_id=user_id, name=name).one_or_none()
     if profile is None:
         profile = ModelProfile(user_id=user_id, name=name)
         session.add(profile)
 
+    session.query(ModelProfile).filter(
+        ModelProfile.user_id == user_id,
+        ModelProfile.is_active.is_(True),
+        ModelProfile.id != profile.id,
+    ).update({"is_active": False})
+
+    profile.name = name
     profile.tier_bindings = tier_bindings
     profile.stage_overrides = stage_overrides or {}
     profile.is_active = True
