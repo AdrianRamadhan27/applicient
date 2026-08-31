@@ -17,13 +17,16 @@ EMBED_DIM = 2048
 
 
 class User(UUIDPKMixin, TimestampMixin, Base):
-    """v1 is single-user/local-first, no auth (PRD §3.1) — this table
-    exists so every other table's user_id has something to point at,
-    and so multi-tenancy is an auth layer later, not a migration."""
+    """M5 — real auth: password_hash backs email+password signup/login
+    (auth.py, routers/auth.py). Nullable so a row created before this
+    column existed (the dev seed user) doesn't break; login is blocked
+    outright for a NULL hash rather than falling through to a hash
+    mismatch, since seed.py now sets one from DEMO_USER_PASSWORD."""
 
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255))
 
 
 class Profile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):

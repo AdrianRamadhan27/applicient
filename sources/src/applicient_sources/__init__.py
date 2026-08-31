@@ -4,6 +4,7 @@ pattern for LLM provider adapters."""
 
 from applicient_sources.ashby import AshbyAdapter
 from applicient_sources.base import ConnectionTestResult, RawPosting, SourceAdapter
+from applicient_sources.generic_scraper import GenericScraperAdapter
 from applicient_sources.greenhouse import GreenhouseAdapter
 from applicient_sources.jobspy_source import JobSpyAdapter
 from applicient_sources.jsearch import JSearchAdapter
@@ -25,6 +26,7 @@ ADAPTERS: dict[str, SourceAdapter] = {
     "ashby": AshbyAdapter(),
     "smartrecruiters": SmartRecruitersAdapter(),
     "recruitee": RecruiteeAdapter(),
+    "generic_scraper": GenericScraperAdapter(),
 }
 
 

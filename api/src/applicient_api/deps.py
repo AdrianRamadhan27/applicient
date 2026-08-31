@@ -1,17 +1,18 @@
-"""FastAPI dependencies. No auth yet — v1 is single-user/local-first
-(PRD §3.1) — but `current_user_id` is the one seam where an auth layer
-plugs in later without touching every route."""
+"""FastAPI dependencies. M5 — current_user_id now resolves a real
+signed-in user from a bearer token instead of a hardcoded demo lookup;
+this was the one seam the placeholder version's own docstring already
+promised auth would plug into without touching every route."""
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
 
-from fastapi import Depends
+from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session, sessionmaker
 
+from applicient_api.auth import AuthError, decode_access_token
 from applicient_api.db import make_engine, make_session_factory
-from applicient_api.models.profile import User
 
 _engine = make_engine()
 _session_factory: sessionmaker = make_session_factory(_engine)
@@ -29,11 +30,26 @@ def get_db() -> Generator[Session, None, None]:
         session.close()
 
 
-def current_user_id(db: Session = Depends(get_db)) -> uuid.UUID:
-    """Placeholder for auth (PRD §2.2 non-goal for v1, §3.1 single-user
-    local-first): resolves to the one demo user rather than a real
-    identity. Every route that needs a user takes this, so swapping in
-    real auth later is one function, not N call sites."""
+def current_user_id(
+    authorization: str | None = Header(default=None), token: str | None = None
+) -> uuid.UUID:
+    """Every route that needs a user takes this — swapping the
+    identity source is one function, not N call sites.
 
-    user = db.query(User).filter_by(email="demo@applicient.local").one()
-    return user.id
+    Accepts the token either as a normal `Authorization: Bearer` header
+    (every real fetch call) or as a `?token=` query param — the one
+    exception is `<img src>` for the live-browser screenshot view
+    (pipeline/page.tsx), which the browser fetches directly and can't
+    attach a custom header to."""
+
+    raw = None
+    if authorization and authorization.startswith("Bearer "):
+        raw = authorization.removeprefix("Bearer ").strip()
+    elif token:
+        raw = token
+    if not raw:
+        raise HTTPException(401, "not authenticated")
+    try:
+        return decode_access_token(raw)
+    except AuthError:
+        raise HTTPException(401, "not authenticated")

@@ -4,6 +4,7 @@ a materially different kind of endpoint, not a plain REST verb."""
 
 import uuid
 
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -12,8 +13,18 @@ from applicient_api.deps import current_user_id, get_db
 from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.discovery import Job, JobSighting, SavedSearch, Source, SourceRun
 from applicient_api.models.profile import Persona
+from applicient_api.scheduler import schedule_saved_search, unschedule_saved_search
 
 router = APIRouter(prefix="/saved-searches", tags=["saved-searches"])
+
+
+def _validate_cron(schedule_cron: str | None) -> None:
+    if schedule_cron is None:
+        return
+    try:
+        CronTrigger.from_crontab(schedule_cron)
+    except ValueError:
+        raise HTTPException(422, f"invalid cron expression: {schedule_cron!r}")
 
 
 def _validate_refs(db: Session, user_id: uuid.UUID, persona_id: uuid.UUID, source_ids: list[uuid.UUID]) -> None:
@@ -42,6 +53,7 @@ def create_saved_search(
     if not body.source_ids:
         raise HTTPException(422, "at least one source is required")
     _validate_refs(db, user_id, body.persona_id, body.source_ids)
+    _validate_cron(body.schedule_cron)
 
     saved_search = SavedSearch(
         user_id=user_id,
@@ -50,10 +62,12 @@ def create_saved_search(
         role_titles=body.role_titles,
         source_ids=body.source_ids,
         filters=body.filters,
+        schedule_cron=body.schedule_cron,
     )
     db.add(saved_search)
     db.commit()
     db.refresh(saved_search)
+    schedule_saved_search(saved_search)
     return saved_search
 
 
@@ -75,10 +89,19 @@ def update_saved_search(
     updates = body.model_dump(exclude_unset=True)
     if "source_ids" in updates:
         _validate_refs(db, user_id, saved_search.persona_id, updates["source_ids"])
+    if "schedule_cron" in updates:
+        _validate_cron(updates["schedule_cron"])
     for field, value in updates.items():
         setattr(saved_search, field, value)
     db.commit()
     db.refresh(saved_search)
+    # Always re-sync APScheduler's in-memory job table with the DB
+    # rather than only doing it when schedule_cron/active are touched
+    # — cheap, and avoids a stale schedule if either changes indirectly.
+    if saved_search.active and saved_search.schedule_cron:
+        schedule_saved_search(saved_search)
+    else:
+        unschedule_saved_search(saved_search.id)
     return saved_search
 
 
@@ -89,6 +112,7 @@ def delete_saved_search(
     saved_search = _owned_saved_search(db, saved_search_id, user_id)
     db.delete(saved_search)
     db.commit()
+    unschedule_saved_search(saved_search_id)
 
 
 @router.get("/{saved_search_id}/runs", response_model=list[schemas.AgentRunOut])

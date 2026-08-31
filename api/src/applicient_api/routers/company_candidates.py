@@ -27,6 +27,7 @@ from applicient_api import schemas
 from applicient_api.company_discovery import classify_apply_url, propose_candidates, resolve_company_ats
 from applicient_api.deps import current_user_id, get_db, get_session_factory
 from applicient_api.models.discovery import CompanyCandidate, Job, Source
+from applicient_api.models.enums import SourceTier
 from applicient_api.models.profile import Persona, Preference
 from applicient_api.tier_resolution import resolve_tier
 from applicient_sources import get_adapter
@@ -41,6 +42,10 @@ _WS_RE = re.compile(r"\s+")
 # RemoteOK) are untouched by this feature, so a candidate resolving to
 # one of THOSE (not possible today — classify_apply_url only knows
 # about the six ATS patterns) would have nothing here to map to.
+# needs_generic_scraping (M4 §9) is the seventh: a real adapter now
+# exists for it (generic_scraper.py), but its scan-list is keyed by
+# URL, not a company_identifiers slug — handled as its own branch in
+# update_company_candidate below rather than forced into that shape.
 _ADAPTER_KEY_BY_STATUS = {
     "resolved_greenhouse": "greenhouse",
     "resolved_lever": "lever",
@@ -48,6 +53,7 @@ _ADAPTER_KEY_BY_STATUS = {
     "resolved_ashby": "ashby",
     "resolved_smartrecruiters": "smartrecruiters",
     "resolved_recruitee": "recruitee",
+    "needs_generic_scraping": "generic_scraper",
 }
 
 
@@ -201,12 +207,17 @@ def _find_or_create_scan_source(db: Session, *, user_id: uuid.UUID, persona: Per
     name = f"{display_name} (discovered — {persona.name})"
     source = db.query(Source).filter_by(user_id=user_id, adapter_key=adapter_key, name=name).one_or_none()
     if source is None:
+        # generic_scraper is not a stable JSON API (SourceTier.TIER1_API
+        # would be misleading) and its config has no "company slug" to
+        # scan for — a bespoke career page has nothing to key off but
+        # its own URL, hence the different config shape.
+        is_generic = adapter_key == "generic_scraper"
         source = Source(
             user_id=user_id,
             name=name,
-            tier="tier1_api",
+            tier=SourceTier.TIER2_PORTAL.value if is_generic else SourceTier.TIER1_API.value,
             adapter_key=adapter_key,
-            config={"company_identifiers": []},
+            config={"career_sites": []} if is_generic else {"company_identifiers": []},
             status="untested",
         )
         db.add(source)
@@ -224,17 +235,31 @@ def update_company_candidate(
     candidate = _owned_candidate(db, candidate_id, user_id)
     candidate.approved = body.approved
 
-    if body.approved and candidate.status in _ADAPTER_KEY_BY_STATUS and candidate.resolved_identifier:
-        persona = db.get(Persona, candidate.persona_id)
+    if body.approved and candidate.status in _ADAPTER_KEY_BY_STATUS:
         adapter_key = _ADAPTER_KEY_BY_STATUS[candidate.status]
-        source = _find_or_create_scan_source(db, user_id=user_id, persona=persona, adapter_key=adapter_key)
-        identifiers = list(source.config.get("company_identifiers", []))
-        if candidate.resolved_identifier not in identifiers:
-            identifiers.append(candidate.resolved_identifier)
-            # New identifier added — same "config changed = untested
-            # again" discipline as routers/sources.py's update_source.
-            source.config = {**source.config, "company_identifiers": identifiers}
-            source.status = "untested"
+        persona = db.get(Persona, candidate.persona_id)
+
+        if adapter_key == "generic_scraper":
+            # M4 §9 — closes the loop M2 left open: resolved_identifier
+            # is always None for needs_generic_scraping (there's no ATS
+            # slug to have resolved), so the entry it enrolls is the
+            # candidate's own discovered_url instead, deduped by URL.
+            if candidate.discovered_url:
+                source = _find_or_create_scan_source(db, user_id=user_id, persona=persona, adapter_key=adapter_key)
+                sites = list(source.config.get("career_sites", []))
+                if not any(site.get("url") == candidate.discovered_url for site in sites):
+                    sites.append({"url": candidate.discovered_url, "company_name": candidate.company_name})
+                    source.config = {**source.config, "career_sites": sites}
+                    source.status = "untested"
+        elif candidate.resolved_identifier:
+            source = _find_or_create_scan_source(db, user_id=user_id, persona=persona, adapter_key=adapter_key)
+            identifiers = list(source.config.get("company_identifiers", []))
+            if candidate.resolved_identifier not in identifiers:
+                identifiers.append(candidate.resolved_identifier)
+                # New identifier added — same "config changed = untested
+                # again" discipline as routers/sources.py's update_source.
+                source.config = {**source.config, "company_identifiers": identifiers}
+                source.status = "untested"
 
     db.commit()
     db.refresh(candidate)

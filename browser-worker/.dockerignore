@@ -1,0 +1,16 @@
+# Build context here is ./browser-worker itself (see Dockerfile), so
+# the repo-root .dockerignore doesn't cover this directory — the host
+# .venv (with its own downloaded Chromium binary) must be excluded
+# explicitly or it gets uploaded whole into the build context.
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+.env
+.env.*
+
+*.log
+.DS_Store

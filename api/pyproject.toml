@@ -9,17 +9,23 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.19.1",
+    "apscheduler>=3.11.0",
+    "applicient-agents",
     "applicient-sources",
+    "bcrypt>=4.2.0",
     "boto3>=1.43.77",
     "cryptography>=50.0.0",
     "fastapi>=0.141.1",
+    "google-auth>=2.35.0",
     "httpx>=0.28.1",
+    "icalendar>=6.1.0",
     "langchain-core>=1.5.6",
     "langchain-openai>=1.5.2",
     "pgvector>=0.5.0",
     "psycopg[binary]>=3.3.4",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.10.1",
     "pypdf>=6.16.1",
     "python-dateutil>=2.9.0.post0",
     "python-docx>=1.2.0",
@@ -28,6 +34,7 @@ dependencies = [
     "sqlalchemy>=2.0.52",
     "sse-starlette>=3.4.8",
     "uvicorn[standard]>=0.52.4",
+    "websockets>=13.1",
 ]
 
 [project.scripts]
@@ -50,3 +57,13 @@ dev = [
 # imports, comments only). Flipped to match real usage instead of
 # leaving a circular declaration neither side needs.
 applicient-sources = { path = "../sources", editable = true }
+# M4 — a genuine mutual dependency, not the same mistake as the one
+# above: `agents` needs api's DB models/tier-resolution/rendering/
+# object-storage/security infra (real reuse, not duplicated), and
+# `api`'s FastAPI process needs to invoke the application-agent
+# in-process (matching every other stage in this codebase — radar,
+# tailoring, cover letters all run in-process from a route handler,
+# no separate worker/queue exists). uv resolves this fine since both
+# are local editable path packages with no version to solve, only
+# source trees to link.
+applicient-agents = { path = "../agents", editable = true }

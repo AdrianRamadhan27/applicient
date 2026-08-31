@@ -295,6 +295,26 @@ async def run_radar_search(
                     adapter = get_adapter(source.adapter_key)
                     config = resolved_config(source.config)
 
+                    # generic_scraper (M4 §9) is the one adapter that needs
+                    # an LLM at all — every other adapter.search() call is a
+                    # deterministic HTTP/JSON parse with nothing to route.
+                    # Resolved once per source here (not per role title/
+                    # query below): unlike query expansion's per-title
+                    # variants, the same career page doesn't need a fresh
+                    # model pull for every title it gets filtered against.
+                    scrape_model = None
+                    if adapter.needs_llm:
+                        try:
+                            scrape_model = resolve_tier(
+                                db, user_id=user_id, tier="fast", stage="radar-generic-scrape",
+                                agent_run_id=run.id, source_run_id=source_run.id, session_factory=session_factory,
+                            )
+                        except TierResolutionError as exc:
+                            yield _emit(
+                                "log", source_run_id=str(source_run.id),
+                                message=f"{source.name}: fast tier not configured, cannot scrape this run ({exc})",
+                            )
+
                     # A credit-metered source (SocialFetch today) bills a
                     # real amount per search call regardless of how many
                     # jobs come back — found live: query expansion turned
@@ -380,9 +400,12 @@ async def run_radar_search(
                         async with search_semaphore:
                             collected_logs: list[str] = []
                             postings = None
-                            async for kind, payload in run_with_live_logs(
-                                adapter.search(query, saved_search.filters or {}, config)
-                            ):
+                            search_call = (
+                                adapter.search(query, saved_search.filters or {}, config, model=scrape_model)
+                                if adapter.needs_llm
+                                else adapter.search(query, saved_search.filters or {}, config)
+                            )
+                            async for kind, payload in run_with_live_logs(search_call):
                                 if kind == "log":
                                     collected_logs.append(payload)
                                 else:

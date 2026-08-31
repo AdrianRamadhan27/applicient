@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { api, type Persona } from "@/lib/api";
+import { api, getAuthToken, type Persona } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 const STORAGE_KEY = "applicient.selectedPersonaId";
 
@@ -24,11 +25,13 @@ const PersonaContext = React.createContext<PersonaContextValue | null>(null);
  * localStorage (first use of it in this app) so a reload doesn't
  * silently reset back to whichever persona happens to sort first. */
 export function PersonaProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [personas, setPersonas] = React.useState<Persona[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [selectedPersonaId, setSelectedPersonaIdState] = React.useState("");
 
   const refreshPersonas = React.useCallback(async () => {
+    if (!getAuthToken()) return;
     const list = await api.listPersonas();
     setPersonas(list);
     setSelectedPersonaIdState((current) => {
@@ -39,9 +42,19 @@ export function PersonaProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Persona loading depends on being authenticated — waits for
+  // AuthProvider to resolve, then only fetches (or clears, on logout)
+  // once there's an actual signed-in user.
   React.useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
     (async () => {
+      if (!user) {
+        setPersonas([]);
+        setSelectedPersonaIdState("");
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         await refreshPersonas();
@@ -52,7 +65,7 @@ export function PersonaProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshPersonas]);
+  }, [authLoading, user, refreshPersonas]);
 
   function setSelectedPersonaId(id: string) {
     setSelectedPersonaIdState(id);

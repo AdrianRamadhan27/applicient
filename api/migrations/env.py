@@ -27,6 +27,20 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def include_object(object, name, type_, reflected, compare_to):
+    # M7 — langgraph-checkpoint-postgres (agents/orchestrator_service.py's
+    # AsyncPostgresSaver.setup()) owns and migrates its own
+    # `checkpoint*` tables directly, entirely outside this app's
+    # SQLAlchemy models/Alembic history. Without this, autogenerate/
+    # `alembic check` sees them as "extra" tables not in `Base.metadata`
+    # and proposes dropping them — a real, otherwise-permanent false
+    # positive from two schema-owning systems sharing one database, not
+    # an actual drift in anything this app itself manages.
+    if type_ == "table" and name.startswith("checkpoint"):
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -34,6 +48,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -48,7 +63,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
 
         with context.begin_transaction():
             context.run_migrations()

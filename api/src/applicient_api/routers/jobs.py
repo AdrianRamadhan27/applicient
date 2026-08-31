@@ -83,6 +83,10 @@ def list_inbox_jobs(
     location: str | None = None,
     min_score: float | None = None,
     max_score: float | None = None,
+    sort: str = Query(
+        default="recommended",
+        description="recommended (default) / newest_posted / newest_scanned / oldest_scanned",
+    ),
     limit: int = Query(default=100, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -142,7 +146,17 @@ def list_inbox_jobs(
         return (rec_rank, -float(fs.overall_score), -(job.posted_at or job.created_at).timestamp())
 
     filtered = [j for j in jobs if matches_filters(j)]
-    filtered.sort(key=rank_key)
+    if sort == "newest_posted":
+        # Falls back to created_at per job for the common F3.1a case of
+        # a null posted_at (never estimated) — same fallback rank_key
+        # below already relies on for its own tie-break.
+        filtered.sort(key=lambda j: j.posted_at or j.created_at, reverse=True)
+    elif sort == "newest_scanned":
+        filtered.sort(key=lambda j: j.created_at, reverse=True)
+    elif sort == "oldest_scanned":
+        filtered.sort(key=lambda j: j.created_at)
+    else:
+        filtered.sort(key=rank_key)
     page = filtered[offset : offset + limit]
 
     return [
@@ -159,6 +173,7 @@ def list_inbox_jobs(
             salary_currency=job.salary_currency,
             apply_url=job.apply_url,
             posted_at=job.posted_at,
+            discovered_at=job.created_at,
             ghost_job_score=job.ghost_job_score,
             ghost_job_reasons=job.ghost_job_reasons,
             repost_count=job.repost_count,
@@ -233,6 +248,7 @@ def get_inbox_job(
         salary_currency=job.salary_currency,
         apply_url=job.apply_url,
         posted_at=job.posted_at,
+        discovered_at=job.created_at,
         ghost_job_score=job.ghost_job_score,
         ghost_job_reasons=job.ghost_job_reasons,
         repost_count=job.repost_count,

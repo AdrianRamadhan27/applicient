@@ -1,6 +1,33 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// M5 — auth token storage. A plain module (not a component), so this
+// reads localStorage directly rather than through React context;
+// auth.ts's AuthProvider writes to the same key so both stay in sync
+// without a circular import between the two files.
+export const AUTH_TOKEN_STORAGE_KEY = "applicient.authToken";
+
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+function authHeader(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export type User = { id: string; email: string };
+
+/** The dedicated Live Browser page's own WebSocket connection —
+ * `API_BASE_URL` with its scheme swapped (http→ws, https→wss), same
+ * origin/port otherwise. Browser-worker itself is never reached
+ * directly (it has no auth of its own); this always points at the
+ * `api`-side proxy (routers/applications.py's live_browser_proxy). */
+export function apiWebSocketUrl(path: string): string {
+  return `${API_BASE_URL.replace(/^http/, "ws")}${path}`;
+}
+
 export type ProviderConnection = {
   id: string;
   provider: string;
@@ -10,6 +37,63 @@ export type ProviderConnection = {
   status: "untested" | "ok" | "auth_failed" | "unreachable";
   last_verified_at: string | null;
   last_error: string | null;
+};
+
+// Third-party login credentials (LinkedIn, etc.) the agent can use to
+// sign in during a fill — deliberately separate from ProviderConnection
+// (an LLM/embedding provider API key) and from FormAnswer (a semantic
+// answer-reuse store, not a secrets vault). The raw secret never comes
+// back from the API after creation — secret_hint only.
+export type Credential = {
+  id: string;
+  label: string;
+  identifier: string;
+  secret_hint: string;
+  created_at: string;
+};
+
+// M5 F8.7 — in-app only for this pass (channel is always "in_app").
+export type Notification = {
+  id: string;
+  channel: string;
+  subject: string;
+  body: string | null;
+  related_type: string | null;
+  related_id: string | null;
+  sent_at: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+// M5 F8.3-F8.6 — one ingested Gmail message, classified and (maybe)
+// matched to an Application.
+export type EmailMessage = {
+  id: string;
+  gmail_message_id: string;
+  thread_id: string | null;
+  subject: string | null;
+  snippet: string | null;
+  received_at: string;
+  classification: string | null;
+  extracted_data: Record<string, unknown>;
+  matched_application_id: string | null;
+  match_confidence: number | null;
+  review_needed: boolean;
+  processed_at: string | null;
+};
+
+// M5 F8.1 — a per-user Gmail OAuth grant feeding email ingestion.
+// Never carries the refresh token — only connection-health fields,
+// same masking discipline as ProviderConnection/Credential.
+export type GmailConnection = {
+  id: string;
+  google_email: string;
+  label_name: string;
+  scan_window_days: number;
+  status: string;
+  last_synced_at: string | null;
+  last_error: string | null;
+  watch_expiration: string | null;
 };
 
 export type ModelCatalogEntry = {
@@ -551,6 +635,7 @@ export type InboxJob = {
   salary_currency: string | null;
   apply_url: string | null;
   posted_at: string | null;
+  discovered_at: string;
   ghost_job_score: number | null;
   ghost_job_reasons: string[];
   repost_count: number;
@@ -565,6 +650,169 @@ export type InboxJobDetail = InboxJob & {
   benefits: string | null;
   sightings: JobSighting[];
 };
+
+// --- F6/F7 — application execution and the pipeline board ---
+
+// M5 follow-up — pipeline stages are now a per-user customizable list
+// (reorder/rename/add/remove), not a fixed set. `key` is immutable and
+// what Application.state actually stores; `display_name` is what the
+// UI shows.
+export type PipelineStage = { id: string; key: string; display_name: string; position: number };
+
+export const AUTONOMY_LEVELS = [
+  "l0_manual",
+  "l1_answer_pack",
+  "l2_fill_review",
+  "l3_fill_submit",
+] as const;
+export type AutonomyLevelValue = (typeof AUTONOMY_LEVELS)[number];
+
+export type Application = {
+  id: string;
+  job_id: string;
+  persona_id: string;
+  job_group_id: string | null;
+  primary_document_id: string | null;
+  // M5 follow-up — a plain string now, not a closed union: it's one of
+  // this user's own customizable PipelineStage keys, which isn't
+  // knowable at the type level (and, in the rare edge case of a
+  // matching stage having been deleted, might not even be one of
+  // them).
+  state: string;
+  autonomy_level: AutonomyLevelValue | null;
+  applied_at: string | null;
+  created_at: string;
+  ghosted: boolean;
+  job_title: string;
+  company_name: string;
+};
+
+export type ApplicationEvent = {
+  id: string;
+  application_id: string;
+  actor: "agent" | "email" | "user";
+  event_type: string;
+  payload: Record<string, unknown>;
+  occurred_at: string;
+};
+
+export type ApplicationAttempt = {
+  id: string;
+  application_id: string;
+  agent_run_id: string | null;
+  attempt_number: number;
+  autonomy_level: string;
+  status:
+    | "in_progress"
+    | "awaiting_review"
+    | "awaiting_handoff"
+    | "awaiting_email"
+    | "submitted"
+    | "abandoned"
+    | "failed";
+  field_map: Record<string, unknown>;
+  screenshot_keys: string[];
+  email_draft: { to: string; subject: string; body: string } | null;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export type ApplicationDetail = Application & {
+  events: ApplicationEvent[];
+  attempts: ApplicationAttempt[];
+};
+
+export type InterruptRequest = { tool: string; args: Record<string, unknown>; description: string };
+
+export type ApplicationStreamEvent =
+  | { type: "stage"; stage: string; status: string; message: string; session_id?: string; attempt_id?: string }
+  // A single LLM turn can call an interrupt-gated tool (e.g. ask_user)
+  // more than once — LangGraph pauses on the whole batch at once, so
+  // this always carries every hanging request, not just one. The
+  // common case is a one-item array.
+  | { type: "interrupt"; attempt_id: string; requests: InterruptRequest[] }
+  | { type: "done"; attempt_id: string }
+  | { type: "error"; message: string };
+
+export function toApplicationStreamEvent(
+  eventType: string,
+  data: Record<string, unknown>,
+): ApplicationStreamEvent {
+  // Every event_type's data shape already matches its live-SSE
+  // counterpart field-for-field (confirmed against streamApply's own
+  // per-event branches above), so a single spread reconstructs all
+  // four variants correctly — no per-type special-casing needed. The
+  // one real exception: `interrupt` RunEvent rows persisted before
+  // multi-request support (`{tool, args, description}`) predate the
+  // `{requests: [...]}` wrapper — replaying one of those old rows
+  // would otherwise leave `requests` undefined and crash every
+  // `.requests.length`/`.map` call downstream. Normalized into a
+  // one-item `requests` array here so old and new history replay
+  // through the exact same rendering path.
+  if (eventType === "interrupt" && !Array.isArray(data.requests)) {
+    return {
+      type: "interrupt",
+      attempt_id: data.attempt_id as string,
+      requests: [{ tool: data.tool as string, args: data.args as Record<string, unknown>, description: data.description as string }],
+    };
+  }
+  return { type: eventType as ApplicationStreamEvent["type"], ...data } as ApplicationStreamEvent;
+}
+
+export type InterruptDecision =
+  | { type: "approve" }
+  | { type: "reject"; message?: string }
+  | { type: "respond"; message: string };
+
+// --- M7 — the conversational orchestrator ---
+
+export type Conversation = {
+  id: string;
+  persona_id: string;
+  status: string;
+  title: string | null;
+  pending_interrupt: { requests: InterruptRequest[] } | null;
+  last_active_at: string;
+  created_at: string;
+};
+
+// A tool result the model sees is always plain text — a card is the
+// side channel (orchestrator_tools.py's `emit_card`) that lets a tool
+// ALSO hand the frontend something structured to render as a real
+// embed (a scored job list, a tailored document, a running
+// application) instead of collapsing everything into prose.
+export type JobCardJob = {
+  job_id: string;
+  title: string;
+  company_name: string;
+  location: string | null;
+  score: number;
+  recommendation: string;
+};
+
+export type ConversationCard =
+  | { card_type: "jobs"; jobs: JobCardJob[] }
+  | {
+      card_type: "document";
+      document_id: string;
+      doc_type: string;
+      template: string;
+      verified: boolean;
+      job_group_id: string | null;
+    }
+  | { card_type: "application"; application_id: string; attempt_id: string | null; session_id: string | null };
+
+export type ConversationStreamEvent =
+  | { type: "stage"; stage: string; status: string; message: string }
+  | { type: "interrupt"; requests: InterruptRequest[] }
+  | { type: "done" }
+  | { type: "error"; message: string }
+  | ({ type: "card" } & ConversationCard);
+
+function toConversationStreamEvent(eventType: string, data: Record<string, unknown>): ConversationStreamEvent {
+  return { type: eventType as ConversationStreamEvent["type"], ...data } as ConversationStreamEvent;
+}
 
 export type RadarRunProgressEvent =
   | { type: "run_started"; agent_run_id: string }
@@ -601,7 +849,7 @@ export type RadarRunProgressEvent =
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: { "Content-Type": "application/json", ...authHeader(), ...init?.headers },
   });
   if (!res.ok) {
     const body = await res.text();
@@ -612,6 +860,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  signup: (email: string, password: string) =>
+    request<{ access_token: string; user: User }>("/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  login: (email: string, password: string) =>
+    request<{ access_token: string; user: User }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  me: () => request<User>("/auth/me"),
+
   listConnections: () => request<ProviderConnection[]>("/provider-connections"),
   createConnection: (body: {
     provider: string;
@@ -625,6 +885,40 @@ export const api = {
     }),
   deleteConnection: (id: string) =>
     request<void>(`/provider-connections/${id}`, { method: "DELETE" }),
+
+  listCredentials: () => request<Credential[]>("/credentials"),
+  createCredential: (body: { label: string; identifier: string; secret: string }) =>
+    request<Credential>("/credentials", { method: "POST", body: JSON.stringify(body) }),
+  deleteCredential: (id: string) => request<void>(`/credentials/${id}`, { method: "DELETE" }),
+
+  /** Not a fetch — a real browser navigation, since OAuth needs the
+   * user's browser at Google's own consent screen. Carries the auth
+   * token as a query param (the /gmail/connect redirect can't read an
+   * Authorization header from a plain link navigation either). */
+  gmailConnectUrl(): string {
+    const token = getAuthToken();
+    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+    return `${API_BASE_URL}/gmail/connect${qs}`;
+  },
+  listGmailConnections: () => request<GmailConnection[]>("/gmail/connections"),
+  updateGmailConnection: (id: string, body: { scan_window_days: number }) =>
+    request<GmailConnection>(`/gmail/connections/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteGmailConnection: (id: string) => request<void>(`/gmail/connections/${id}`, { method: "DELETE" }),
+
+  listNotifications: (unreadOnly = false) =>
+    request<Notification[]>(`/notifications${unreadOnly ? "?unread_only=true" : ""}`),
+  unreadNotificationCount: () => request<{ count: number }>("/notifications/unread-count"),
+  markNotificationRead: (id: string) => request<Notification>(`/notifications/${id}/read`, { method: "POST" }),
+
+  listEmailMessages: (reviewNeeded?: boolean) =>
+    request<EmailMessage[]>(`/email-messages${reviewNeeded !== undefined ? `?review_needed=${reviewNeeded}` : ""}`),
+  confirmEmailTransition: (id: string, body: { approve: boolean; new_state?: string | null }) =>
+    request<EmailMessage>(`/email-messages/${id}/confirm-transition`, { method: "POST", body: JSON.stringify(body) }),
+  emailMessageIcsUrl(emailMessageId: string): string {
+    const token = getAuthToken();
+    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+    return `${API_BASE_URL}/email-messages/${emailMessageId}/ics${qs}`;
+  },
   testConnection: (id: string) =>
     request<ProviderConnection>(`/provider-connections/${id}/test`, {
       method: "POST",
@@ -689,6 +983,7 @@ export const api = {
     formData.append("file", file);
     const res = await fetch(`${API_BASE_URL}/profiles/${profileId}/cv/parse`, {
       method: "POST",
+      headers: authHeader(),
       body: formData,
     });
     if (!res.ok) {
@@ -706,7 +1001,10 @@ export const api = {
   /** Same SSE shape as streamParseCV — see radar.py's module docstring
    * for what each event ties to. */
   async *streamRadarRun(savedSearchId: string): AsyncGenerator<RadarRunProgressEvent> {
-    const res = await fetch(`${API_BASE_URL}/saved-searches/${savedSearchId}/run`, { method: "POST" });
+    const res = await fetch(`${API_BASE_URL}/saved-searches/${savedSearchId}/run`, {
+      method: "POST",
+      headers: authHeader(),
+    });
     if (!res.ok) {
       throw new Error(`radar run failed: ${res.status}: ${await res.text()}`);
     }
@@ -804,10 +1102,11 @@ export const api = {
     role_titles: string[];
     source_ids: string[];
     filters?: SavedSearch["filters"];
+    schedule_cron?: string | null;
   }) => request<SavedSearch>("/saved-searches", { method: "POST", body: JSON.stringify(body) }),
   updateSavedSearch: (
     id: string,
-    body: Partial<Pick<SavedSearch, "name" | "active" | "role_titles" | "source_ids" | "filters">>,
+    body: Partial<Pick<SavedSearch, "name" | "active" | "role_titles" | "source_ids" | "filters" | "schedule_cron">>,
   ) =>
     request<SavedSearch>(`/saved-searches/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSavedSearch: (id: string) => request<void>(`/saved-searches/${id}`, { method: "DELETE" }),
@@ -827,6 +1126,7 @@ export const api = {
       location?: string;
       minScore?: number;
       maxScore?: number;
+      sort?: "recommended" | "newest_posted" | "newest_scanned" | "oldest_scanned";
       limit?: number;
       offset?: number;
     },
@@ -838,6 +1138,7 @@ export const api = {
     if (filters?.location) params.set("location", filters.location);
     if (filters?.minScore !== undefined) params.set("min_score", String(filters.minScore));
     if (filters?.maxScore !== undefined) params.set("max_score", String(filters.maxScore));
+    if (filters?.sort) params.set("sort", filters.sort);
     if (filters?.limit !== undefined) params.set("limit", String(filters.limit));
     if (filters?.offset !== undefined) params.set("offset", String(filters.offset));
     return request<InboxJob[]>(`/jobs?${params.toString()}`);
@@ -869,6 +1170,10 @@ export const api = {
     request<TailoredDocument[]>(
       `/job-groups/${groupId}/documents${docType ? `?doc_type=${docType}` : ""}`,
     ),
+  /** The plain row, by id alone — no job_group context needed. Backs
+   * the Assistant chat's document card, which only has a document_id
+   * from a tool result. */
+  getDocument: (documentId: string) => request<TailoredDocument>(`/documents/${documentId}`),
   getSkillGap: (groupId: string) => request<SkillGapItem[]>(`/job-groups/${groupId}/skill-gap`),
   completeSkillGapItem: (groupId: string, itemId: string) =>
     request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/complete`, { method: "POST" }),
@@ -885,7 +1190,7 @@ export const api = {
   async renderDocument(documentId: string, templateId: string): Promise<Blob> {
     const res = await fetch(
       `${API_BASE_URL}/documents/${documentId}/render?template_id=${encodeURIComponent(templateId)}`,
-      { method: "POST" },
+      { method: "POST", headers: authHeader() },
     );
     if (!res.ok) throw new Error(`render failed: ${res.status}: ${await res.text()}`);
     return res.blob();
@@ -898,6 +1203,7 @@ export const api = {
   async getRenderedPdf(documentId: string, templateId: string): Promise<Blob | null> {
     const res = await fetch(
       `${API_BASE_URL}/documents/${documentId}/rendered?template_id=${encodeURIComponent(templateId)}`,
+      { headers: authHeader() },
     );
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`fetch rendered PDF failed: ${res.status}: ${await res.text()}`);
@@ -907,7 +1213,10 @@ export const api = {
   /** Same SSE shape as streamParseCV/streamRadarRun — see
    * job_groups.py's module docstring. */
   async *streamTailorJobGroup(groupId: string): AsyncGenerator<TailorProgressEvent> {
-    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/tailor`, { method: "POST" });
+    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/tailor`, {
+      method: "POST",
+      headers: authHeader(),
+    });
     if (!res.ok) throw new Error(`tailor failed: ${res.status}: ${await res.text()}`);
 
     for await (const { event, data } of parseSSE(res)) {
@@ -927,7 +1236,7 @@ export const api = {
   ): AsyncGenerator<TailorProgressEvent> {
     const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/cover-letter`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ tone: style?.tone ?? "neutral", length: style?.length ?? "medium" }),
     });
     if (!res.ok) throw new Error(`cover letter generation failed: ${res.status}: ${await res.text()}`);
@@ -947,7 +1256,7 @@ export const api = {
   async *streamGenerateAnswerPack(groupId: string, questions: string[]): AsyncGenerator<TailorProgressEvent> {
     const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/answer-pack`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ questions }),
     });
     if (!res.ok) throw new Error(`answer pack generation failed: ${res.status}: ${await res.text()}`);
@@ -967,7 +1276,10 @@ export const api = {
    * mid-run). Same event shape as streamTailorJobGroup's verifying/
    * regenerating stages. */
   async *streamReverifyDocument(documentId: string): AsyncGenerator<TailorProgressEvent> {
-    const res = await fetch(`${API_BASE_URL}/documents/${documentId}/verify`, { method: "POST" });
+    const res = await fetch(`${API_BASE_URL}/documents/${documentId}/verify`, {
+      method: "POST",
+      headers: authHeader(),
+    });
     if (!res.ok) throw new Error(`verify failed: ${res.status}: ${await res.text()}`);
 
     for await (const { event, data } of parseSSE(res)) {
@@ -1001,13 +1313,283 @@ export const api = {
     }),
 
   getActiveModelProfile: () => request<ModelProfile | null>("/model-profiles/active"),
-  saveActiveModelProfile: (body: {
+  listModelProfiles: () => request<ModelProfile[]>("/model-profiles"),
+  createModelProfile: (body: {
     name: string;
     tier_bindings: Record<string, string>;
     stage_overrides?: Record<string, string>;
   }) =>
-    request<ModelProfile>("/model-profiles/active", {
-      method: "PUT",
+    request<ModelProfile>("/model-profiles", {
+      method: "POST",
       body: JSON.stringify(body),
     }),
+  updateModelProfile: (
+    id: string,
+    body: { name: string; tier_bindings: Record<string, string>; stage_overrides?: Record<string, string> },
+  ) =>
+    request<ModelProfile>(`/model-profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  activateModelProfile: (id: string) =>
+    request<ModelProfile>(`/model-profiles/${id}/activate`, { method: "POST" }),
+  deleteModelProfile: (id: string) =>
+    request<void>(`/model-profiles/${id}`, { method: "DELETE" }),
+
+  // --- F6/F7 — pipeline board ---
+  listPipelineStages: () => request<PipelineStage[]>("/pipeline-stages"),
+  createPipelineStage: (body: { display_name: string }) =>
+    request<PipelineStage>("/pipeline-stages", { method: "POST", body: JSON.stringify(body) }),
+  renamePipelineStage: (id: string, body: { display_name: string }) =>
+    request<PipelineStage>(`/pipeline-stages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deletePipelineStage: (id: string) => request<void>(`/pipeline-stages/${id}`, { method: "DELETE" }),
+  reorderPipelineStages: (stage_ids: string[]) =>
+    request<PipelineStage[]>("/pipeline-stages/reorder", { method: "POST", body: JSON.stringify({ stage_ids }) }),
+
+  createApplication: (body: {
+    job_id: string;
+    persona_id: string;
+    job_group_id?: string;
+    primary_document_id?: string;
+  }) => request<Application>("/applications", { method: "POST", body: JSON.stringify(body) }),
+  listApplications: (state?: string) =>
+    request<Application[]>(`/applications${state ? `?state=${encodeURIComponent(state)}` : ""}`),
+  getApplication: (id: string) => request<ApplicationDetail>(`/applications/${id}`),
+  updateApplication: (
+    id: string,
+    body: { state?: string; autonomy_level?: string; primary_document_id?: string },
+  ) => request<Application>(`/applications/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  markApplied: (id: string, note?: string) =>
+    request<Application>(`/applications/${id}/mark-applied`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+  exportApplications: (format: "csv" | "json" = "csv") =>
+    fetch(`${API_BASE_URL}/applications/export?format=${format}`, { headers: authHeader() }).then((r) => r.blob()),
+
+  /** Starts a real application-agent run. An `interrupt` event pauses
+   * the stream for a human decision — resolve it with streamResumeApplication,
+   * which yields the same event shape and may itself pause again. */
+  async *streamApply(applicationId: string): AsyncGenerator<ApplicationStreamEvent> {
+    const res = await fetch(`${API_BASE_URL}/applications/${applicationId}/apply`, {
+      method: "POST",
+      headers: authHeader(),
+    });
+    if (!res.ok) throw new Error(`apply failed: ${res.status}: ${await res.text()}`);
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "interrupt") yield { type: "interrupt", ...payload };
+      else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "error") yield { type: "error", message: payload.message };
+    }
+  },
+  async *streamResumeApplication(
+    applicationId: string,
+    attemptId: string,
+    decisions: InterruptDecision[],
+  ): AsyncGenerator<ApplicationStreamEvent> {
+    const res = await fetch(`${API_BASE_URL}/applications/${applicationId}/attempts/${attemptId}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ decisions }),
+    });
+    if (!res.ok) throw new Error(`resume failed: ${res.status}: ${await res.text()}`);
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "interrupt") yield { type: "interrupt", ...payload };
+      else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "error") yield { type: "error", message: payload.message };
+    }
+  },
+
+  /** One-shot fetch of an attempt's full persisted log — for viewing a
+   * *finished* attempt's history (any earlier attempt_number, not just
+   * the latest), where there's nothing left to poll for. Same replay
+   * endpoint `pollApplicationAttemptEvents` uses, just without the
+   * "keep polling while running" loop. */
+  async getApplicationAttemptEvents(
+    applicationId: string,
+    attemptId: string,
+  ): Promise<ApplicationStreamEvent[]> {
+    const { events } = await request<{
+      run_status: string;
+      events: { seq: number; event_type: string; data: Record<string, unknown> }[];
+    }>(`/applications/${applicationId}/attempts/${attemptId}/events?since_seq=0`);
+    return events.map((e) => toApplicationStreamEvent(e.event_type, e.data));
+  },
+
+  /** F6.7's review-before-submit screenshot — `index` supports
+   * Python-style negative indexing server-side (-1 = latest), so the
+   * caller doesn't need to know how many screenshots exist yet. Built
+   * as a plain URL (not a fetch wrapper) since it's meant for an
+   * <img src>, not JSON. */
+  attemptScreenshotUrl(applicationId: string, attemptId: string, index = -1): string {
+    const token = getAuthToken();
+    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+    return `${API_BASE_URL}/applications/${applicationId}/attempts/${attemptId}/screenshots/${index}${qs}`;
+  },
+
+  /** F6.7's review-before-submit field-by-field preview: while a
+   * submit_application (or any other) interrupt is pending, the
+   * browser session named in its own args is still open and paused —
+   * this fetches its live accessibility-tree snapshot through the API
+   * (never talks to browser-worker directly; it has no auth of its
+   * own and isn't meant to be reachable from the browser). */
+  getAttemptLiveSnapshot(applicationId: string, attemptId: string, sessionId: string) {
+    return request<{ snapshot: string }>(
+      `/applications/${applicationId}/attempts/${attemptId}/live-snapshot?session_id=${encodeURIComponent(sessionId)}`,
+    );
+  },
+
+  /** The same fallback chain the application-agent's own upload tool
+   * uses (an explicit primary document, then the job_group's tailored
+   * documents, then the persona's own originally-uploaded CV) — no
+   * longer gated on this application having a job_group_id (a
+   * Composer session) at all. Returns null (not an error) when
+   * nothing resolves, same "absent, not broken" convention as
+   * getRenderedPdf. `filename` comes from the server's own
+   * Content-Disposition header rather than being assumed — the raw-CV
+   * fallback can be a `.docx` or anything else the user originally
+   * uploaded, not necessarily a `.pdf` like every other document here. */
+  async getApplicationDocument(
+    applicationId: string,
+    docType: "cv" | "cover_letter",
+  ): Promise<{ blob: Blob; filename: string } | null> {
+    const res = await fetch(`${API_BASE_URL}/applications/${applicationId}/documents/${docType}`, {
+      headers: authHeader(),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`document fetch failed: ${res.status}: ${await res.text()}`);
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename="?([^"]+)"?/.exec(disposition);
+    const filename = match?.[1] ?? `${docType}.pdf`;
+    return { blob: await res.blob(), filename };
+  },
+
+  /** Reconnect/replay for an attempt this page instance didn't start
+   * live — one still `in_progress`/`awaiting_*` from before a page
+   * navigation, tab close, or reload. Every event `_emit`
+   * (application_service.py) yields is also a durable `RunEvent` row,
+   * so this replays everything since `sinceSeq` through the exact
+   * same `ApplicationStreamEvent` shape the live SSE path produces —
+   * the caller's event handling never needs to know whether an event
+   * arrived live or replayed. While the underlying AgentRun is still
+   * "running" (which stays true for the whole awaiting_review/
+   * awaiting_handoff window too, not just active execution — there's
+   * no separate "paused" run status), it keeps polling every 2s
+   * instead of returning; the caller decides when to stop consuming
+   * (e.g. on the first "interrupt" event, same as the live path). */
+  async *pollApplicationAttemptEvents(
+    applicationId: string,
+    attemptId: string,
+    sinceSeq = 0,
+  ): AsyncGenerator<ApplicationStreamEvent> {
+    let seq = sinceSeq;
+    // Belt-and-suspenders against a genuinely wedged run (the backend's
+    // own startup reconciliation — see application_service.py's
+    // reconcile_stale_attempts — already closes out anything left
+    // stuck by a server restart; this only guards against a run that
+    // somehow never reaches a terminal state while the server stays up
+    // the whole time). 900 * 2s = 30 minutes.
+    for (let i = 0; i < 900; i++) {
+      const { run_status, events } = await request<{
+        run_status: string;
+        events: { seq: number; event_type: string; data: Record<string, unknown> }[];
+      }>(`/applications/${applicationId}/attempts/${attemptId}/events?since_seq=${seq}`);
+      for (const e of events) {
+        seq = e.seq;
+        yield toApplicationStreamEvent(e.event_type, e.data);
+      }
+      if (run_status !== "running") return;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    yield { type: "error", message: "gave up waiting for this run to settle after 30 minutes" };
+  },
+
+  // --- M7 — the conversational orchestrator ---
+
+  /** Always a genuinely new conversation — no idempotency. "New chat"
+   * has to actually mean a fresh thread, especially as the escape
+   * hatch for one stuck on a decision you're not ready to make. */
+  createConversation: (personaId: string, title?: string) =>
+    request<Conversation>("/orchestrator/conversations", {
+      method: "POST",
+      body: JSON.stringify({ persona_id: personaId, title: title ?? null }),
+    }),
+  getConversation: (conversationId: string) =>
+    request<Conversation>(`/orchestrator/conversations/${conversationId}`),
+  /** Every conversation for this persona, most-recently-active first —
+   * the Assistant page's own conversation list/switcher. */
+  listConversations: (personaId: string) =>
+    request<Conversation[]>(`/orchestrator/conversations?persona_id=${encodeURIComponent(personaId)}`),
+  /** Hides a conversation from the active list without deleting its
+   * history — how you walk away from one stuck on a pending decision. */
+  archiveConversation: (conversationId: string) =>
+    request<Conversation>(`/orchestrator/conversations/${conversationId}/archive`, { method: "POST" }),
+
+  /** An ordinary chat turn. Streams the same stage/interrupt/done/error
+   * shape as streamApply — errors inside the stream (e.g. a pending
+   * interrupt already open) arrive as an "error" event, not a thrown
+   * exception. */
+  async *streamOrchestratorMessage(conversationId: string, text: string): AsyncGenerator<ConversationStreamEvent> {
+    const res = await fetch(`${API_BASE_URL}/orchestrator/conversations/${conversationId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error(`send message failed: ${res.status}: ${await res.text()}`);
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "interrupt") yield { type: "interrupt", ...payload };
+      else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "error") yield { type: "error", message: payload.message };
+      else if (event === "card") yield { type: "card", ...payload };
+    }
+  },
+
+  /** Resolves the conversation's current pending ask_user interrupt. */
+  async *streamOrchestratorResume(
+    conversationId: string,
+    decisions: InterruptDecision[],
+  ): AsyncGenerator<ConversationStreamEvent> {
+    const res = await fetch(`${API_BASE_URL}/orchestrator/conversations/${conversationId}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ decisions }),
+    });
+    if (!res.ok) throw new Error(`resume failed: ${res.status}: ${await res.text()}`);
+    for await (const { event, data } of parseSSE(res)) {
+      const payload = JSON.parse(data);
+      if (event === "stage") yield { type: "stage", ...payload };
+      else if (event === "interrupt") yield { type: "interrupt", ...payload };
+      else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "error") yield { type: "error", message: payload.message };
+      else if (event === "card") yield { type: "card", ...payload };
+    }
+  },
+
+  /** Full replay — a conversation's whole event history is small
+   * (turns x tens of events, not radar's thousands), so unlike the
+   * application-attempt endpoints this isn't incremental; the caller
+   * just re-renders the whole log on load/reconnect. */
+  async getConversationEvents(conversationId: string): Promise<{
+    runStatus: string;
+    pendingInterrupt: { requests: InterruptRequest[] } | null;
+    events: ConversationStreamEvent[];
+  }> {
+    const result = await request<{
+      status: string;
+      pending_interrupt: { requests: InterruptRequest[] } | null;
+      run_status: string;
+      events: { created_at: string; event_type: string; data: Record<string, unknown> }[];
+    }>(`/orchestrator/conversations/${conversationId}/events`);
+    return {
+      runStatus: result.run_status,
+      pendingInterrupt: result.pending_interrupt,
+      events: result.events.map((e) => toConversationStreamEvent(e.event_type, e.data)),
+    };
+  },
 };

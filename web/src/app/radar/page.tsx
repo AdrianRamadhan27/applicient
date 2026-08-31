@@ -96,6 +96,18 @@ const API_KEY_PLACEHOLDER: Partial<Record<SourceAdapterKey, string>> = {
   socialfetch: "SocialFetch API key (sfk_...)",
 };
 
+// F10.1 — cron presets for the saved-search schedule field. Plain
+// crontab syntax, same convention as the backend's own `schedule_cron`
+// column and APScheduler's `CronTrigger.from_crontab` — no schedule
+// builder widget, just presets that fill the raw expression plus a
+// free-text field for anything else.
+const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
+  { label: "Every hour", cron: "0 * * * *" },
+  { label: "Every 6 hours", cron: "0 */6 * * *" },
+  { label: "Daily at 8am", cron: "0 8 * * *" },
+  { label: "Weekdays at 8am", cron: "0 8 * * 1-5" },
+];
+
 const JOBSPY_SITES = [
   { value: "indeed", label: "Indeed" },
   { value: "linkedin", label: "LinkedIn" },
@@ -199,6 +211,7 @@ export default function RadarPage() {
   const [draftPersonaId, setDraftPersonaId] = React.useState<string>("");
   const [draftSourceIds, setDraftSourceIds] = React.useState<Set<string>>(new Set());
   const [draftLocation, setDraftLocation] = React.useState("");
+  const [draftScheduleCron, setDraftScheduleCron] = React.useState("");
   const [creatingSearch, setCreatingSearch] = React.useState(false);
 
   // Keyed by saved-search id, not a single slot — every saved search
@@ -506,6 +519,7 @@ export default function RadarPage() {
     setDraftPersonaId(selectedPersonaId);
     setDraftSourceIds(new Set());
     setDraftLocation("");
+    setDraftScheduleCron("");
     setCreateOpen(true);
   }
 
@@ -516,6 +530,7 @@ export default function RadarPage() {
     setDraftPersonaId(s.persona_id);
     setDraftSourceIds(new Set(s.source_ids));
     setDraftLocation(s.filters.location ?? "");
+    setDraftScheduleCron(s.schedule_cron ?? "");
     setCreateOpen(true);
   }
 
@@ -531,12 +546,14 @@ export default function RadarPage() {
     setCreatingSearch(true);
     try {
       const filters = draftLocation.trim() ? { location: draftLocation.trim() } : {};
+      const scheduleCron = draftScheduleCron.trim() || null;
       if (editingSearchId) {
         const updated = await api.updateSavedSearch(editingSearchId, {
           name: draftName.trim(),
           role_titles: roleTitles,
           source_ids: Array.from(draftSourceIds),
           filters,
+          schedule_cron: scheduleCron,
         });
         setSavedSearches((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
         toast.success("Saved search updated");
@@ -547,6 +564,7 @@ export default function RadarPage() {
           role_titles: roleTitles,
           source_ids: Array.from(draftSourceIds),
           filters,
+          schedule_cron: scheduleCron,
         });
         setSavedSearches((prev) => [...prev, saved]);
         toast.success("Saved search created");
@@ -1009,6 +1027,11 @@ export default function RadarPage() {
                     <span className="mt-1 block text-[11px] text-muted-foreground">
                       persona: {persona?.name ?? "?"} · {s.source_ids.length} source{s.source_ids.length === 1 ? "" : "s"}
                       {s.filters.location ? ` · ${s.filters.location}` : ""}
+                      {s.schedule_cron ? (
+                        <span className="font-mono"> · scheduled: {s.schedule_cron}</span>
+                      ) : (
+                        " · manual only"
+                      )}
                     </span>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -1294,7 +1317,9 @@ export default function RadarPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingSearchId ? "Edit saved search" : "New saved search"}</DialogTitle>
-            <DialogDescription>Manual run only in this milestone — scheduling comes later.</DialogDescription>
+            <DialogDescription>
+              Runs manually via the Run button, and on a cron schedule if you set one below.
+            </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-2">
             <div className="grid gap-1.5">
@@ -1361,6 +1386,40 @@ export default function RadarPage() {
             <div className="grid gap-1.5">
               <Label htmlFor="search-location">Location filter (optional)</Label>
               <Input id="search-location" value={draftLocation} onChange={(e) => setDraftLocation(e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="search-schedule">Schedule (optional, crontab syntax)</Label>
+              <Input
+                id="search-schedule"
+                placeholder="e.g. 0 8 * * * — leave blank for manual runs only"
+                value={draftScheduleCron}
+                onChange={(e) => setDraftScheduleCron(e.target.value)}
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {SCHEDULE_PRESETS.map((p) => (
+                  <Button
+                    key={p.cron}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setDraftScheduleCron(p.cron)}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+                {draftScheduleCron && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setDraftScheduleCron("")}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
           <DialogFooter>

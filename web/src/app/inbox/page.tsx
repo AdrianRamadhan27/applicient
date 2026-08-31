@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { api, type InboxJob, type InboxJobDetail, type JobGroup, type Recommendation, type Source } from "@/lib/api";
+import { api, type Application, type InboxJob, type InboxJobDetail, type JobGroup, type Recommendation, type Source } from "@/lib/api";
 import { usePersona } from "@/components/persona-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +78,13 @@ function salaryLabel(job: Pick<InboxJob, "salary_min" | "salary_max" | "salary_c
   return `${currency} ${one!.toLocaleString()}`;
 }
 
+function relativeDays(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1d ago";
+  return `${days}d ago`;
+}
+
 function DimensionRow({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="flex items-center justify-between text-xs border-b border-border last:border-b-0 py-1.5">
@@ -96,11 +103,13 @@ function JobDetailDrawer({
   personaId: string;
   onClose: () => void;
 }) {
+  const router = useRouter();
   const [detail, setDetail] = React.useState<InboxJobDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [jobGroups, setJobGroups] = React.useState<JobGroup[]>([]);
   const [newGroupName, setNewGroupName] = React.useState("");
   const [addingToGroup, setAddingToGroup] = React.useState(false);
+  const [startingApplication, setStartingApplication] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -136,6 +145,21 @@ function JobDetailDrawer({
       toast.error(String(e));
     } finally {
       setAddingToGroup(false);
+    }
+  }
+
+  async function handleStartApplication() {
+    setStartingApplication(true);
+    try {
+      // create_application is idempotent server-side (returns the
+      // existing row if this job already has one), so this is safe to
+      // click again on a job you've already added — it just reopens it.
+      const application: Application = await api.createApplication({ job_id: jobId, persona_id: personaId });
+      router.push(`/pipeline?application_id=${application.id}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setStartingApplication(false);
     }
   }
 
@@ -347,13 +371,23 @@ function JobDetailDrawer({
                 ))}
               </div>
 
-              {detail.apply_url && (
-                <Button asChild size="sm" className="self-start">
-                  <a href={detail.apply_url} target="_blank" rel="noopener noreferrer">
-                    Apply
-                  </a>
+              <div className="flex items-center gap-2">
+                {detail.apply_url && (
+                  <Button asChild size="sm" variant="outline">
+                    <a href={detail.apply_url} target="_blank" rel="noopener noreferrer">
+                      Open apply page ↗
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleStartApplication}
+                  disabled={startingApplication}
+                  title="Creates a tracked Application and opens it on the Pipeline board, where you can run the application-agent or mark it applied manually"
+                >
+                  {startingApplication ? "Adding…" : "Add to Pipeline"}
                 </Button>
-              )}
+              </div>
 
               <div className="border-t border-border pt-3 space-y-1.5">
                 <span className="text-xs font-semibold text-muted-foreground uppercase">
@@ -439,6 +473,9 @@ export default function InboxPage() {
   const [locationFilter, setLocationFilter] = React.useState("");
   const [minScore, setMinScore] = React.useState("");
   const [maxScore, setMaxScore] = React.useState("");
+  const [sortBy, setSortBy] = React.useState<"recommended" | "newest_posted" | "newest_scanned" | "oldest_scanned">(
+    "recommended",
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -470,6 +507,7 @@ export default function InboxPage() {
         location: locationFilter || undefined,
         minScore: minScore ? Number(minScore) : undefined,
         maxScore: maxScore ? Number(maxScore) : undefined,
+        sort: sortBy,
         limit: 200,
       });
       setJobs(result);
@@ -482,7 +520,7 @@ export default function InboxPage() {
     } finally {
       setLoadingList(false);
     }
-  }, [personaId, recFilter, sourceFilter, searchQuery, locationFilter, minScore, maxScore]);
+  }, [personaId, recFilter, sourceFilter, searchQuery, locationFilter, minScore, maxScore, sortBy]);
 
   React.useEffect(() => {
     (async () => {
@@ -700,6 +738,20 @@ export default function InboxPage() {
                 </Select>
               </div>
               <div className="flex flex-col gap-1">
+                <Label className="text-[10px] text-muted-foreground">Sort</Label>
+                <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+                  <SelectTrigger className="w-40 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="recommended">Recommended</SelectItem>
+                    <SelectItem value="newest_posted">Newest posted</SelectItem>
+                    <SelectItem value="newest_scanned">Newest scanned</SelectItem>
+                    <SelectItem value="oldest_scanned">Oldest scanned</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
                 <Label className="text-[10px] text-muted-foreground">Location</Label>
                 <Input
                   value={locationInput}
@@ -783,6 +835,12 @@ export default function InboxPage() {
                         </Badge>
                       )}
                       <span>{salaryLabel(job)}</span>
+                      <span title={job.posted_at ? new Date(job.posted_at).toLocaleString() : "not stated by the source"}>
+                        Posted {job.posted_at ? relativeDays(job.posted_at) : "unknown"}
+                      </span>
+                      <span title={new Date(job.discovered_at).toLocaleString()}>
+                        · Scanned {relativeDays(job.discovered_at)}
+                      </span>
                       {job.source_names.map((s) => (
                         <Badge key={s} variant="outline" className="text-[9px] font-mono">
                           {s}

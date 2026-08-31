@@ -83,11 +83,22 @@ class SourceAdapter:
     # skips query expansion for this source and searches only the
     # literal role title, one real call per title per run.
     credit_metered: bool = False
+    # M4 §9 — declared for the one adapter (generic_scraper) that has
+    # to interpret an unknown-structure page rather than parse a
+    # documented API response, so it needs an LLM call `search()` has
+    # no other way to get. Every other adapter leaves this False and
+    # the radar orchestrator never resolves or passes a model to them
+    # — `model` stays untyped here (not `BaseChatModel`) so this
+    # dependency-light base module doesn't have to pull in
+    # langchain-core just for the one adapter that uses it.
+    needs_llm: bool = False
 
     async def test_connection(self, config: dict[str, Any]) -> ConnectionTestResult:
         raise NotImplementedError
 
-    async def search(self, query: str, filters: dict[str, Any], config: dict[str, Any]) -> list[RawPosting]:
+    async def search(
+        self, query: str, filters: dict[str, Any], config: dict[str, Any], *, model: Any = None
+    ) -> list[RawPosting]:
         raise NotImplementedError
 
     async def fetch_detail(self, url: str, config: dict[str, Any]) -> RawPosting:

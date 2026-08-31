@@ -12,13 +12,24 @@ A standalone profile with no owning persona doesn't fit that model, so
 creating the user's first persona (from the app itself) is what
 provisions their first profile too.
 
+M5 — real auth means the demo user needs a real password to log in
+with. DEMO_USER_PASSWORD is dev-only convenience, loudly not meant for
+anything deployed; if a demo user already exists without a password
+(pre-M5 row), this backfills one on the next seed run rather than
+leaving it permanently unable to log in.
+
 Usage: uv run python -m applicient_api.seed
 """
 
+import os
+
+from applicient_api.auth import hash_password
 from applicient_api.db import make_engine, make_session_factory
 from applicient_api.models.profile import User
+from applicient_api.pipeline_stage_service import provision_default_stages
 
 DEMO_EMAIL = "demo@applicient.local"
+DEMO_USER_PASSWORD = os.environ.get("DEMO_USER_PASSWORD", "applicient-dev")
 
 
 def seed() -> None:
@@ -28,13 +39,18 @@ def seed() -> None:
     with Session() as session:
         user = session.query(User).filter_by(email=DEMO_EMAIL).one_or_none()
         if user is None:
-            user = User(email=DEMO_EMAIL)
+            user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_USER_PASSWORD))
             session.add(user)
             session.flush()  # populate user.id via server_default before use below
-            print(f"created user {user.id} ({user.email})")
+            print(f"created user {user.id} ({user.email}) — dev password from DEMO_USER_PASSWORD")
         else:
             print(f"user already exists: {user.id} ({user.email})")
+            if user.password_hash is None:
+                user.password_hash = hash_password(DEMO_USER_PASSWORD)
+                print("  backfilled password_hash from DEMO_USER_PASSWORD")
 
+        session.flush()
+        provision_default_stages(session, user_id=user.id)
         session.commit()
 
 

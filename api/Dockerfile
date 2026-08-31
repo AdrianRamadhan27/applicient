@@ -1,13 +1,18 @@
 # syntax=docker/dockerfile:1
 #
 # Build context is the repo root (not api/) because api/pyproject.toml
-# declares `applicient-sources` as an editable path dependency at
-# `../sources` — both packages have to land in the image as siblings,
-# same layout as local dev. renderers/latex_templates is a third
-# sibling: latex_rendering.py resolves it via
+# declares `applicient-sources` and `applicient-agents` as editable path
+# dependencies at `../sources` and `../agents` — all these packages have
+# to land in the image as siblings, same layout as local dev.
+# `applicient-agents` itself declares `applicient-api` as an editable
+# path dependency back at `../api` (a genuine mutual dependency, see
+# M4_IMPLEMENTATION.md §10) — both sides resolve fine as long as both
+# directories exist under /app before `uv sync` runs. renderers/latex_templates
+# is a further sibling: latex_rendering.py resolves it via
 # `Path(__file__).resolve().parents[3]`, i.e. three levels up from
 # api/src/applicient_api/, which only lands on the right directory if
-# this layout (api/, sources/, renderers/ all under /app) is preserved.
+# this layout (api/, sources/, agents/, renderers/ all under /app) is
+# preserved.
 FROM python:3.12-slim AS base
 
 ARG TARGETARCH
@@ -38,6 +43,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.6 /uv /uvx /usr/local/bin/
 WORKDIR /app
 
 COPY sources /app/sources
+COPY agents /app/agents
 
 # Install dependencies before copying the rest of the app so this layer
 # only invalidates when pyproject.toml/uv.lock actually change.

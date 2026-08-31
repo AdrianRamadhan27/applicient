@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Target, Settings } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Target, Settings, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { usePersona } from "@/components/persona-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,10 +151,59 @@ function ManagePersonasDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   );
 }
 
+const PUBLIC_ROUTES = ["/login", "/signup"];
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, loading: authLoading, logout } = useAuth();
   const { personas, loading, selectedPersonaId, setSelectedPersonaId } = usePersona();
   const [manageOpen, setManageOpen] = React.useState(false);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+
+  const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
+
+  const refreshUnreadCount = React.useCallback(async () => {
+    try {
+      const { count } = await api.unreadNotificationCount();
+      setUnreadCount(count);
+    } catch {
+      // best-effort — a failed count fetch shouldn't disrupt the shell
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      if (!cancelled) await refreshUnreadCount();
+    })();
+    const interval = setInterval(refreshUnreadCount, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [user, refreshUnreadCount, pathname]);
+
+  React.useEffect(() => {
+    if (authLoading) return;
+    if (!user && !isPublicRoute) router.replace("/login");
+    else if (user && isPublicRoute) router.replace("/");
+  }, [authLoading, user, isPublicRoute, pathname, router]);
+
+  // /login and /signup render standalone — no sidebar chrome, since
+  // there's nothing authenticated to show yet. No middleware.ts exists
+  // in this app, so this redirect (plus the mirrored one above) is the
+  // one real auth gate.
+  if (isPublicRoute) return <>{children}</>;
+
+  if (authLoading || !user) {
+    return (
+      <div className="flex h-screen items-center justify-center text-sm text-muted-foreground font-mono">
+        loading…
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen">
@@ -221,7 +271,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      {item.label}
+                      <span className="flex-1">{item.label}</span>
+                      {item.href === "/notifications" && unreadCount > 0 && (
+                        <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-mono leading-none text-primary-foreground">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
                     </Link>
                   );
                 },
@@ -229,6 +284,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </nav>
+
+        <div className="mt-auto border-t border-border px-4 py-2.5 flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate text-[11px] font-mono text-muted-foreground" title={user.email}>
+            {user.email}
+          </span>
+          <button
+            onClick={() => {
+              logout();
+              router.replace("/login");
+            }}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            title="Log out"
+          >
+            <LogOut className="size-3.5" />
+          </button>
+        </div>
       </aside>
 
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden">

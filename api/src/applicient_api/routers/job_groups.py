@@ -62,6 +62,21 @@ def list_templates(doc_type: str = "cv"):
     return [{"id": tid, "name": t["name"], "description": t["description"]} for tid, t in registry.items()]
 
 
+@documents_router.get("/{document_id}", response_model=schemas.DocumentOut)
+def get_document(document_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)):
+    """The plain row — every other document route returns a derivative
+    (`/rendered` PDF bytes, `/tex` source, `/verifications` history);
+    nothing returned the row itself until now. Backs the Assistant
+    chat's document card, which only has a `document_id` from a tool
+    result and needs `doc_type`/`template`/`verified`/`json_delta` to
+    render a preview + diff view."""
+
+    document = db.query(Document).filter_by(id=document_id, user_id=user_id).one_or_none()
+    if document is None:
+        raise HTTPException(404, "document not found")
+    return document
+
+
 @documents_router.get("/{document_id}/verifications", response_model=list[schemas.ClaimVerificationOut])
 def list_document_verifications(
     document_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)

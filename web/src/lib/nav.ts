@@ -9,6 +9,11 @@ export type NavItem = {
 // real screen, so it earns a nav entry now. Settings is still missing
 // (PRD §6) — added when it actually gets built.
 export const NAV_ITEMS: NavItem[] = [
+  // M7 — the conversational orchestrator; first in "Work" since it's
+  // now the primary entry point that drives the other four.
+  { href: "/assistant", label: "Assistant", section: "Work" },
+  { href: "/notifications", label: "Notifications", section: "Work" },
+  { href: "/email-review", label: "Email Review", section: "Work" },
   { href: "/profile", label: "Profile Studio", section: "Work" },
   { href: "/radar", label: "Radar", section: "Work" },
   { href: "/inbox", label: "Job Inbox", section: "Work" },
@@ -17,5 +22,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/run-console", label: "Run Console", section: "System" },
   { href: "/events", label: "Events", section: "System" },
   { href: "/models", label: "Models", section: "System" },
+  { href: "/credentials", label: "Credentials", section: "System" },
   { href: "/cost", label: "Cost", section: "System" },
 ];

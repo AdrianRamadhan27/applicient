@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   api,
   type ModelCatalogEntry,
+  type ModelProfile,
   type ProviderConnection,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -93,9 +94,15 @@ export default function ModelsPage() {
   const [selected, setSelected] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [profiles, setProfiles] = React.useState<ModelProfile[]>([]);
+  // null = the editor below is building a brand-new preset, not yet
+  // saved. Any existing profile's id means "editing that one in
+  // place" — Save writes back to it, Activate/Delete act on it.
+  const [editingId, setEditingId] = React.useState<string | null>(null);
   const [presetName, setPresetName] = React.useState(DEFAULT_PRESET_NAME);
   const [bindings, setBindings] = React.useState<Record<string, string>>({});
   const [savingBindings, setSavingBindings] = React.useState(false);
+  const [profileBusy, setProfileBusy] = React.useState<string | null>(null);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [newProvider, setNewProvider] = React.useState<string>("openrouter");
@@ -134,15 +141,20 @@ export default function ModelsPage() {
     };
   }, [loadConnections]);
 
+  function loadProfileIntoEditor(profile: ModelProfile | null) {
+    setEditingId(profile?.id ?? null);
+    setPresetName(profile?.name ?? DEFAULT_PRESET_NAME);
+    setBindings(profile?.tier_bindings ?? {});
+  }
+
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const profile = await api.getActiveModelProfile();
-        if (!cancelled) {
-          setPresetName(profile?.name ?? DEFAULT_PRESET_NAME);
-          setBindings(profile?.tier_bindings ?? {});
-        }
+        const list = await api.listModelProfiles();
+        if (cancelled) return;
+        setProfiles(list);
+        loadProfileIntoEditor(list.find((p) => p.is_active) ?? list[0] ?? null);
       } catch (e) {
         if (!cancelled) toast.error(String(e));
       }
@@ -151,6 +163,48 @@ export default function ModelsPage() {
       cancelled = true;
     };
   }, []);
+
+  function handleNewPreset() {
+    loadProfileIntoEditor(null);
+  }
+
+  async function handleActivateProfile(profile: ModelProfile) {
+    setProfileBusy(profile.id);
+    try {
+      const updated = await api.activateModelProfile(profile.id);
+      setProfiles((current) => current.map((p) => ({ ...p, is_active: p.id === updated.id })));
+      if (editingId === updated.id) setPresetName(updated.name);
+      toast.success(`"${updated.name}" is now active`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setProfileBusy(null);
+    }
+  }
+
+  async function handleDeleteProfile(profile: ModelProfile) {
+    if (!window.confirm(`Delete preset "${profile.name}"?`)) return;
+    setProfileBusy(profile.id);
+    try {
+      await api.deleteModelProfile(profile.id);
+      const remaining = profiles.filter((p) => p.id !== profile.id);
+      setProfiles(remaining);
+      if (editingId === profile.id) {
+        // The backend auto-activates another remaining profile when
+        // the deleted one was active (see model_profiles.py) — refetch
+        // so the editor reflects whichever one that actually was
+        // instead of guessing client-side.
+        const list = await api.listModelProfiles();
+        setProfiles(list);
+        loadProfileIntoEditor(list.find((p) => p.is_active) ?? list[0] ?? null);
+      }
+      toast.success(`"${profile.name}" deleted`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setProfileBusy(null);
+    }
+  }
 
   // Loaded for every tested connection, not just the one highlighted
   // in the table below — tier bindings can mix providers (F12.9: any
@@ -292,13 +346,20 @@ export default function ModelsPage() {
     }
     setSavingBindings(true);
     try {
-      const saved = await api.saveActiveModelProfile({
-        name: presetName.trim() || DEFAULT_PRESET_NAME,
-        tier_bindings: effectiveBindings,
+      const body = { name: presetName.trim() || DEFAULT_PRESET_NAME, tier_bindings: effectiveBindings };
+      const saved = editingId ? await api.updateModelProfile(editingId, body) : await api.createModelProfile(body);
+      setProfiles((current) => {
+        const withoutSaved = current.filter((p) => p.id !== saved.id);
+        // A brand-new profile only comes back is_active=true if it was
+        // this user's very first one ever (model_profiles.py) — either
+        // way, trust the server's answer over guessing here.
+        const next = saved.is_active
+          ? withoutSaved.map((p) => ({ ...p, is_active: false })).concat(saved)
+          : withoutSaved.concat(saved);
+        return next;
       });
-      setPresetName(saved.name);
-      setBindings(saved.tier_bindings);
-      toast.success("Preset saved — CV ingest is ready");
+      loadProfileIntoEditor(saved);
+      toast.success(editingId ? "Preset updated" : "Preset created");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -514,8 +575,66 @@ export default function ModelsPage() {
             </span>
             <span className="text-[11px] text-muted-foreground">
               Agents ask for a capability tier; this is the only place a model is selected.
+              Keep multiple presets and switch which one is active — e.g. a free/budget preset
+              and a paid/quality preset for the same tiers.
             </span>
           </div>
+
+          {profiles.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {profiles.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => loadProfileIntoEditor(p)}
+                  disabled={profileBusy === p.id}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                    editingId === p.id
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-card hover:border-primary/50",
+                  )}
+                >
+                  {p.is_active && <span className="size-1.5 shrink-0 rounded-full bg-ok" />}
+                  {p.name}
+                </button>
+              ))}
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleNewPreset}>
+                + New preset
+              </Button>
+            </div>
+          )}
+
+          {editingId && (
+            <div className="flex items-center gap-2">
+              {(() => {
+                const current = profiles.find((p) => p.id === editingId);
+                if (!current) return null;
+                return (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={current.is_active || profileBusy === current.id}
+                      onClick={() => handleActivateProfile(current)}
+                    >
+                      {current.is_active ? "Active" : "Activate"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs text-crit hover:text-crit"
+                      disabled={profileBusy === current.id}
+                      onClick={() => handleDeleteProfile(current)}
+                    >
+                      Delete preset
+                    </Button>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {!Object.values(tierOptions).some((options) => options.length) ? (
             <div className="border border-dashed border-input p-5 text-center text-sm text-muted-foreground">
               Test a provider and refresh its catalog to configure the tiers.
@@ -587,7 +706,7 @@ export default function ModelsPage() {
               <div className="flex flex-col gap-2 border-t border-border bg-secondary px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <Label htmlFor="model-preset-name" className="shrink-0 text-xs text-muted-foreground">
-                    active preset
+                    {editingId ? "preset name" : "new preset name"}
                   </Label>
                   <Input
                     id="model-preset-name"
@@ -599,7 +718,7 @@ export default function ModelsPage() {
                   />
                 </div>
                 <Button size="sm" onClick={handleSaveBindings} disabled={savingBindings}>
-                  {savingBindings ? "Saving…" : "Save preset"}
+                  {savingBindings ? "Saving…" : editingId ? "Save changes" : "Create preset"}
                 </Button>
               </div>
             </div>

@@ -11,6 +11,28 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+
+
+class SignupIn(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    user: UserOut
+
+
 class ProviderConnectionCreate(BaseModel):
     provider: str
     api_key: str
@@ -32,6 +54,81 @@ class ProviderConnectionOut(BaseModel):
     status: str
     last_verified_at: datetime | None
     last_error: str | None
+
+
+class GmailConnectionOut(BaseModel):
+    """Never includes the refresh token — nothing decrypts it for
+    display, same discipline as ProviderConnectionOut.api_key_hint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    google_email: str
+    label_name: str
+    scan_window_days: int
+    status: str
+    last_synced_at: datetime | None
+    last_error: str | None
+    watch_expiration: datetime | None
+
+
+class GmailConnectionUpdate(BaseModel):
+    scan_window_days: int = Field(ge=1, le=90)
+
+
+class EmailMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    gmail_message_id: str
+    thread_id: str | None
+    subject: str | None
+    snippet: str | None
+    received_at: datetime
+    classification: str | None
+    extracted_data: dict
+    matched_application_id: uuid.UUID | None
+    match_confidence: float | None
+    review_needed: bool
+    processed_at: datetime | None
+
+
+class EmailTransitionConfirm(BaseModel):
+    approve: bool
+    new_state: str | None = None
+
+
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    channel: str
+    subject: str
+    body: str | None
+    related_type: str | None
+    related_id: uuid.UUID | None
+    sent_at: datetime | None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class CredentialCreate(BaseModel):
+    label: str = Field(max_length=60)
+    identifier: str = Field(max_length=250)
+    secret: str
+
+
+class CredentialOut(BaseModel):
+    """Never includes the raw or encrypted secret — secret_hint only,
+    same masking discipline as ProviderConnectionOut.api_key_hint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    label: str
+    identifier: str
+    secret_hint: str
+    created_at: datetime
 
 
 class ModelCatalogEntryOut(BaseModel):
@@ -398,6 +495,7 @@ class SavedSearchCreate(BaseModel):
     role_titles: list[str]
     source_ids: list[uuid.UUID]
     filters: dict = Field(default_factory=dict)
+    schedule_cron: str | None = None
 
 
 class SavedSearchUpdate(BaseModel):
@@ -405,6 +503,7 @@ class SavedSearchUpdate(BaseModel):
     role_titles: list[str] | None = None
     source_ids: list[uuid.UUID] | None = None
     filters: dict | None = None
+    schedule_cron: str | None = None
     active: bool | None = None
 
 
@@ -469,6 +568,51 @@ class RunEventOut(BaseModel):
 class RunEventsOut(BaseModel):
     run_status: str
     events: list[RunEventOut]
+
+
+class ConversationCreate(BaseModel):
+    persona_id: uuid.UUID
+    title: str | None = None
+
+
+class ConversationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    persona_id: uuid.UUID
+    status: str
+    title: str | None
+    pending_interrupt: dict | None
+    last_active_at: datetime
+    created_at: datetime
+
+
+class MessageIn(BaseModel):
+    text: str
+
+
+class ConversationEventOut(BaseModel):
+    """A conversation spans many AgentRun rows (one per turn), so
+    RunEvent's own per-run `seq` isn't a valid cross-conversation
+    cursor — `created_at` (already on TimestampMixin) is used instead,
+    same reasoning `get_conversation_events` documents."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    created_at: datetime
+    event_type: str
+    data: dict
+
+
+class ConversationEventsOut(BaseModel):
+    status: str
+    pending_interrupt: dict | None
+    # The most recent turn's own AgentRun.status — "running" means a
+    # turn is still in flight (e.g. the page reloaded mid-stream), the
+    # same signal applications.py's run_status gives its own reconnect
+    # path.
+    run_status: str
+    events: list[ConversationEventOut]
 
 
 class JobSummaryOut(BaseModel):
@@ -566,6 +710,13 @@ class InboxJobOut(BaseModel):
     salary_currency: str | None
     apply_url: str | None
     posted_at: datetime | None
+    # The employer's own stated posting date (posted_at, above) is
+    # frequently null (F3.1's own "never estimated" discipline) or
+    # stale (a repost). discovered_at — Job.created_at, when
+    # Applicient's own row was first created — is always real and is
+    # what "sort by newest" (Inbox) actually sorts by when a job has
+    # no posted_at at all.
+    discovered_at: datetime
     ghost_job_score: float | None
     ghost_job_reasons: list[str]
     repost_count: int
@@ -672,4 +823,116 @@ class ClaimVerificationOut(BaseModel):
     evidence_ids: list[uuid.UUID]
     verdict: str
     rationale: str | None
+
+
+# --- F6/F7 — application execution and the pipeline board ---
+
+
+class PipelineStageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    key: str
+    display_name: str
+    position: int
+
+
+class PipelineStageCreate(BaseModel):
+    display_name: str = Field(max_length=60)
+
+
+class PipelineStageRename(BaseModel):
+    display_name: str = Field(max_length=60)
+
+
+class PipelineStageReorder(BaseModel):
+    stage_ids: list[uuid.UUID]
+
+
+class ApplicationCreate(BaseModel):
+    job_id: uuid.UUID
+    persona_id: uuid.UUID
+    job_group_id: uuid.UUID | None = None
+    primary_document_id: uuid.UUID | None = None
+
+
+class ApplicationUpdate(BaseModel):
+    state: str | None = None
+    autonomy_level: str | None = None
+    primary_document_id: uuid.UUID | None = None
+
+
+class ApplicationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    persona_id: uuid.UUID
+    job_group_id: uuid.UUID | None
+    primary_document_id: uuid.UUID | None
+    state: str
+    autonomy_level: str | None
+    applied_at: datetime | None
+    created_at: datetime
+    ghosted: bool = False
+    job_title: str = ""
+    company_name: str = ""
+
+
+class ApplicationEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    actor: str
+    event_type: str
+    payload: dict
+    occurred_at: datetime
+
+
+class ApplicationAttemptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    agent_run_id: uuid.UUID | None
+    attempt_number: int
+    autonomy_level: str
+    status: str
+    field_map: dict
+    screenshot_keys: list
+    email_draft: dict | None = None
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class ApplicationDetailOut(ApplicationOut):
+    events: list[ApplicationEventOut] = []
+    attempts: list[ApplicationAttemptOut] = []
+
+
+class InterruptDecisionIn(BaseModel):
+    # "approve" | "reject" | "respond"
+    type: str
+    message: str | None = None
+
+
+class InterruptDecisionsIn(BaseModel):
+    """One resume can pause on more than one hanging tool call at once
+    — e.g. the agent calling `ask_user` several times in the same turn
+    instead of one at a time. LangGraph's HumanInTheLoopMiddleware
+    requires exactly one decision per hanging call, in the same order
+    they were requested — a single `InterruptDecisionIn` (the pre-M4.1
+    shape) silently broke the moment more than one ever showed up
+    (`Number of human decisions (1) does not match number of hanging
+    tool calls (15)`, hit live). This is now the only shape the resume
+    endpoint accepts; the common single-interrupt case is just a
+    one-item list."""
+
+    decisions: list[InterruptDecisionIn]
+
+
+class MarkAppliedIn(BaseModel):
+    note: str | None = None
     attempt_number: int

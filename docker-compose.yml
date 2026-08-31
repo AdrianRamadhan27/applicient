@@ -72,8 +72,13 @@ services:
       SECRET_KEY: ${SECRET_KEY:-3bvqp75gEt7Wq7cMXtIedPE-zZEGVCpbUL0DVOqZN0Y=}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-applicient}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-applicient-dev}
       GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
       GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
+      GMAIL_PUBSUB_TOPIC: ${GMAIL_PUBSUB_TOPIC:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:${WEB_PORT:-3000}}
+      BROWSER_WORKER_URL: http://browser-worker:8100
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -83,8 +88,27 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      browser-worker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  browser-worker:
+    build:
+      context: ./browser-worker
+    restart: unless-stopped
+    # Chromium's default /dev/shm (64MB) is too small under Docker and
+    # can crash mid-session — same fix Playwright's own Docker docs
+    # recommend.
+    shm_size: "1gb"
+    ports:
+      - "${BROWSER_WORKER_PORT:-8100}:8100"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -107,8 +131,8 @@ services:
         condition: service_healthy
 
   # --- Not yet built: still empty stub packages (see worker/,
-  # browser-worker/, scheduler/, metering/, models/) — nothing to
-  # containerize until one of those actually has code in it.
+  # scheduler/, metering/, models/) — nothing to containerize until
+  # one of those actually has code in it.
 
 volumes:
   pgdata:

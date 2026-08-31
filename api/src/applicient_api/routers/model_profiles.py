@@ -1,4 +1,8 @@
-"""GUI-managed model tier bindings used by every agent stage."""
+"""GUI-managed model tier bindings used by every agent stage. A user
+may keep any number of named presets (F12.9/F12.10) — exactly one is
+"active" at a time, which is what every other stage in this codebase
+actually resolves against (see model_profiles.py's own docstring for
+why that invariant is enforced here rather than centrally)."""
 
 from __future__ import annotations
 
@@ -9,7 +13,14 @@ from sqlalchemy.orm import Session
 
 from applicient_api import schemas
 from applicient_api.deps import current_user_id, get_db
-from applicient_api.model_profiles import upsert_active_profile
+from applicient_api.model_profiles import (
+    ModelProfileNotFoundError,
+    activate_profile,
+    create_profile,
+    delete_profile,
+    list_profiles,
+    update_profile,
+)
 from applicient_api.models.llm import ModelCatalogEntry, ModelProfile, ProviderConnection
 
 router = APIRouter(prefix="/model-profiles", tags=["model-profiles"])
@@ -56,19 +67,7 @@ def _validate_bindings(
             raise HTTPException(422, f"{entry.model_id} does not advertise structured output")
 
 
-@router.get("/active", response_model=schemas.ModelProfileOut | None)
-def get_active_model_profile(
-    db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
-):
-    return db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
-
-
-@router.put("/active", response_model=schemas.ModelProfileOut)
-def save_active_model_profile(
-    body: schemas.ModelProfileUpdate,
-    db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
-):
+def _validated_bindings(db: Session, *, user_id: uuid.UUID, body: schemas.ModelProfileUpdate) -> tuple[dict, dict]:
     tier_bindings = {tier: str(entry_id) for tier, entry_id in body.tier_bindings.items()}
     stage_overrides = {stage: str(entry_id) for stage, entry_id in body.stage_overrides.items()}
     _validate_bindings(
@@ -77,13 +76,87 @@ def save_active_model_profile(
         tier_bindings={tier: uuid.UUID(entry_id) for tier, entry_id in tier_bindings.items()},
         stage_overrides={stage: uuid.UUID(entry_id) for stage, entry_id in stage_overrides.items()},
     )
-    profile = upsert_active_profile(
+    return tier_bindings, stage_overrides
+
+
+@router.get("", response_model=list[schemas.ModelProfileOut])
+def get_model_profiles(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)):
+    return list_profiles(db, user_id=user_id)
+
+
+@router.get("/active", response_model=schemas.ModelProfileOut | None)
+def get_active_model_profile(
+    db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    return db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
+
+
+@router.post("", response_model=schemas.ModelProfileOut, status_code=201)
+def create_model_profile(
+    body: schemas.ModelProfileUpdate,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    tier_bindings, stage_overrides = _validated_bindings(db, user_id=user_id, body=body)
+    profile = create_profile(
         db,
         user_id=user_id,
-        name=body.name.strip() or "openrouter-budget",
+        name=body.name.strip() or "untitled preset",
         tier_bindings=tier_bindings,
         stage_overrides=stage_overrides,
     )
     db.commit()
     db.refresh(profile)
     return profile
+
+
+@router.patch("/{profile_id}", response_model=schemas.ModelProfileOut)
+def update_model_profile(
+    profile_id: uuid.UUID,
+    body: schemas.ModelProfileUpdate,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    tier_bindings, stage_overrides = _validated_bindings(db, user_id=user_id, body=body)
+    try:
+        profile = update_profile(
+            db,
+            user_id=user_id,
+            profile_id=profile_id,
+            name=body.name.strip() or "untitled preset",
+            tier_bindings=tier_bindings,
+            stage_overrides=stage_overrides,
+        )
+    except ModelProfileNotFoundError:
+        raise HTTPException(404, "model profile not found")
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.post("/{profile_id}/activate", response_model=schemas.ModelProfileOut)
+def activate_model_profile(
+    profile_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    try:
+        profile = activate_profile(db, user_id=user_id, profile_id=profile_id)
+    except ModelProfileNotFoundError:
+        raise HTTPException(404, "model profile not found")
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.delete("/{profile_id}", status_code=204)
+def delete_model_profile(
+    profile_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    try:
+        delete_profile(db, user_id=user_id, profile_id=profile_id)
+    except ModelProfileNotFoundError:
+        raise HTTPException(404, "model profile not found")
+    db.commit()
