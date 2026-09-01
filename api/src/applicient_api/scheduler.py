@@ -13,10 +13,23 @@ Budget-cap enforcement (F10.4) is deliberately NOT built in this pass
 — `Budget` rows exist but nothing reads them yet anywhere in this
 codebase, and wiring real spend enforcement is its own scoped piece of
 work, not a one-line addition alongside the rest of this module.
+
+SaaS pivot — real multi-tenant constraint, stated plainly rather than
+discovered in production: this scheduler must stay a single `api`
+replica. APScheduler's in-memory jobstore has no distributed lock or
+leader election, so a second replica would independently reconstruct
+and fire the exact same job set (`start_scheduler`'s own reconciliation
+pass runs identically in every process) — every saved-search cron,
+every Gmail poll, every daily digest would fire twice. Real horizontal
+scaling of this scheduler needs either a distributed jobstore/leader
+election or moving cron ownership out of `api` into a dedicated
+service — a real, separate piece of architecture work, not attempted
+here.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -47,6 +60,17 @@ WATCH_RENEWAL_CHECK_INTERVAL_MINUTES = 60
 WATCH_RENEWAL_WINDOW = timedelta(hours=24)
 DIGEST_HOUR_UTC = 8
 DEADLINE_LOOKAHEAD = timedelta(days=3)
+
+# SaaS pivot — this loop used to await every user's Gmail poll one
+# after another with no bound, on the one shared event loop the whole
+# api process runs on: a slow/hanging real Gmail API call for one
+# tenant delayed every other tenant's poll behind it, and could push
+# a poll past its own next scheduled firing. A semaphore caps how many
+# connections poll concurrently (Gmail's API, not this process, is the
+# real bottleneck); a per-connection timeout guarantees one hung call
+# can't consume the whole 5-minute window.
+GMAIL_POLL_CONCURRENCY = 5
+GMAIL_POLL_TIMEOUT_SECONDS = 60
 
 
 def _saved_search_job_id(saved_search_id: uuid.UUID) -> str:
@@ -109,15 +133,38 @@ async def run_scheduled_search(saved_search_id: uuid.UUID, user_id: uuid.UUID) -
         logger.exception("scheduled run for saved search %s failed", saved_search_id)
 
 
+async def _poll_one_connection(connection_id: uuid.UUID, user_id: uuid.UUID, semaphore: asyncio.Semaphore) -> None:
+    # user_id passed through purely for structured logging (see
+    # logging_config.py) — diagnosing one noisy/broken tenant's Gmail
+    # connection from `docker logs` shouldn't require grepping a
+    # connection UUID and cross-referencing it against the DB by hand.
+    async with semaphore:
+        try:
+            await asyncio.wait_for(
+                email_ingestion.GmailIngestor.poll(_session_factory, connection_id),
+                timeout=GMAIL_POLL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "gmail poll for connection %s exceeded %ss, abandoned",
+                connection_id, GMAIL_POLL_TIMEOUT_SECONDS,
+                extra={"user_id": user_id, "connection_id": connection_id},
+            )
+        except Exception:
+            logger.exception(
+                "gmail poll failed for connection %s", connection_id,
+                extra={"user_id": user_id, "connection_id": connection_id},
+            )
+
+
 async def _poll_all_gmail_connections() -> None:
     assert _session_factory is not None
     with _session_factory() as session:
-        connection_ids = [row[0] for row in session.query(GmailConnection.id).all()]
-    for connection_id in connection_ids:
-        try:
-            await email_ingestion.GmailIngestor.poll(_session_factory, connection_id)
-        except Exception:
-            logger.exception("gmail poll failed for connection %s", connection_id)
+        connections = session.query(GmailConnection.id, GmailConnection.user_id).all()
+    semaphore = asyncio.Semaphore(GMAIL_POLL_CONCURRENCY)
+    await asyncio.gather(
+        *(_poll_one_connection(cid, uid, semaphore) for cid, uid in connections)
+    )
 
 
 async def _renew_expiring_watches() -> None:

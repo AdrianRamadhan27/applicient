@@ -13,12 +13,17 @@ from sse_starlette.sse import EventSourceResponse
 from applicient_api.deps import current_user_id, get_db, get_session_factory
 from applicient_api.models.discovery import SavedSearch
 from applicient_api.models.profile import Persona, Profile
+from applicient_api.billing_service import enforce_usage_cap
 from applicient_api.radar import run_radar_search
+from applicient_api.rate_limit import rate_limit
 
 router = APIRouter(prefix="/saved-searches", tags=["radar"])
 
 
-@router.post("/{saved_search_id}/run")
+@router.post(
+    "/{saved_search_id}/run",
+    dependencies=[Depends(rate_limit("radar-run", limit=5, window_seconds=60)), Depends(enforce_usage_cap)],
+)
 def run_saved_search(
     saved_search_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
 ):

@@ -2,7 +2,7 @@
 
 The implementation checklist is split by milestone so each milestone can evolve independently. See [PRD.md](PRD.md) for the product requirements and roadmap.
 
-**Current status:** M0-M5 complete (M4/M5 checklists have a small number of disclosed, bounded gaps — see each file's own Status line). M6 is ready to start.
+**Current status:** M0-M5 complete (M4/M5 checklists have a small number of disclosed, bounded gaps — see each file's own Status line). **M6 (Breadth & proof) and M7 (Demo dataset) are dropped from the active roadmap** per explicit user direction — the project pivoted to a real SaaS instead. See [SAAS_IMPLEMENTATION.md](SAAS_IMPLEMENTATION.md) for that work (Phase 0-1 complete, Phase 2-4 designed but not yet built).
 
 | Milestone | Checklist | Status |
 |---|---|---|
@@ -12,7 +12,8 @@ The implementation checklist is split by milestone so each milestone can evolve 
 | M3 — Tailoring | [M3_IMPLEMENTATION.md](M3_IMPLEMENTATION.md) | Complete |
 | M4 — Execution | [M4_IMPLEMENTATION.md](M4_IMPLEMENTATION.md) | Complete (disclosed gaps) |
 | M5 — Radar & Inbox | [M5_IMPLEMENTATION.md](M5_IMPLEMENTATION.md) | Complete (disclosed gaps) |
-| M6 — Breadth & proof | Planned | Not started |
-| M7 — Demo dataset | Planned | Not started |
+| ~~M6 — Breadth & proof~~ | — | Dropped — superseded by the SaaS pivot |
+| ~~M7 — Demo dataset~~ | — | Dropped — superseded by the SaaS pivot |
+| SaaS pivot | [SAAS_IMPLEMENTATION.md](SAAS_IMPLEMENTATION.md) | In progress (Phase 0-1 complete) |
 
 Use the milestone-specific file for implementation work and its verification log. Keep this file as the entry point and status overview.

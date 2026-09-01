@@ -48,10 +48,10 @@ from applicient_api.deps import current_user_id, get_db, get_session_factory
 from applicient_api.embedding_service import embed_evidence_items
 from applicient_api.models.agents import AgentRun, AgentStep
 from applicient_api.models.enums import EvidenceCategory
-from applicient_api.models.llm import LlmCall, ModelProfile
+from applicient_api.models.llm import LlmCall
 from applicient_api.models.profile import EvidenceItem, Profile
 from applicient_api.object_storage import put_object
-from applicient_api.tier_resolution import TierResolutionError, resolve_embedding_tier, resolve_tier
+from applicient_api.tier_resolution import TierResolutionError, active_model_profile, resolve_embedding_tier, resolve_tier
 
 _VALID_CATEGORIES = {c.value for c in EvidenceCategory}
 
@@ -221,10 +221,8 @@ async def _parse_cv_stream(
             profile.parsed_at = datetime.now(timezone.utc)
             profile.confirmed = False
             profile.revision += 1
-            active_model_profile = (
-                db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
-            )
-            run.model_profile_id = active_model_profile.id if active_model_profile else None
+            active_profile = active_model_profile(db)
+            run.model_profile_id = active_profile.id if active_profile else None
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
 

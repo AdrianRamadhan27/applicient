@@ -9,6 +9,7 @@ import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { usePersona } from "@/components/persona-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const SECTIONS = ["Work", "System"] as const;
+const SECTIONS = ["Work", "System", "Admin"] as const;
 
 /** Persona create/rename/delete used to live only inside Radar's Setup
  * dialog (a leftover from when it was first built, since SavedSearch
@@ -151,7 +152,22 @@ function ManagePersonasDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   );
 }
 
-const PUBLIC_ROUTES = ["/login", "/signup"];
+// "/" is the public marketing landing page (SaaS pivot) — renders with
+// no sidebar chrome for everyone, signed in or not, and unlike
+// /login|/signup never redirects anyone away from it. AUTH_ENTRY_ROUTES
+// are the ones an already-authenticated user has no reason to be on.
+const NO_CHROME_ROUTES = ["/", "/login", "/signup"];
+const AUTH_ENTRY_ROUTES = ["/login", "/signup"];
+// Where an authenticated user gets sent instead of an auth-entry page
+// or a forbidden admin route — nav.ts's own comment already calls this
+// "the primary entry point that drives the other four."
+const AUTHENTICATED_HOME = "/assistant";
+
+// SaaS pivot — a signed-in non-admin who navigates straight to an
+// admin-only URL (rather than clicking a hidden nav item) gets
+// redirected instead of a raw 403 error toast. Backend routes remain
+// the real boundary (current_admin_user) regardless.
+const ADMIN_ROUTE_PREFIXES = NAV_ITEMS.filter((item) => item.adminOnly).map((item) => item.href);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -161,7 +177,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [manageOpen, setManageOpen] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
 
-  const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
+  const isNoChromeRoute = NO_CHROME_ROUTES.includes(pathname);
+  const isAuthEntryRoute = AUTH_ENTRY_ROUTES.includes(pathname);
+  const isAdminRoute = ADMIN_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 
   const refreshUnreadCount = React.useCallback(async () => {
     try {
@@ -187,15 +205,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     if (authLoading) return;
-    if (!user && !isPublicRoute) router.replace("/login");
-    else if (user && isPublicRoute) router.replace("/");
-  }, [authLoading, user, isPublicRoute, pathname, router]);
+    if (!user && !isNoChromeRoute) router.replace("/login");
+    else if (user && isAuthEntryRoute) router.replace(AUTHENTICATED_HOME);
+    else if (user && isAdminRoute && user.role !== "admin") router.replace(AUTHENTICATED_HOME);
+  }, [authLoading, user, isNoChromeRoute, isAuthEntryRoute, isAdminRoute, pathname, router]);
 
-  // /login and /signup render standalone — no sidebar chrome, since
-  // there's nothing authenticated to show yet. No middleware.ts exists
+  // "/", /login and /signup render standalone — no sidebar chrome, since
+  // there's nothing authenticated to show yet (or, for "/", nothing that
+  // needs to be — it's the public marketing page). No middleware.ts exists
   // in this app, so this redirect (plus the mirrored one above) is the
   // one real auth gate.
-  if (isPublicRoute) return <>{children}</>;
+  if (isNoChromeRoute) return <>{children}</>;
 
   if (authLoading || !user) {
     return (
@@ -208,12 +228,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen">
       <aside className="w-[196px] shrink-0 border-r border-border bg-card flex flex-col">
-        <div className="h-12 flex items-center gap-2 px-4 border-b border-border">
+        <Link href="/" className="h-12 flex items-center gap-2 px-4 border-b border-border hover:bg-secondary/40">
           <Target className="size-4 text-primary" strokeWidth={1.5} />
           <span className="font-mono text-sm font-semibold tracking-tight">
             applicient
           </span>
-        </div>
+        </Link>
 
         <div className="px-3 py-2.5 border-b border-border flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -252,12 +272,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex flex-col py-2">
-          {SECTIONS.map((section) => (
+          {SECTIONS.map((section) => {
+            const items = NAV_ITEMS.filter(
+              (item) => item.section === section && (!item.adminOnly || user?.role === "admin"),
+            );
+            if (items.length === 0) return null;
+            return (
             <div key={section}>
               <div className="px-4 pt-3.5 pb-1 font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
                 {section}
               </div>
-              {NAV_ITEMS.filter((item) => item.section === section).map(
+              {items.map(
                 (item) => {
                   const active = pathname.startsWith(item.href);
                   return (
@@ -282,23 +307,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 },
               )}
             </div>
-          ))}
+            );
+          })}
         </nav>
 
         <div className="mt-auto border-t border-border px-4 py-2.5 flex items-center justify-between gap-2">
           <span className="min-w-0 truncate text-[11px] font-mono text-muted-foreground" title={user.email}>
             {user.email}
           </span>
-          <button
-            onClick={() => {
-              logout();
-              router.replace("/login");
-            }}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-            title="Log out"
-          >
-            <LogOut className="size-3.5" />
-          </button>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <ThemeToggle className="size-3.5" />
+            <button
+              onClick={() => {
+                logout();
+                router.replace("/login");
+              }}
+              className="text-muted-foreground hover:text-foreground"
+              title="Log out"
+            >
+              <LogOut className="size-3.5" />
+            </button>
+          </div>
         </div>
       </aside>
 

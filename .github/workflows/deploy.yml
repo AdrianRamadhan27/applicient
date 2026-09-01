@@ -1,0 +1,177 @@
+name: Deploy
+
+# Builds happen here (GitHub's runners), not on the VPS — the VPS is a
+# 2 vCPU / 4GB box that's already tight on RAM for browser-worker's
+# Chromium sessions (see DEPLOYMENT.md); it only ever pulls finished
+# images, never builds them. It also never clones this repo — the only
+# things it needs that aren't inside an image are docker-compose.yml and
+# Caddyfile, which the deploy job below copies over directly.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: sources — install deps
+        working-directory: sources
+        run: uv sync
+
+      - name: sources — pytest
+        working-directory: sources
+        # "live" tests hit real network endpoints on purpose (see
+        # sources/pyproject.toml's marker docstring) — opt-in only,
+        # never run here.
+        run: uv run pytest -m "not live"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: web — install deps
+        working-directory: web
+        run: npm ci
+
+      - name: web — lint
+        working-directory: web
+        run: npm run lint
+
+      - name: web — build (also type-checks)
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+        run: npm run build
+
+  build-and-push:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          # No `registry:` — defaults to Docker Hub.
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/applicient-api:latest
+            ${{ env.IMAGE_NAMESPACE }}/applicient-api:${{ github.sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build & push browser-worker
+        uses: docker/build-push-action@v6
+        with:
+          context: ./browser-worker
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/applicient-browser-worker:latest
+            ${{ env.IMAGE_NAMESPACE }}/applicient-browser-worker:${{ github.sha }}
+          cache-from: type=gha,scope=browser-worker
+          cache-to: type=gha,mode=max,scope=browser-worker
+
+      - name: Build & push web
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/applicient-web:latest
+            ${{ env.IMAGE_NAMESPACE }}/applicient-web:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The VPS never clones this repo — docker-compose.yml and
+      # Caddyfile are the only two files it needs that aren't already
+      # baked into an image, so just copy them over directly.
+      - name: Copy docker-compose.yml + Caddyfile to the VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "docker-compose.yml,Caddyfile"
+          target: /opt/applicient
+          strip_components: 0
+
+      - name: Write .env, pull the new images, recreate containers
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          # GitHub Secrets/Variables are the one source of truth for the
+          # app's runtime config — this rewrites .env on every deploy, so
+          # nobody hand-edits a file on the VPS. The ${{ }} substitutions
+          # below happen at workflow-render time (before this script ever
+          # reaches the VPS), so the quoted heredoc delimiter is just to
+          # stop the *remote* shell from re-interpreting any `$` that
+          # happens to land inside a secret's actual value.
+          script: |
+            set -e
+            cat > /opt/applicient/.env <<'ENVEOF'
+            POSTGRES_USER=applicient
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=applicient
+            S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }}
+            S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }}
+            S3_BUCKET=applicient
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            DEMO_USER_PASSWORD=${{ secrets.DEMO_USER_PASSWORD }}
+            ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
+            LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}
+            LANGSMITH_PROJECT=${{ vars.LANGSMITH_PROJECT }}
+            FRONTEND_URL=${{ vars.FRONTEND_URL }}
+            CORS_ORIGINS=${{ vars.CORS_ORIGINS }}
+            CADDY_EMAIL=${{ vars.CADDY_EMAIL }}
+            BROWSER_WORKER_MAX_SESSIONS=${{ vars.BROWSER_WORKER_MAX_SESSIONS }}
+            DOCKERHUB_USERNAME=${{ vars.DOCKERHUB_USERNAME }}
+            IMAGE_TAG=latest
+            GMAIL_CLIENT_ID=${{ vars.GMAIL_CLIENT_ID }}
+            GMAIL_CLIENT_SECRET=${{ secrets.GMAIL_CLIENT_SECRET }}
+            GMAIL_REDIRECT_URI=${{ vars.GMAIL_REDIRECT_URI }}
+            GMAIL_PUBSUB_TOPIC=${{ vars.GMAIL_PUBSUB_TOPIC }}
+            XENDIT_SECRET_KEY=${{ secrets.XENDIT_SECRET_KEY }}
+            XENDIT_WEBHOOK_TOKEN=${{ secrets.XENDIT_WEBHOOK_TOKEN }}
+            ENVEOF
+            chmod 600 /opt/applicient/.env
+            cd /opt/applicient
+            docker compose pull api web browser-worker
+            docker compose up -d
+            docker image prune -f
+
+      - name: Confirm the deployed site is actually up
+        run: |
+          curl --fail -sS -o /dev/null https://applicient.my.id/
+          curl --fail -sS https://api.applicient.my.id/health

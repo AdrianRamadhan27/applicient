@@ -16,6 +16,7 @@ class UserOut(BaseModel):
 
     id: uuid.UUID
     email: str
+    role: str
 
 
 class SignupIn(BaseModel):
@@ -936,3 +937,57 @@ class InterruptDecisionsIn(BaseModel):
 class MarkAppliedIn(BaseModel):
     note: str | None = None
     attempt_number: int
+
+
+class PlanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    price_idr: int
+    monthly_usage_cap_usd: float
+    is_active: bool
+
+
+class PlanCreate(BaseModel):
+    name: str
+    price_idr: int = Field(ge=0)
+    monthly_usage_cap_usd: float = Field(gt=0)
+    is_active: bool = True
+
+
+class PlanUpdate(BaseModel):
+    name: str | None = None
+    price_idr: int | None = Field(default=None, ge=0)
+    monthly_usage_cap_usd: float | None = Field(default=None, gt=0)
+    is_active: bool | None = None
+
+
+class SubscriptionOut(BaseModel):
+    plan_id: uuid.UUID
+    plan_name: str
+    price_idr: int
+    monthly_usage_cap_usd: float
+    status: str
+    current_period_spend_usd: float
+    current_period_end: datetime | None
+    pending_plan_name: str | None
+
+
+class CheckoutOut(BaseModel):
+    checkout_url: str
+
+
+class CheckoutIn(BaseModel):
+    plan_id: uuid.UUID
+
+
+class AdminUserOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    plan_name: str | None
+    subscription_status: str | None
+    current_period_spend_usd: float

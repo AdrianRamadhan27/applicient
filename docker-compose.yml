@@ -9,8 +9,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-applicient}
       POSTGRES_DB: ${POSTGRES_DB:-applicient}
     ports:
-      # Override POSTGRES_PORT when the host already uses 5433.
-      - "${POSTGRES_PORT:-5433}:5432"
+      # Bound to 127.0.0.1 — this only needs to be reachable from the
+      # host machine itself (e.g. `psql` over an SSH tunnel), never from
+      # the public internet. Docker's own iptables rules bypass ufw for
+      # a plain 0.0.0.0 publish, so the loopback bind is the real
+      # boundary here, not the host firewall. Override POSTGRES_PORT
+      # when the host already uses 5433.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +28,8 @@ services:
     image: redis:7.4-alpine
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      # See postgres's port comment — loopback-only, not public.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -42,8 +48,9 @@ services:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-applicient}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-applicient-dev-only}
     ports:
-      - "${S3_PORT:-9000}:9000"   # S3 API
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # Console
+      # See postgres's port comment — loopback-only, not public.
+      - "127.0.0.1:${S3_PORT:-9000}:9000"   # S3 API
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"   # Console
     volumes:
       - miniodata:/data
     healthcheck:
@@ -56,6 +63,12 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    # Local dev: `docker compose build` builds from the Dockerfile above
+    # and tags the result with this name — the `image:` line doesn't
+    # change that. Production: CI builds+pushes this exact tag to Docker
+    # Hub (see .github/workflows/deploy.yml) and the VPS just `docker
+    # compose pull`s it, never building on the box itself.
+    image: ${DOCKERHUB_USERNAME:-your-dockerhub-username}/applicient-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       # These service names work inside the Compose network. The values
@@ -66,21 +79,31 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-applicient}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-applicient-dev-only}
       S3_BUCKET: ${S3_BUCKET:-applicient}
-      # Development-only fallback so a fresh clone can save a provider
-      # connection without first generating a Fernet key. Replace this
-      # for any shared or non-local deployment.
-      SECRET_KEY: ${SECRET_KEY:-3bvqp75gEt7Wq7cMXtIedPE-zZEGVCpbUL0DVOqZN0Y=}
+      # SaaS pivot — no default fallback: a shared, checked-into-the-repo
+      # key would decrypt every tenant's provider keys/Gmail tokens for
+      # anyone who's ever read this file. Generate your own (.env.example
+      # has the command) — the api container now fails fast at startup
+      # (main.py's _require_secret_key) if this is unset, rather than
+      # booting fine and breaking on the first encrypted-field access.
+      SECRET_KEY: ${SECRET_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-applicient}
       DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-applicient-dev}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-demo@applicient.local}
       GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
       GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
       GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
       GMAIL_PUBSUB_TOPIC: ${GMAIL_PUBSUB_TOPIC:-}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:${WEB_PORT:-3000}}
       BROWSER_WORKER_URL: http://browser-worker:8100
     ports:
-      - "${API_PORT:-8000}:8000"
+      # Loopback-only: caddy reaches this over the compose network
+      # (http://api:8000), it never needs the host-published port.
+      # Kept published for host-side debugging (curl/SSH tunnel).
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,13 +123,23 @@ services:
   browser-worker:
     build:
       context: ./browser-worker
+    # See api's image comment — same build-locally/pull-in-prod split.
+    image: ${DOCKERHUB_USERNAME:-your-dockerhub-username}/applicient-browser-worker:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    environment:
+      # Each open session is a real Chromium process — cap it to what
+      # the host actually has RAM for. Default (sessions.py) is 20,
+      # which assumes a much bigger box than a typical starter VPS;
+      # see DEPLOYMENT.md for sizing guidance.
+      BROWSER_WORKER_MAX_SESSIONS: ${BROWSER_WORKER_MAX_SESSIONS:-20}
     # Chromium's default /dev/shm (64MB) is too small under Docker and
     # can crash mid-session — same fix Playwright's own Docker docs
     # recommend.
     shm_size: "1gb"
     ports:
-      - "${BROWSER_WORKER_PORT:-8100}:8100"
+      # Loopback-only — internal service, api reaches it as
+      # http://browser-worker:8100 over the compose network.
+      - "127.0.0.1:${BROWSER_WORKER_PORT:-8100}:8100"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
       interval: 5s
@@ -123,12 +156,48 @@ services:
         # host port), not the in-network "http://api:8000" the web
         # container itself would use.
         NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT:-8000}}"
+    # See api's image comment — same build-locally/pull-in-prod split.
+    image: ${DOCKERHUB_USERNAME:-your-dockerhub-username}/applicient-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      # Loopback-only — caddy reaches this as http://web:3000 over the
+      # compose network; see api's port comment.
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
+
+  # TLS-terminating reverse proxy, production only (`docker compose
+  # --profile prod up -d`, or `docker compose up -d caddy` explicitly —
+  # left out of a plain `docker compose up` so local dev is unaffected).
+  # Auto-obtains/renews Let's Encrypt certs for the domains listed in
+  # ./Caddyfile — see DEPLOYMENT.md. Deliberately no `depends_on: [web,
+  # api]` — Caddy doesn't need them present at its own startup (it just
+  # 502s per-request until they're up), and DEPLOYMENT.md's step 6
+  # relies on bringing Caddy up completely standalone, before `web`/`api`
+  # exist at all. A depends_on here would drag those (and
+  # browser-worker) into `docker compose up -d caddy` too.
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    profiles: ["prod"]
+    environment:
+      # Caddyfile's `email {$CADDY_EMAIL}` needs a syntactically valid
+      # address even before the real one exists (step 6 brings Caddy up
+      # before step 7's .env exists at all) — an empty substitution turns
+      # that into a bare `email` directive with no argument, which is a
+      # Caddyfile parse error and crash-loops the container. This
+      # placeholder is functionally fine either way: Let's Encrypt
+      # doesn't validate deliverability at issuance, it's only used for
+      # optional expiry notices.
+      CADDY_EMAIL: ${CADDY_EMAIL:-admin@applicient.my.id}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
 
   # --- Not yet built: still empty stub packages (see worker/,
   # scheduler/, metering/, models/) — nothing to containerize until
@@ -138,3 +207,5 @@ volumes:
   pgdata:
   redisdata:
   miniodata:
+  caddydata:
+  caddyconfig:

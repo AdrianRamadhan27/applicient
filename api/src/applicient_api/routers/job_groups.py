@@ -25,8 +25,9 @@ from applicient_api.latex_rendering import COVER_LETTER_TEMPLATES, RenderError, 
 from applicient_api.models.agents import AgentRun
 from applicient_api.models.discovery import Job
 from applicient_api.models.documents import ClaimVerification, Document, JobGroup, JobGroupMember
-from applicient_api.models.llm import ModelProfile
+from applicient_api.billing_service import enforce_usage_cap
 from applicient_api.models.profile import Persona
+from applicient_api.rate_limit import rate_limit
 from applicient_api.claim_verification_service import (
     VerificationError,
     regenerate_from_last_verification,
@@ -49,7 +50,7 @@ from applicient_api.skill_gap_service import (
 )
 from applicient_api.tailoring_engine import TailoringOutput
 from applicient_api.tailoring_service import TailoringError, save_document_delta, tailor_job_group
-from applicient_api.tier_resolution import TierResolutionError
+from applicient_api.tier_resolution import TierResolutionError, active_model_profile
 
 router = APIRouter(prefix="/job-groups", tags=["job-groups"])
 persona_router = APIRouter(prefix="/personas/{persona_id}/job-groups", tags=["job-groups"])
@@ -491,10 +492,8 @@ async def _tailor_stream(group_id: uuid.UUID, user_id: uuid.UUID) -> AsyncGenera
             # rendering needs a chosen template id, which doesn't exist
             # yet at generation time.
 
-            active_model_profile = (
-                db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
-            )
-            run.model_profile_id = active_model_profile.id if active_model_profile else None
+            active_model_profile_row = active_model_profile(db)
+            run.model_profile_id = active_model_profile_row.id if active_model_profile_row else None
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
@@ -641,7 +640,10 @@ async def reverify_document(
     return EventSourceResponse(_reverify_stream(document_id, user_id))
 
 
-@router.post("/{group_id}/tailor")
+@router.post(
+    "/{group_id}/tailor",
+    dependencies=[Depends(rate_limit("tailor", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+)
 async def tailor_group(
     group_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
 ):
@@ -744,10 +746,8 @@ async def _cover_letter_stream(
                     clean=clean,
                 )
 
-            active_model_profile = (
-                db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
-            )
-            run.model_profile_id = active_model_profile.id if active_model_profile else None
+            active_model_profile_row = active_model_profile(db)
+            run.model_profile_id = active_model_profile_row.id if active_model_profile_row else None
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
@@ -778,7 +778,10 @@ async def _cover_letter_stream(
                     db.rollback()
 
 
-@router.post("/{group_id}/cover-letter")
+@router.post(
+    "/{group_id}/cover-letter",
+    dependencies=[Depends(rate_limit("cover-letter", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+)
 async def cover_letter_group(
     group_id: uuid.UUID,
     body: schemas.CoverLetterRequest | None = None,
@@ -884,10 +887,8 @@ async def _answer_pack_stream(
                     clean=clean,
                 )
 
-            active_model_profile = (
-                db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
-            )
-            run.model_profile_id = active_model_profile.id if active_model_profile else None
+            active_model_profile_row = active_model_profile(db)
+            run.model_profile_id = active_model_profile_row.id if active_model_profile_row else None
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
@@ -918,7 +919,10 @@ async def _answer_pack_stream(
                     db.rollback()
 
 
-@router.post("/{group_id}/answer-pack")
+@router.post(
+    "/{group_id}/answer-pack",
+    dependencies=[Depends(rate_limit("answer-pack", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+)
 async def answer_pack_group(
     group_id: uuid.UUID,
     body: schemas.AnswerPackRequest,

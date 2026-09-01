@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from applicient_api.db import Base, TimestampMixin, UUIDPKMixin, UserScopedMixin
+from applicient_api.models.enums import UserRole
 
 # Dimension of the shipped default embedding model, nvidia/nemotron-3-embed-1b:free
 # (PRD §7.5 / §17). Changing the embedding model is a migration (F12.15),
@@ -27,6 +28,15 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    # SaaS pivot — no self-service path to "admin" exists; see
+    # routers/auth.py signup's ADMIN_EMAIL bootstrap.
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default=UserRole.USER.value)  # UserRole
+    # Suspension is enforced at login only (auth.py's login() 403s a
+    # suspended user before issuing a new token), not on every request
+    # — an already-issued 7-day bearer token keeps working until it
+    # naturally expires rather than every route paying a DB lookup on
+    # the hot auth path. A real, disclosed trade-off, not an oversight.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class Profile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):

@@ -35,7 +35,9 @@ from applicient_api.models.enums import EventActor
 from applicient_api.models.pipeline import Application, ApplicationAttempt, ApplicationEvent
 from applicient_api.models.profile import Persona
 from applicient_api.object_storage import get_object
+from applicient_api.billing_service import enforce_usage_cap
 from applicient_api.pipeline_service import MarkAppliedError, TransitionError, is_ghosted, latest_event_times, transition
+from applicient_api.rate_limit import rate_limit
 from applicient_api.pipeline_service import mark_applied as mark_applied_service
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -277,7 +279,10 @@ def mark_applied(
     return _to_out(application, ghosted=False, job=db.get(Job, application.job_id))
 
 
-@router.post("/{application_id}/apply")
+@router.post(
+    "/{application_id}/apply",
+    dependencies=[Depends(rate_limit("application-apply", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+)
 def apply(
     application_id: uuid.UUID,
     db: Session = Depends(get_db),

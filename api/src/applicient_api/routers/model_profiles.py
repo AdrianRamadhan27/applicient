@@ -1,8 +1,14 @@
-"""GUI-managed model tier bindings used by every agent stage. A user
+"""GUI-managed model tier bindings used by every agent stage. An admin
 may keep any number of named presets (F12.9/F12.10) — exactly one is
 "active" at a time, which is what every other stage in this codebase
 actually resolves against (see model_profiles.py's own docstring for
-why that invariant is enforced here rather than centrally)."""
+why that invariant is enforced here rather than centrally).
+
+SaaS pivot — admin-only. `user_id` throughout this file is the admin's
+own id (whoever is configuring the deployment's model bindings), not
+the id of whichever end user's request happens to be running — see
+tier_resolution.py's `_active_profile`, which resolves the one active
+profile deployment-wide rather than per-caller."""
 
 from __future__ import annotations
 
@@ -12,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
-from applicient_api.deps import current_user_id, get_db
+from applicient_api.deps import current_admin_user, get_db
 from applicient_api.model_profiles import (
     ModelProfileNotFoundError,
     activate_profile,
@@ -80,13 +86,13 @@ def _validated_bindings(db: Session, *, user_id: uuid.UUID, body: schemas.ModelP
 
 
 @router.get("", response_model=list[schemas.ModelProfileOut])
-def get_model_profiles(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)):
+def get_model_profiles(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)):
     return list_profiles(db, user_id=user_id)
 
 
 @router.get("/active", response_model=schemas.ModelProfileOut | None)
 def get_active_model_profile(
-    db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+    db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)
 ):
     return db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
 
@@ -95,7 +101,7 @@ def get_active_model_profile(
 def create_model_profile(
     body: schemas.ModelProfileUpdate,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     tier_bindings, stage_overrides = _validated_bindings(db, user_id=user_id, body=body)
     profile = create_profile(
@@ -115,7 +121,7 @@ def update_model_profile(
     profile_id: uuid.UUID,
     body: schemas.ModelProfileUpdate,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     tier_bindings, stage_overrides = _validated_bindings(db, user_id=user_id, body=body)
     try:
@@ -138,7 +144,7 @@ def update_model_profile(
 def activate_model_profile(
     profile_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     try:
         profile = activate_profile(db, user_id=user_id, profile_id=profile_id)
@@ -153,7 +159,7 @@ def activate_model_profile(
 def delete_model_profile(
     profile_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     try:
         delete_profile(db, user_id=user_id, profile_id=profile_id)

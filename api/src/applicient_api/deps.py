@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from applicient_api.auth import AuthError, decode_access_token
 from applicient_api.db import make_engine, make_session_factory
+from applicient_api.models.profile import User
 
 _engine = make_engine()
 _session_factory: sessionmaker = make_session_factory(_engine)
@@ -53,3 +54,21 @@ def current_user_id(
         return decode_access_token(raw)
     except AuthError:
         raise HTTPException(401, "not authenticated")
+
+
+def current_admin_user(
+    user_id: uuid.UUID = Depends(current_user_id), db: Session = Depends(get_db)
+) -> uuid.UUID:
+    """SaaS pivot — gates the admin-only surfaces (provider connections,
+    model profiles, cost/usage). A DB lookup, not a JWT `role` claim:
+    tokens are 7-day/no-refresh, so a claim baked into the token would
+    go stale if a role changed mid-session; this always reads the
+    current row. First (and, deliberately, only) second-layer auth
+    dependency in this codebase — every other route only ever checks
+    "is this a valid token," not "is this specific user allowed here."
+    """
+
+    user = db.query(User).filter_by(id=user_id).one_or_none()
+    if user is None or user.role != "admin":
+        raise HTTPException(403, "admin access required")
+    return user_id

@@ -24,7 +24,9 @@ Usage: uv run python -m applicient_api.seed
 import os
 
 from applicient_api.auth import hash_password
+from applicient_api.billing_service import default_plan
 from applicient_api.db import make_engine, make_session_factory
+from applicient_api.models.billing import Subscription
 from applicient_api.models.profile import User
 from applicient_api.pipeline_stage_service import provision_default_stages
 
@@ -35,22 +37,32 @@ DEMO_USER_PASSWORD = os.environ.get("DEMO_USER_PASSWORD", "applicient-dev")
 def seed() -> None:
     engine = make_engine()
     Session = make_session_factory(engine)
+    admin_email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 
     with Session() as session:
         user = session.query(User).filter_by(email=DEMO_EMAIL).one_or_none()
         if user is None:
-            user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_USER_PASSWORD))
+            role = "admin" if admin_email and DEMO_EMAIL == admin_email else "user"
+            user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_USER_PASSWORD), role=role)
             session.add(user)
             session.flush()  # populate user.id via server_default before use below
-            print(f"created user {user.id} ({user.email}) — dev password from DEMO_USER_PASSWORD")
+            print(f"created user {user.id} ({user.email}, role={role}) — dev password from DEMO_USER_PASSWORD")
         else:
             print(f"user already exists: {user.id} ({user.email})")
             if user.password_hash is None:
                 user.password_hash = hash_password(DEMO_USER_PASSWORD)
                 print("  backfilled password_hash from DEMO_USER_PASSWORD")
+            if admin_email and DEMO_EMAIL == admin_email and user.role != "admin":
+                user.role = "admin"
+                print("  promoted to admin (matches ADMIN_EMAIL)")
 
         session.flush()
         provision_default_stages(session, user_id=user.id)
+        if session.query(Subscription).filter_by(user_id=user.id).one_or_none() is None:
+            plan = default_plan(session)
+            if plan is not None:
+                session.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
+                print(f"  subscribed to plan {plan.name!r}")
         session.commit()
 
 

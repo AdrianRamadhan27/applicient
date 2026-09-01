@@ -17,7 +17,38 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export type User = { id: string; email: string };
+export type User = { id: string; email: string; role: "user" | "admin" };
+
+// SaaS pivot — admin-only surfaces.
+export type Plan = {
+  id: string;
+  name: string;
+  price_idr: number;
+  monthly_usage_cap_usd: number;
+  is_active: boolean;
+};
+
+export type Subscription = {
+  plan_id: string;
+  plan_name: string;
+  price_idr: number;
+  monthly_usage_cap_usd: number;
+  status: string;
+  current_period_spend_usd: number;
+  current_period_end: string | null;
+  pending_plan_name: string | null;
+};
+
+export type AdminUser = {
+  id: string;
+  email: string;
+  role: "user" | "admin";
+  is_active: boolean;
+  created_at: string;
+  plan_name: string | null;
+  subscription_status: string | null;
+  current_period_spend_usd: number;
+};
 
 /** The dedicated Live Browser page's own WebSocket connection —
  * `API_BASE_URL` with its scheme swapped (http→ws, https→wss), same
@@ -1592,4 +1623,24 @@ export const api = {
       events: result.events.map((e) => toConversationStreamEvent(e.event_type, e.data)),
     };
   },
+
+  // SaaS pivot — admin-only (backend 403s a non-admin regardless of
+  // whether the frontend nav hid these).
+  listAdminUsers: () => request<AdminUser[]>("/admin/users"),
+  suspendUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/suspend`, { method: "POST" }),
+  unsuspendUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/unsuspend`, { method: "POST" }),
+  promoteUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/promote`, { method: "POST" }),
+  demoteUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/demote`, { method: "POST" }),
+
+  listBillingPlans: () => request<Plan[]>("/billing/plans"),
+  getMySubscription: () => request<Subscription>("/billing/subscription"),
+  startCheckout: (planId: string) =>
+    request<{ checkout_url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ plan_id: planId }) }),
+  syncSubscription: () => request<Subscription>("/billing/sync", { method: "POST" }),
+
+  listPlans: () => request<Plan[]>("/admin/plans"),
+  createPlan: (body: { name: string; price_idr: number; monthly_usage_cap_usd: number; is_active?: boolean }) =>
+    request<Plan>("/admin/plans", { method: "POST", body: JSON.stringify(body) }),
+  updatePlan: (id: string, body: Partial<Pick<Plan, "name" | "price_idr" | "monthly_usage_cap_usd" | "is_active">>) =>
+    request<Plan>(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 };

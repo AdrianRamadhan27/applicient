@@ -3,8 +3,10 @@
 uv run uvicorn applicient_api.main:app --reload
 """
 
+import os
 from contextlib import asynccontextmanager
 
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,10 +14,13 @@ from applicient_agents.application_service import reconcile_stale_attempts
 from applicient_agents.orchestrator_service import close_checkpointer, init_checkpointer
 
 from applicient_api.deps import get_session_factory
+from applicient_api.logging_config import configure_logging
 from applicient_api.scheduler import start_scheduler, stop_scheduler
 from applicient_api.routers import (
+    admin,
     applications,
     auth,
+    billing,
     company_candidates,
     cost,
     credentials,
@@ -41,8 +46,33 @@ from applicient_api.routers import (
     webhooks,
 )
 
+def _require_secret_key() -> None:
+    """SaaS pivot — docker-compose.yml no longer ships a default
+    fallback SECRET_KEY (a real, known-to-anyone-who-reads-the-repo
+    value that used to encrypt every tenant's provider keys/Gmail
+    tokens by default). security.py's own Fernet call already raises
+    if this is unset, but only lazily, the first time some request
+    happens to touch an encrypted field — for a multi-tenant deployment
+    that's "boots fine, breaks mysteriously three weeks later," not a
+    real fail-fast. This makes the same failure happen at startup,
+    before the process ever accepts a request."""
+
+    key = os.environ.get("SECRET_KEY")
+    if not key:
+        raise RuntimeError(
+            "SECRET_KEY is not set — generate one with: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        )
+    try:
+        Fernet(key.encode())
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"SECRET_KEY is set but not a valid Fernet key: {exc}") from exc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
+    _require_secret_key()
     # See reconcile_stale_attempts's own docstring — _ACTIVE_ATTEMPTS is
     # in-memory only, so any application-agent attempt that looked
     # "in progress"/"awaiting_*" when this process last stopped can
@@ -69,17 +99,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Applicient API", version="0.1.0", lifespan=lifespan)
 
 # Local-first dev: the Next.js dev server runs on a different port, so
-# this needs CORS. Tightens to the real deployed origin once there is
-# one (PRD §2.2 — no auth in v1, so this is the only access boundary
-# for now, and it is intentionally permissive for local dev only).
-app.add_middleware(
-    CORSMiddleware,
+# this needs CORS. Deployed origins come from CORS_ORIGINS (comma-
+# separated, e.g. "https://applicient.web.id,https://www.applicient.web.id")
+# rather than being hardcoded here — see DEPLOYMENT.md.
+_cors_origins = [
     # 3001 is what this repo's web/package.json pins `next dev` to
     # (port 3000 was already taken by something else on the dev
     # machine this was built on); 3000 stays allowed too since that's
     # Next.js's real default and other clones may not hit the
     # collision.
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    "http://localhost:3000",
+    "http://localhost:3001",
+    *(origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()),
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     # Content-Disposition isn't on the CORS-safelisted response-header
@@ -117,3 +153,5 @@ app.include_router(email_messages.router)
 app.include_router(notifications.router)
 app.include_router(webhooks.router)
 app.include_router(orchestrator.router)
+app.include_router(admin.router)
+app.include_router(billing.router)

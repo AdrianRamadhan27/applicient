@@ -23,7 +23,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(email.trim(), password);
-      router.replace("/");
+      router.replace("/assistant");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {

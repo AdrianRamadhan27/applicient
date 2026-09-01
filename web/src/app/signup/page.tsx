@@ -23,7 +23,7 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       await signup(email.trim(), password);
-      router.replace("/");
+      router.replace("/assistant");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Signup failed");
     } finally {

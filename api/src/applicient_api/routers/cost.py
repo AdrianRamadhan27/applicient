@@ -11,6 +11,12 @@ hand-rolled SQL GROUP BY per breakdown — same pragmatic style as the
 original minimal endpoint: this is a personal-scale ledger, and a plain
 Python loop is far easier to read and extend than five separate SQL
 aggregate queries would be.
+
+SaaS pivot — admin-only. Still scoped to the calling admin's own
+LlmCall/AgentRun rows (unchanged query shape) — this is the operator's
+own spend/run history, not a cross-tenant view. Per-tenant spend across
+every user lives on the separate admin user-list endpoint
+(routers/admin.py), which aggregates LlmCall by user_id explicitly.
 """
 
 import uuid
@@ -21,7 +27,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
-from applicient_api.deps import current_user_id, get_db
+from applicient_api.deps import current_admin_user, get_db
 from applicient_api.models.agents import AgentRun
 from applicient_api.models.discovery import Source, SourceRun
 from applicient_api.models.llm import LlmCall
@@ -40,7 +46,7 @@ def cost_summary(
     provider: str | None = None,
     model_id: str | None = None,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     q = db.query(LlmCall).filter(LlmCall.user_id == user_id)
     if since is not None:
@@ -118,7 +124,7 @@ def list_cost_runs(
     limit: int = 50,
     run_type: str | None = None,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     q = db.query(AgentRun).filter(AgentRun.user_id == user_id)
     if run_type is not None:

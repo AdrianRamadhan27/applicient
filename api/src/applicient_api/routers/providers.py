@@ -1,5 +1,11 @@
 """F12.2/F12.5/F12.7 — the actual routes the Models & Providers screen
-calls. Thin wrappers over connections.py's service layer."""
+calls. Thin wrappers over connections.py's service layer.
+
+SaaS pivot — admin-only. ProviderConnection stops being private-to-the-
+user data and becomes the single admin-configured set of connections
+the whole deployment's LLM calls resolve against (see
+tier_resolution.py); `user_id` on each row now means "which admin
+configured this," not "who it's private to.\""""
 
 import uuid
 
@@ -7,14 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from applicient_api import connections, schemas
-from applicient_api.deps import current_user_id, get_db
+from applicient_api.deps import current_admin_user, get_db
 from applicient_api.models.llm import EmbeddingIndex, ModelCatalogEntry, ModelProfile, ProviderConnection
 
 router = APIRouter(prefix="/provider-connections", tags=["providers"])
 
 
 @router.get("", response_model=list[schemas.ProviderConnectionOut])
-def list_connections(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)):
+def list_connections(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)):
     return db.query(ProviderConnection).filter_by(user_id=user_id).all()
 
 
@@ -22,7 +28,7 @@ def list_connections(db: Session = Depends(get_db), user_id: uuid.UUID = Depends
 def create_connection(
     body: schemas.ProviderConnectionCreate,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     if body.provider == "openai_compatible" and not body.base_url:
         raise HTTPException(422, "base_url is required for an openai_compatible provider")
@@ -92,7 +98,7 @@ def _delete_blocker(db: Session, *, user_id: uuid.UUID, connection_id: uuid.UUID
 def delete_connection(
     connection_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user_id: uuid.UUID = Depends(current_user_id),
+    user_id: uuid.UUID = Depends(current_admin_user),
 ):
     conn = _owned_connection(db, connection_id, user_id)
     blocker = _delete_blocker(db, user_id=user_id, connection_id=connection_id)
@@ -105,7 +111,7 @@ def delete_connection(
 
 @router.post("/{connection_id}/test", response_model=schemas.ProviderConnectionOut)
 def test_connection(
-    connection_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+    connection_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)
 ):
     conn = _owned_connection(db, connection_id, user_id)
     connections.test_connection(db, conn)
@@ -115,7 +121,7 @@ def test_connection(
 
 @router.post("/{connection_id}/refresh-catalog", response_model=list[schemas.ModelCatalogEntryOut])
 def refresh_catalog(
-    connection_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+    connection_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)
 ):
     conn = _owned_connection(db, connection_id, user_id)
     entries = connections.refresh_catalog(db, conn)
@@ -125,7 +131,7 @@ def refresh_catalog(
 
 @router.get("/{connection_id}/catalog", response_model=list[schemas.ModelCatalogEntryOut])
 def get_catalog(
-    connection_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+    connection_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)
 ):
     _owned_connection(db, connection_id, user_id)
     return (

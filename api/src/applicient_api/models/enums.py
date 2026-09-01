@@ -10,6 +10,17 @@ constraint is a normal, easily-reversible migration.
 import enum
 
 
+class UserRole(str, enum.Enum):
+    """SaaS pivot — `admin` configures LLM providers/models for the
+    whole deployment and is the only role that sees raw provider/cost
+    internals; `user` is every paying/free-tier customer. No
+    self-service path to `admin` exists anywhere (see `routers/auth.py`
+    signup's `ADMIN_EMAIL` bootstrap)."""
+
+    USER = "user"
+    ADMIN = "admin"
+
+
 class Recommendation(str, enum.Enum):
     """F4.9"""
 

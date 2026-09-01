@@ -22,6 +22,23 @@ class SessionNotFoundError(KeyError):
     pass
 
 
+class SessionLimitError(RuntimeError):
+    pass
+
+
+# SaaS pivot — this worker has no DB/user access of its own (deliberate,
+# see the module the M4 docs describe: a pure Playwright/HTTP shell), so
+# a genuine per-user cap belongs on the api side instead, where the
+# caller's identity actually exists — application_service.py's
+# `POST /applications/{id}/apply` already rate-limits how fast one user
+# can start new sessions (rate_limit.py, api-side). What this worker CAN
+# and does enforce on its own: a hard ceiling on total concurrent
+# sessions across every tenant, protecting the one shared Chromium
+# process this whole worker process is built around from being
+# exhausted by any combination of callers, malicious or just buggy.
+MAX_CONCURRENT_SESSIONS = int(os.environ.get("BROWSER_WORKER_MAX_SESSIONS", "20"))
+
+
 @dataclass
 class Session:
     id: str
@@ -70,6 +87,10 @@ class SessionManager:
         restores a persisted authenticated context (F6.6) when provided."""
 
         assert self._browser is not None, "SessionManager.start() was never called"
+        if len(self._sessions) >= MAX_CONCURRENT_SESSIONS:
+            raise SessionLimitError(
+                f"{MAX_CONCURRENT_SESSIONS} concurrent browser sessions already open — try again shortly"
+            )
         context = await self._browser.new_context(storage_state=storage_state)
         page = await context.new_page()
         await page.goto(url, wait_until="domcontentloaded")

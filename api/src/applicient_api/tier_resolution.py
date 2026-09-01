@@ -3,14 +3,22 @@ chat model. This is the one place tier -> model indirection actually
 happens; no agent, subagent or tool may do this lookup itself or name
 a model directly (PRD §7.5).
 
-Deliberately minimal for now: reads the user's active ModelProfile,
-looks up the tier (falling back to a stage override if one is set),
-and builds a LangChain chat model against the bound catalog entry's
-provider. Capability preflight (F12.11 — verifying a stage's required
-capabilities are present before a run starts) and multi-provider chat
-model construction (ChatAnthropic, etc.) are real gaps, left for when
-the GUI (step 5) and Anthropic actually need them — flagged here
-rather than silently assumed complete.
+Deliberately minimal for now: reads the deployment's one active
+ModelProfile, looks up the tier (falling back to a stage override if
+one is set), and builds a LangChain chat model against the bound
+catalog entry's provider. Capability preflight (F12.11 — verifying a
+stage's required capabilities are present before a run starts) and
+multi-provider chat model construction (ChatAnthropic, etc.) are real
+gaps, left for when the GUI (step 5) and Anthropic actually need them
+— flagged here rather than silently assumed complete.
+
+SaaS pivot — ModelProfile is now admin-owned/shared for the whole
+deployment, not per-user: the active-profile lookup below is no longer
+filtered by `user_id` (see routers/model_profiles.py, now admin-gated).
+`user_id` stays a required parameter here regardless — it's still
+legitimately needed for LlmCall.user_id cost attribution (per-tenant
+usage-cap enforcement and billing both need real per-user spend data,
+even though only admins can configure which profile is active).
 """
 
 from __future__ import annotations
@@ -86,6 +94,23 @@ def _build_chat_model(entry: ModelCatalogEntry, conn: ProviderConnection, callba
     )
 
 
+def active_model_profile(session: Session) -> ModelProfile | None:
+    """The one active ModelProfile for the whole deployment. Ordered by
+    `updated_at` rather than a bare `.one_or_none()` so a deployment
+    that (pre-migration, or through a data mistake) has more than one
+    row with `is_active=True` degrades to "use the most recently
+    changed one" instead of raising — the admin-only ModelProfile
+    router (routers/model_profiles.py) is what actually enforces
+    single-active going forward."""
+
+    return (
+        session.query(ModelProfile)
+        .filter_by(is_active=True)
+        .order_by(ModelProfile.updated_at.desc())
+        .first()
+    )
+
+
 def resolve_tier(
     session: Session,
     *,
@@ -99,13 +124,9 @@ def resolve_tier(
     job_id: uuid.UUID | None = None,
     session_factory: sessionmaker,
 ) -> BaseChatModel:
-    profile = (
-        session.query(ModelProfile)
-        .filter_by(user_id=user_id, is_active=True)
-        .one_or_none()
-    )
+    profile = active_model_profile(session)
     if profile is None:
-        raise TierResolutionError(f"no active ModelProfile for user {user_id}")
+        raise TierResolutionError("no active ModelProfile configured for this deployment — an admin must set one")
 
     catalog_entry_id = None
     if stage and stage in (profile.stage_overrides or {}):
@@ -153,9 +174,9 @@ def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID) -> tuple["Op
     erroring, which is worse.
     """
 
-    profile = session.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
+    profile = active_model_profile(session)
     if profile is None:
-        raise TierResolutionError(f"no active ModelProfile for user {user_id}")
+        raise TierResolutionError("no active ModelProfile configured for this deployment — an admin must set one")
 
     catalog_entry_id = (profile.tier_bindings or {}).get("embedding")
     if catalog_entry_id is None:

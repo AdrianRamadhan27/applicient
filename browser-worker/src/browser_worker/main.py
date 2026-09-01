@@ -25,7 +25,7 @@ from fastapi.responses import Response
 from playwright.async_api import Error as PlaywrightError
 from pydantic import BaseModel
 
-from browser_worker.sessions import SessionManager, SessionNotFoundError
+from browser_worker.sessions import SessionLimitError, SessionManager, SessionNotFoundError
 
 _SCREENCAST_INTERVAL_SECONDS = 0.5
 
@@ -100,6 +100,8 @@ async def health() -> dict:
 async def open_session(body: OpenSessionIn) -> OpenSessionOut:
     try:
         session_id, snapshot = await _manager(app).open(body.url, storage_state=body.storage_state)
+    except SessionLimitError as exc:
+        raise HTTPException(503, str(exc))
     except PlaywrightError as exc:
         raise HTTPException(422, str(exc))
     return OpenSessionOut(session_id=session_id, snapshot=snapshot)

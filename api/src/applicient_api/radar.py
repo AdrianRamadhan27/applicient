@@ -79,14 +79,14 @@ from applicient_api.job_embedding import embed_jobs
 from applicient_api.live_logs import run_with_live_logs
 from applicient_api.models.agents import AgentRun, AgentStep, RunEvent
 from applicient_api.models.discovery import Job, SavedSearch, Source, SourceRun
-from applicient_api.models.llm import LlmCall, ModelProfile
+from applicient_api.models.llm import LlmCall
 from applicient_api.models.profile import Persona, Profile
 from applicient_api.models.scoring import PrefilterResult
 from applicient_api.normalization import normalize_and_upsert
 from applicient_api.query_expansion import expand_role_title
 from applicient_api.scoring_service import score_job
 from applicient_api.source_connections import resolved_config
-from applicient_api.tier_resolution import TierResolutionError, resolve_embedding_tier, resolve_tier
+from applicient_api.tier_resolution import TierResolutionError, active_model_profile, resolve_embedding_tier, resolve_tier
 from applicient_sources import get_adapter
 
 # M1 §5 — bounded on purpose, same reasoning as the query-expansion
@@ -169,7 +169,7 @@ async def run_radar_search(
         # persona already in hand, not "the" user's profile (there
         # can be several, one per persona).
         profile = db.get(Profile, persona.profile_id)
-        active_model_profile = db.query(ModelProfile).filter_by(user_id=user_id, is_active=True).one_or_none()
+        active_profile = active_model_profile(db)
 
         run = AgentRun(
             user_id=user_id,
@@ -178,7 +178,7 @@ async def run_radar_search(
             saved_search_id=saved_search.id,
             persona_id=persona.id,
             profile_revision=profile.revision,
-            model_profile_id=active_model_profile.id if active_model_profile else None,
+            model_profile_id=active_profile.id if active_profile else None,
             started_at=datetime.now(timezone.utc),
         )
         db.add(run)
