@@ -38,23 +38,33 @@ jobs:
         # never run here.
         run: uv run pytest -m "not live"
 
+      # web uses pnpm (pnpm-lock.yaml, no package-lock.json — `npm ci`
+      # fails outright since that file doesn't exist), pinned via
+      # package.json's own "packageManager" field, same as web/Dockerfile
+      # already does.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: web — install deps
         working-directory: web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: web — lint
         working-directory: web
-        run: npm run lint
+        run: pnpm run lint
 
       - name: web — build (also type-checks)
         working-directory: web
         env:
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
-        run: npm run build
+        run: pnpm run build
 
   build-and-push:
     needs: verify
