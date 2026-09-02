@@ -222,3 +222,95 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Landing-page hero background — small squares (zero radius, matching
+   Terminal Ledger's own rule, not circles) drifting and fading on a
+   loop. Per-particle randomness (position/duration/delay/drift
+   distance) comes from inline custom properties the component sets;
+   this keyframe just reads them, so one shared animation covers every
+   particle instead of generating one @keyframes rule per particle. */
+@keyframes particle-drift {
+  0%, 100% {
+    opacity: 0;
+  }
+  10%, 90% {
+    opacity: var(--particle-opacity, 0.35);
+  }
+  50% {
+    transform: translate(var(--drift-x, 24px), var(--drift-y, -36px));
+  }
+}
+
+.particle {
+  animation: particle-drift var(--duration, 14s) ease-in-out var(--delay, 0s) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particle {
+    animation: none;
+    opacity: var(--particle-opacity, 0.35);
+  }
+}
+
+/* Landing-page highlight-carousel diagrams (page.tsx's Discovery/
+   Verifier/Apply/Email diagrams) — small looping motions so each
+   illustration reads as the actual flow happening (an arrow moving,
+   a box "receiving" it, a button actually getting pressed) rather
+   than a static screenshot. Shared utility classes, not one keyframe
+   set per diagram, so all four stay visually consistent. */
+@keyframes anim-flow {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(4px); }
+}
+.anim-flow {
+  animation: anim-flow 1.6s ease-in-out infinite;
+}
+
+@keyframes anim-pop {
+  0%, 20%, 100% { transform: scale(1); }
+  10% { transform: scale(1.18); }
+}
+.anim-pop {
+  animation: anim-pop 3s ease-in-out infinite;
+}
+
+@keyframes anim-fade-cycle {
+  0%, 100% { opacity: 0.3; }
+  /* --fade-peak lets a caller cap the top of the cycle per element
+     (e.g. page.tsx's ScrollParticleField, where each particle wants
+     its own max opacity) — defaults to 1, i.e. every earlier caller
+     of .anim-fade-cycle that never set it keeps its original range. */
+  50% { opacity: var(--fade-peak, 1); }
+}
+.anim-fade-cycle {
+  animation: anim-fade-cycle 2.4s ease-in-out infinite;
+}
+
+/* The apply-diagram's own "agent clicks Submit, a hand stops it"
+   beat — two keyframes sharing one 3s cycle so they read as cause
+   and effect on every loop rather than two unrelated animations. */
+@keyframes anim-press {
+  0%, 15%, 100% { transform: scale(1); }
+  8% { transform: scale(0.9); }
+}
+.anim-press {
+  animation: anim-press 3s ease-in-out infinite;
+}
+
+@keyframes anim-hand-stop {
+  0%, 20%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.7; }
+  10% { transform: translateY(-2px) rotate(-10deg); opacity: 1; }
+}
+.anim-hand-stop {
+  animation: anim-hand-stop 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-flow,
+  .anim-pop,
+  .anim-fade-cycle,
+  .anim-press,
+  .anim-hand-stop {
+    animation: none;
+  }
+}

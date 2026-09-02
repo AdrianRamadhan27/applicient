@@ -19,9 +19,38 @@ const ibmPlexMono = IBM_Plex_Mono({
   weight: ["400", "500", "600"],
 });
 
+const SITE_URL = process.env.SITE_URL ?? "https://applicient.my.id";
+const DESCRIPTION =
+  "Applicient discovers job openings across boards and ATS sites, scores them honestly against your real experience, drafts a tailored CV it can prove is truthful, fills the application, and keeps your pipeline updated from your inbox.";
+
 export const metadata: Metadata = {
-  title: "Applicient",
-  description: "An agentic job-application system.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Applicient — Make your job applications efficient",
+    template: "%s · Applicient",
+  },
+  description: DESCRIPTION,
+  keywords: [
+    "job application agent",
+    "AI job search",
+    "CV tailoring",
+    "job board aggregator",
+    "ATS application tracker",
+    "resume verification",
+  ],
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: "Applicient",
+    title: "Applicient — Make your job applications efficient",
+    description: DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Applicient — Make your job applications efficient",
+    description: DESCRIPTION,
+  },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

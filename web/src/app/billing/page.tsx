@@ -7,6 +7,7 @@ import { api, type Plan, type Subscription } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TierLabel } from "@/lib/plan-tiers";
+import { detectCurrency, formatLocalizedPrice } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
 function idr(v: number) {
@@ -24,6 +25,11 @@ export default function BillingPage() {
   const [loading, setLoading] = React.useState(true);
   const [checkingOutId, setCheckingOutId] = React.useState<string | null>(null);
   const [syncing, setSyncing] = React.useState(false);
+  const [localCurrency, setLocalCurrency] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    (() => setLocalCurrency(detectCurrency()))();
+  }, []);
 
   const load = React.useCallback(async () => {
     try {
@@ -171,6 +177,7 @@ export default function BillingPage() {
                 // in flight, to avoid starting two conflicting checkouts.
                 const isPending = !!subscription?.pending_plan_id && subscription.pending_plan_id === p.id;
                 const blockedByOtherPending = !!subscription?.pending_plan_name && !isPending;
+                const localized = localCurrency ? formatLocalizedPrice(p.price_idr, localCurrency) : null;
                 return (
                   <div key={p.id} className="border border-border px-4 py-3 flex items-center gap-3">
                     <div className="flex-1 min-w-0">
@@ -178,6 +185,7 @@ export default function BillingPage() {
                       <span className="block text-xs text-muted-foreground font-mono">
                         {idr(p.price_idr)} · cap ${p.monthly_usage_cap_usd.toFixed(2)}/mo
                       </span>
+                      {localized && <span className="block text-xs text-muted-foreground">≈ {localized}/mo</span>}
                     </div>
                     {isCurrent ? (
                       <Badge variant="secondary" className="text-[9px] font-mono">

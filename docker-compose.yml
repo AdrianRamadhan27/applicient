@@ -165,6 +165,12 @@ services:
     # See api's image comment — same build-locally/pull-in-prod split.
     image: ${DOCKERHUB_USERNAME:-your-dockerhub-username}/applicient-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    environment:
+      # Server-only (metadataBase/robots.txt/sitemap.xml generation,
+      # layout.tsx/robots.ts/sitemap.ts — none of it client-bundled),
+      # so this is a plain runtime var, not a NEXT_PUBLIC_ build ARG
+      # like the two above — changing it doesn't need a rebuild.
+      SITE_URL: ${SITE_URL:-http://localhost:${WEB_PORT:-3000}}
     ports:
       # Loopback-only — caddy reaches this as http://web:3000 over the
       # compose network; see api's port comment.

@@ -14,6 +14,15 @@ import {
   Coins,
   PlayCircle,
   ChevronDown,
+  ArrowRight,
+  FileText,
+  Check,
+  Building2,
+  Mail,
+  Hand,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
 } from "lucide-react";
 import { api, type Plan } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -21,6 +30,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TierLabel } from "@/lib/plan-tiers";
+import { detectCurrency, formatLocalizedPrice } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
 // Structure follows the saas-ui-nextjs-landing-page template's own
@@ -90,6 +100,476 @@ const FAQ = [
   },
 ];
 
+// Same five stages Features elaborates on below, teased here as a
+// literal diagram rather than a generic hero image — deliberately
+// built from this app's own bordered-box-plus-icon language (same
+// shape as a Features card, an admin table row, a badge) rather than
+// a stock illustration, so the "front door" doesn't look like a
+// different, less-finished product bolted onto everything behind it.
+const FLOW_STEPS = [
+  { icon: Search, label: "Discover" },
+  { icon: ShieldCheck, label: "Score" },
+  { icon: FileCheck2, label: "Tailor" },
+  { icon: MousePointerClick, label: "Apply" },
+  { icon: KanbanSquare, label: "Track" },
+];
+
+function FlowDiagram() {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      {FLOW_STEPS.map((step, i) => (
+        <React.Fragment key={step.label}>
+          <div className="flex w-24 flex-col items-center gap-2 border border-border bg-card px-3 py-3">
+            <step.icon className="size-5 text-primary" strokeWidth={1.5} />
+            <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{step.label}</span>
+          </div>
+          {i < FLOW_STEPS.length - 1 && (
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground max-sm:rotate-90" strokeWidth={1.5} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// Illustrates the exact claim-verifier flow the text beside it
+// describes — a CV claim goes into the verifier, and only comes out
+// SUPPORTED or UNSUPPORTED, reusing the same two badge colors/labels
+// already shown in that text column instead of inventing new ones.
+function VerifierDiagram() {
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col items-center gap-1.5 border border-border bg-card px-4 py-3">
+          <FileText className="size-5 text-muted-foreground" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-muted-foreground">CV claim</span>
+        </div>
+        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
+          <ShieldCheck className="anim-pop size-5 text-primary" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-primary">Verifier</span>
+        </div>
+      </div>
+      <div className="h-4 w-px bg-border" />
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="anim-fade-cycle flex items-center gap-1.5 border border-ok bg-ok-bg px-3 py-1.5">
+          <Check className="size-3.5 shrink-0 text-ok" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-ok">SUPPORTED</span>
+        </div>
+        <div className="anim-fade-cycle flex items-center gap-1.5 border border-crit bg-crit-bg px-3 py-1.5" style={{ animationDelay: "1.2s" }}>
+          <X className="size-3.5 shrink-0 text-crit" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-crit">UNSUPPORTED</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Sources feeding the scorer, output as a ranked list — three bars of
+// decreasing width/color (ok -> warn -> muted) standing in for
+// strong_apply/apply/lower-ranked results, same rank colors used on
+// every real Job Inbox card.
+function DiscoveryDiagram() {
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1.5 border border-border bg-card px-3 py-1.5">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+            <span className="font-mono text-[9px] text-muted-foreground">Job boards</span>
+          </div>
+          <div className="flex items-center gap-1.5 border border-border bg-card px-3 py-1.5">
+            <Building2 className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+            <span className="font-mono text-[9px] text-muted-foreground">ATS sites</span>
+          </div>
+        </div>
+        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
+          <ShieldCheck className="anim-pop size-5 text-primary" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-primary">Score</span>
+        </div>
+      </div>
+      <div className="h-4 w-px bg-border" />
+      <div className="flex w-40 flex-col gap-1.5">
+        <div className="anim-fade-cycle h-2 w-full bg-ok" />
+        <div className="anim-fade-cycle h-2 w-4/5 bg-warn" style={{ animationDelay: "0.3s" }} />
+        <div className="anim-fade-cycle h-2 w-3/5 bg-muted" style={{ animationDelay: "0.6s" }} />
+      </div>
+    </div>
+  );
+}
+
+// A mock browser window, filled fields, stopped right at Submit — the
+// literal "agent fills the form and stops before the submit button"
+// promise, not just described in text.
+function ApplyDiagram() {
+  return (
+    <div className="flex w-48 flex-col border border-border bg-card">
+      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+        <span className="size-1.5 shrink-0 bg-border" />
+        <span className="size-1.5 shrink-0 bg-border" />
+        <span className="size-1.5 shrink-0 bg-border" />
+      </div>
+      <div className="flex flex-col gap-1.5 p-3">
+        <div className="h-2 w-full bg-secondary" />
+        <div className="h-2 w-4/5 bg-secondary" />
+        <div className="h-2 w-3/5 bg-secondary" />
+        <div className="mt-1.5 flex items-center justify-between">
+          <span className="anim-press border border-primary px-2 py-1 font-mono text-[9px] text-primary">Submit</span>
+          <Hand className="anim-hand-stop size-4 shrink-0 text-warn" strokeWidth={1.5} />
+        </div>
+      </div>
+      <div className="flex items-center justify-center gap-1.5 border-t border-warn bg-warn-bg px-2 py-1.5">
+        <span className="font-mono text-[9px] text-warn">waiting for your review</span>
+      </div>
+    </div>
+  );
+}
+
+// Inbox -> pipeline, with the two most common real detections shown —
+// same ok/crit coloring the Application Pipeline board itself uses.
+function EmailDiagram() {
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col items-center gap-1.5 border border-border bg-card px-4 py-3">
+          <Mail className="size-5 text-muted-foreground" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-muted-foreground">Inbox</span>
+        </div>
+        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
+          <KanbanSquare className="anim-pop size-5 text-primary" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-primary">Pipeline</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="anim-fade-cycle border border-ok bg-ok-bg px-3 py-1.5">
+          <span className="font-mono text-[9px] text-ok">Interview detected</span>
+        </div>
+        <div className="anim-fade-cycle border border-crit bg-crit-bg px-3 py-1.5" style={{ animationDelay: "1.2s" }}>
+          <span className="font-mono text-[9px] text-crit">Rejection detected</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// One panel per major stage of the loop, not just the claim verifier —
+// raised directly by Adrian after the verifier panel shipped alone;
+// scrolls sideways (scroll-snap, no carousel library — same "no new
+// dependency" call already made for the rest of this page) rather than
+// stacking four of these tall panels vertically.
+const HIGHLIGHTS = [
+  {
+    eyebrow: "Job search",
+    title: "Every board, one honest score",
+    body: "Search Greenhouse, Lever, Ashby, Workable and more from one plain list of target roles — deduplicated across sources automatically. Every posting found gets ranked dimension by dimension against your real profile, with the exact reasoning shown, never a bare number.",
+    diagram: <DiscoveryDiagram />,
+    badges: null as React.ReactNode,
+  },
+  {
+    eyebrow: "The hard guarantee",
+    title: "Zero fabricated claims — enforced technically, not just promised",
+    body: "Every tailored bullet point is generated with a link back to a real, atomic piece of your evidence bank. A separate, adversarial verifier agent then checks each claim — and it never sees the job description, so it can't rationalize inflating something to fit what a role wants. Anything unsupported or inflated blocks export until it's fixed.",
+    diagram: <VerifierDiagram />,
+    badges: (
+      <>
+        <Badge variant="secondary" className="font-mono text-[10px]">SUPPORTED</Badge>
+        <Badge variant="secondary" className="font-mono text-[10px]">REFRAMED_OK</Badge>
+        <Badge variant="secondary" className="bg-crit-bg font-mono text-[10px] text-crit">UNSUPPORTED</Badge>
+        <Badge variant="secondary" className="bg-crit-bg font-mono text-[10px] text-crit">INFLATED</Badge>
+      </>
+    ) as React.ReactNode,
+  },
+  {
+    eyebrow: "Apply",
+    title: "The agent applies. You approve the submit.",
+    body: "The agent opens the real application form and fills every field — resume, cover letter, screening questions — then stops right before the submit button for your review. A captcha or login wall hands the live browser back to you directly, mid-run.",
+    diagram: <ApplyDiagram />,
+    badges: null as React.ReactNode,
+  },
+  {
+    eyebrow: "Email analyze",
+    title: "Your pipeline updates itself",
+    body: "Interview invites, rejections and assessment requests are detected straight from your inbox and reflected on the pipeline board automatically — no manual status updates after you hit apply.",
+    diagram: <EmailDiagram />,
+    badges: null as React.ReactNode,
+  },
+];
+
+const AUTO_ADVANCE_MS = 2800;
+
+// A trailing clone of slide 0, appended after the real slides —
+// what makes the loop feel like it keeps going right forever instead
+// of animating backward from the last slide to the first. Advancing
+// onto the clone looks identical to landing on the real slide 0; once
+// that scroll settles, handleScroll snaps the position back to the
+// REAL slide 0 with no animation (invisible, since the clone is a
+// pixel-identical copy), so the next advance can keep moving right.
+const SLIDES = [...HIGHLIGHTS, HIGHLIGHTS[0]];
+
+function HighlightCarousel() {
+  const scrollerRef = React.useRef<HTMLDivElement>(null);
+  const [active, setActive] = React.useState(0);
+  const [paused, setPaused] = React.useState(false);
+  const settleTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const scrollToIndex = React.useCallback((i: number, smooth = true) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ left: i * el.clientWidth, behavior: smooth ? "smooth" : "auto" });
+  }, []);
+
+  const advance = React.useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el || el.clientWidth === 0) return;
+    scrollToIndex(Math.round(el.scrollLeft / el.clientWidth) + 1);
+  }, [scrollToIndex]);
+
+  function handleScroll() {
+    const el = scrollerRef.current;
+    if (!el || el.clientWidth === 0) return;
+    const index = Math.round(el.scrollLeft / el.clientWidth);
+    setActive(index % HIGHLIGHTS.length);
+
+    // Debounced "has scrolling actually stopped" check (native smooth
+    // scroll fires continuous scroll events for however long the glide
+    // takes, so waiting for events to go quiet — not a fixed delay —
+    // is what reliably detects it settled, regardless of duration).
+    clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => {
+      if (index === HIGHLIGHTS.length) scrollToIndex(0, false);
+    }, 150);
+  }
+
+  React.useEffect(() => {
+    if (paused) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const id = setInterval(advance, AUTO_ADVANCE_MS);
+    return () => clearInterval(id);
+  }, [paused, advance]);
+
+  return (
+    <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <div
+        ref={scrollerRef}
+        onScroll={handleScroll}
+        className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {SLIDES.map((h, i) => (
+          <div key={`${h.eyebrow}-${i}`} className="w-full shrink-0 snap-center px-0.5">
+            <div className="grid grid-cols-1 items-center gap-8 border border-border bg-card p-6 sm:p-10 lg:grid-cols-2">
+              <div>
+                <Eyebrow>{h.eyebrow}</Eyebrow>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight">{h.title}</h2>
+                <p className="mt-3 text-sm text-muted-foreground">{h.body}</p>
+                {h.badges && <div className="mt-4 flex flex-wrap gap-2">{h.badges}</div>}
+              </div>
+              <div className="flex aspect-square items-center justify-center border border-dashed border-input bg-secondary/40">
+                {h.diagram}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center justify-center gap-4">
+        <button
+          onClick={() => scrollToIndex((active - 1 + HIGHLIGHTS.length) % HIGHLIGHTS.length)}
+          className="border border-border p-1.5 text-muted-foreground hover:text-foreground"
+          aria-label="Previous"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        <div className="flex items-center gap-1.5">
+          {HIGHLIGHTS.map((h, i) => (
+            <button
+              key={h.eyebrow}
+              onClick={() => scrollToIndex(i)}
+              className={cn("size-1.5", i === active ? "bg-primary" : "bg-border")}
+              aria-label={`Go to ${h.eyebrow}`}
+            />
+          ))}
+        </div>
+        <button onClick={advance} className="border border-border p-1.5 text-muted-foreground hover:text-foreground" aria-label="Next">
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Deterministic pseudo-scatter (no Math.random — that would render
+// differently server vs. client and trip a hydration mismatch) behind
+// the hero: small squares (zero radius, matching Terminal Ledger's own
+// rule, not circles) drifting and fading on an infinite loop, driven
+// by globals.css's `.particle`/`particle-drift` keyframe reading these
+// per-element custom properties.
+const PARTICLE_COUNT = 24;
+
+const PARTICLES = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
+  left: (i * 41 + 7) % 100,
+  top: (i * 67 + 13) % 100,
+  size: 4 + (i % 4) * 1.5,
+  duration: 3.5 + (i % 7) * 0.6,
+  delay: (i % 9) * 0.4,
+  driftX: ((i % 5) - 2) * 14,
+  driftY: -30 - (i % 4) * 12,
+  opacity: 0.3 + (i % 4) * 0.1,
+  primary: i % 3 === 0,
+}));
+
+function ParticleField() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
+      {PARTICLES.map((p, i) => (
+        <span
+          key={i}
+          className={cn("particle absolute", p.primary ? "bg-primary" : "bg-muted-foreground")}
+          style={
+            {
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              width: p.size,
+              height: p.size,
+              "--duration": `${p.duration}s`,
+              "--delay": `${p.delay}s`,
+              "--drift-x": `${p.driftX}px`,
+              "--drift-y": `${p.driftY}px`,
+              "--particle-opacity": p.opacity,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+// Below the hero — deliberately a different mark (small "+" crosses,
+// not the hero's solid squares) so the two fields read as distinct
+// layers, not one animation continuing past its own section. Spread
+// across the FULL height of the Features->final-CTA wrapper via `top`
+// percentages (that wrapper is whatever tall its own content makes
+// it, not one viewport), then the whole layer is nudged upward by a
+// fraction of the page's own scroll position — real parallax, not
+// just another idle drift: scrolling down visibly moves this layer
+// up relative to the content passing over it, exactly because it
+// moves slower than the page itself does.
+const SCROLL_PARTICLE_COUNT = 64;
+
+const SCROLL_PARTICLES = Array.from({ length: SCROLL_PARTICLE_COUNT }, (_, i) => ({
+  left: (i * 37 + 5) % 100,
+  top: (i * 29 + 9) % 100,
+  size: 12 + (i % 3) * 5,
+  fadeDuration: 3 + (i % 5) * 0.6,
+  fadeDelay: (i % 11) * 0.4,
+  // Muted-foreground reads as near-invisible at low opacity in light
+  // mode (raised directly after shipping — it genuinely wasn't
+  // visible there) — pushed well up, and most particles are primary
+  // now rather than a 1-in-4 minority, since a saturated color holds
+  // up in both themes at these sizes/opacities in a way a gray tint
+  // doesn't.
+  opacity: 0.35 + (i % 3) * 0.15,
+  primary: i % 3 !== 0,
+}));
+
+// Real inertia, not just a lagged readout of scrollY — every scroll
+// event adds to a velocity (proportional to how far you just
+// scrolled), and a continuously-running rAF loop applies
+// `position += velocity` then decays velocity by FRICTION every
+// frame. That decay is the entire effect: stop scrolling and the
+// layer keeps coasting for a few frames before settling, instead of
+// stopping the instant you do. The loop itself only runs while
+// velocity is still large enough to matter — no idle rAF burning
+// cycles once everything's settled — and restarts on the next scroll.
+const SCROLL_GAIN = 0.15; // how much of each scroll delta becomes velocity
+const SCROLL_FRICTION = 0.95; // velocity kept per frame — higher coasts longer
+const SCROLL_SETTLE_THRESHOLD = 0.02; // px/frame below which the loop stops
+// Without a bound, `position` just kept accumulating over the whole
+// page's scroll history — after enough scrolling it had drifted the
+// entire layer far enough that most of its 64 particles (spread across
+// the full Features->CTA height) ended up translated out of the
+// overflow-hidden wrapper's box entirely, which is why they visibly
+// vanished a section or two down rather than actually settling
+// anywhere. Bouncing off a small fixed range instead means the layer
+// can never drift more than SCROLL_BOUND from its base alignment —
+// "bounded... bounces on screen" was the actual ask, not unbounded
+// parallax drift.
+const SCROLL_BOUND = 50; // px, max distance from center before it bounces
+const SCROLL_BOUNCE_DAMPING = 0.55; // velocity kept (reflected) on each bounce
+
+function ScrollParticleField() {
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let position = 0;
+    let velocity = 0;
+    let lastScrollY = window.scrollY;
+    let rafId: number | undefined;
+
+    function tick() {
+      position += velocity;
+      if (position > SCROLL_BOUND) {
+        position = SCROLL_BOUND;
+        velocity = -Math.abs(velocity) * SCROLL_BOUNCE_DAMPING;
+      } else if (position < -SCROLL_BOUND) {
+        position = -SCROLL_BOUND;
+        velocity = Math.abs(velocity) * SCROLL_BOUNCE_DAMPING;
+      }
+      velocity *= SCROLL_FRICTION;
+
+      const el = ref.current;
+      if (el) el.style.transform = `translateY(${position}px)`;
+
+      if (Math.abs(velocity) > SCROLL_SETTLE_THRESHOLD) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        rafId = undefined;
+      }
+    }
+
+    function onScroll() {
+      const current = window.scrollY;
+      // Scrolling down (positive delta) pushes velocity negative, so
+      // the layer drifts UP relative to the content — same direction
+      // the plain parallax version had, momentum layered on top of it.
+      velocity -= (current - lastScrollY) * SCROLL_GAIN;
+      lastScrollY = current;
+      if (rafId === undefined) rafId = requestAnimationFrame(tick);
+    }
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (rafId !== undefined) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  return (
+    <div ref={ref} className="pointer-events-none absolute inset-0 will-change-transform" aria-hidden="true">
+      {SCROLL_PARTICLES.map((p, i) => (
+        <Plus
+          key={i}
+          className={cn("anim-fade-cycle absolute", p.primary ? "text-primary" : "text-muted-foreground")}
+          style={
+            {
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              width: p.size,
+              height: p.size,
+              animationDuration: `${p.fadeDuration}s`,
+              animationDelay: `${p.fadeDelay}s`,
+              "--fade-peak": p.opacity,
+            } as React.CSSProperties
+          }
+          strokeWidth={2}
+        />
+      ))}
+    </div>
+  );
+}
+
 function Section({ id, className, children }: { id?: string; className?: string; children: React.ReactNode }) {
   return (
     <section id={id} className={cn("mx-auto w-full max-w-5xl px-5 py-16 sm:py-20", className)}>
@@ -110,6 +590,11 @@ export default function LandingPage() {
   const [plans, setPlans] = React.useState<Plan[]>([]);
   const [plansLoading, setPlansLoading] = React.useState(true);
   const [openFaq, setOpenFaq] = React.useState<number | null>(0);
+  // null until after mount — detectCurrency reads navigator, so this
+  // has to happen in an effect (server-rendered/first-paint HTML has
+  // no locale to go on) rather than during render, or it'd hydration-
+  // mismatch.
+  const [localCurrency, setLocalCurrency] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     (async () => {
@@ -121,6 +606,7 @@ export default function LandingPage() {
         setPlansLoading(false);
       }
     })();
+    (() => setLocalCurrency(detectCurrency()))();
   }, []);
 
   const primaryHref = user ? "/assistant" : "/signup";
@@ -128,6 +614,36 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <script
+        type="application/ld+json"
+        // Real offers once plans have loaded; omitted (not fabricated)
+        // while still loading — same "never invent, leave it out"
+        // discipline this codebase applies to real data everywhere
+        // else. priceCurrency stays IDR (what price_idr actually is,
+        // per models/billing.py) rather than converting to USD with an
+        // invented exchange rate.
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "Applicient",
+            applicationCategory: "BusinessApplication",
+            operatingSystem: "Web",
+            description:
+              "Applicient discovers job openings across boards and ATS sites, scores them honestly against your real experience, drafts a tailored CV it can prove is truthful, fills the application, and keeps your pipeline updated from your inbox.",
+            ...(plans.length > 0
+              ? {
+                  offers: plans.map((p) => ({
+                    "@type": "Offer",
+                    name: p.name,
+                    price: String(p.price_idr),
+                    priceCurrency: "IDR",
+                  })),
+                }
+              : {}),
+          }),
+        }}
+      />
       {!bannerDismissed && (
         <div className="flex items-center justify-center gap-2 bg-primary px-4 py-1.5 text-center text-xs text-primary-foreground">
           <span>Applicient is in early access — pricing and features may still change.</span>
@@ -170,29 +686,57 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <Section className="flex flex-col items-center gap-6 pt-20 pb-16 text-center sm:pt-28">
-        <Badge variant="secondary" className="font-mono text-[10px] tracking-wide uppercase">
-          Honest scoring · Verified CVs · Human in control
-        </Badge>
-        <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-          Find the right jobs.<br />Apply with proof, not padding.
-        </h1>
-        <p className="max-w-xl text-base text-muted-foreground sm:text-lg">
-          Applicient discovers openings across job boards and ATS sites, scores them honestly against
-          your real experience, drafts a tailored CV it can prove is truthful, fills the application,
-          and keeps your pipeline updated from your inbox.
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          <Button asChild size="lg">
-            <Link href={primaryHref}>{primaryLabel}</Link>
-          </Button>
-          <Button asChild variant="outline" size="lg">
-            <a href="#demo">See how it works</a>
-          </Button>
+      <Section className="relative z-0 overflow-hidden pt-20 pb-16 text-center sm:pt-28">
+        <ParticleField />
+        {/* Explicit position+z-index on BOTH this wrapper and
+            ParticleField, as direct siblings under Section — Section's
+            own `relative` alone doesn't establish a real stacking
+            context (no z-index on it), so ParticleField's old `-z-10`
+            had no reliable local scope to sink "just below this hero's
+            own text" and could end up painted behind something else
+            entirely, several ancestors up. Two siblings with their own
+            explicit z-index (0 vs 10) stack correctly against each
+            other regardless of that ambiguity. */}
+        <div className="relative z-10 flex flex-col items-center gap-6">
+          <Badge variant="secondary" className="font-mono text-[10px] tracking-wide uppercase">
+            Honest scoring · Verified CVs · Human in control
+          </Badge>
+          <p className="text-base font-medium sm:text-lg">
+            Make your job <span className="text-primary">appli</span>cations effi<span className="text-primary">cient</span>.
+          </p>
+          <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+            Find the right jobs.<br />Apply with proof, not padding.
+          </h1>
+          <p className="max-w-xl text-base text-muted-foreground sm:text-lg">
+            Applicient discovers openings across job boards and ATS sites, scores them honestly against
+            your real experience, drafts a tailored CV it can prove is truthful, fills the application,
+            and keeps your pipeline updated from your inbox.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button asChild size="lg">
+              <Link href={primaryHref}>{primaryLabel}</Link>
+            </Button>
+            <Button asChild variant="outline" size="lg">
+              <a href="#demo">See how it works</a>
+            </Button>
+          </div>
+          <span className="text-xs text-muted-foreground">No credit card required for the Free plan.</span>
+          <div className="mt-6 w-full max-w-3xl border border-border bg-card/50 px-4 py-8 sm:px-8">
+            <FlowDiagram />
+          </div>
         </div>
-        <span className="text-xs text-muted-foreground">No credit card required for the Free plan.</span>
       </Section>
 
+      {/* Everything below the hero shares one scroll-reactive particle
+          layer — see ScrollParticleField's own comment for why it's a
+          different mark than the hero's, and for the stacking-context
+          reasoning (explicit z-index on both this layer and the
+          content wrapper as direct siblings, same fix the hero itself
+          needed) that keeps it reliably behind this content instead of
+          on top of it. */}
+      <div className="relative z-0 overflow-hidden">
+        <ScrollParticleField />
+        <div className="relative z-10">
       {/* Features */}
       <Section id="features">
         <Eyebrow>What it does</Eyebrow>
@@ -210,31 +754,9 @@ export default function LandingPage() {
         </div>
       </Section>
 
-      {/* Highlight: claim verifier */}
+      {/* Highlights: one panel per stage, scrolls sideways */}
       <Section>
-        <div className="grid grid-cols-1 items-center gap-8 border border-border bg-card p-6 sm:p-10 lg:grid-cols-2">
-          <div>
-            <Eyebrow>The hard guarantee</Eyebrow>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight">
-              Zero fabricated claims — enforced technically, not just promised
-            </h2>
-            <p className="mt-3 text-sm text-muted-foreground">
-              Every tailored bullet point is generated with a link back to a real, atomic piece of
-              your evidence bank. A separate, adversarial verifier agent then checks each claim —
-              and it never sees the job description, so it can&apos;t rationalize inflating something to
-              fit what a role wants. Anything unsupported or inflated blocks export until it&apos;s fixed.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Badge variant="secondary" className="font-mono text-[10px]">SUPPORTED</Badge>
-              <Badge variant="secondary" className="font-mono text-[10px]">REFRAMED_OK</Badge>
-              <Badge variant="secondary" className="bg-crit-bg font-mono text-[10px] text-crit">UNSUPPORTED</Badge>
-              <Badge variant="secondary" className="bg-crit-bg font-mono text-[10px] text-crit">INFLATED</Badge>
-            </div>
-          </div>
-          <div className="flex aspect-square items-center justify-center border border-dashed border-input bg-secondary/40">
-            <ShieldCheck className="size-16 text-muted-foreground" strokeWidth={1} />
-          </div>
-        </div>
+        <HighlightCarousel />
       </Section>
 
       {/* Demo video */}
@@ -261,23 +783,29 @@ export default function LandingPage() {
           <div className="mt-8 text-sm text-muted-foreground font-mono">loading…</div>
         ) : (
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {plans.map((p) => (
-              <div key={p.id} className="flex flex-col gap-4 border border-border bg-card p-6">
-                <div>
-                  <TierLabel planName={p.name} className="text-sm font-medium" iconClassName="size-4" />
-                  <div className="mt-1 text-2xl font-semibold tracking-tight">
-                    {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
-                    {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
+            {plans.map((p) => {
+              const localized = localCurrency ? formatLocalizedPrice(p.price_idr, localCurrency) : null;
+              return (
+                <div key={p.id} className="flex flex-col gap-4 border border-border bg-card p-6">
+                  <div>
+                    <TierLabel planName={p.name} className="text-sm font-medium" iconClassName="size-4" />
+                    <div className="mt-1 text-2xl font-semibold tracking-tight">
+                      {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
+                      {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
+                    </div>
+                    {localized && (
+                      <span className="block text-xs text-muted-foreground">≈ {localized}/mo</span>
+                    )}
+                    <span className="mt-1 block text-xs text-muted-foreground font-mono">
+                      ${p.monthly_usage_cap_usd.toFixed(2)} usage cap / mo
+                    </span>
                   </div>
-                  <span className="mt-1 block text-xs text-muted-foreground font-mono">
-                    ${p.monthly_usage_cap_usd.toFixed(2)} usage cap / mo
-                  </span>
+                  <Button asChild className="mt-auto">
+                    <Link href={user ? "/billing" : "/signup"}>{user ? "Manage plan" : "Get started"}</Link>
+                  </Button>
                 </div>
-                <Button asChild className="mt-auto">
-                  <Link href={user ? "/billing" : "/signup"}>{user ? "Manage plan" : "Get started"}</Link>
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>
@@ -320,6 +848,8 @@ export default function LandingPage() {
           </Button>
         </div>
       </Section>
+        </div>
+      </div>
 
       <footer className="border-t border-border">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 px-5 py-10 sm:flex-row sm:items-center sm:justify-between">

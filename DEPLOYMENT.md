@@ -325,7 +325,7 @@ of `.env`, written fresh on every deploy:
 | `NEXT_PUBLIC_DODO_PAYMENTS_MODE` | `test` until step 9 confirms billing end to end, then `live` |
 | `DODO_PAYMENTS_ENVIRONMENT` | `test_mode` until step 9 confirms billing end to end, then `live_mode` |
 | `ADMIN_EMAIL` | the real email you'll sign up with — that account becomes admin automatically |
-| `FRONTEND_URL` | `https://applicient.my.id` |
+| `FRONTEND_URL` | `https://applicient.my.id` — also drives `web`'s own `SITE_URL` (metadataBase/robots.txt/sitemap.xml), no separate variable needed |
 | `API_BASE_URL` | `https://api.applicient.my.id` — the API's own public URL, used to build the email-verification link (v2 Phase 1) |
 | `CORS_ORIGINS` | `https://applicient.my.id,https://www.applicient.my.id` |
 | `CADDY_EMAIL` | your real email — Let's Encrypt renewal/expiry notices |

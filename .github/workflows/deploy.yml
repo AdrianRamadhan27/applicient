@@ -168,6 +168,7 @@ jobs:
             LANGSMITH_PROJECT=${{ vars.LANGSMITH_PROJECT }}
             FRONTEND_URL=${{ vars.FRONTEND_URL }}
             API_BASE_URL=${{ vars.API_BASE_URL }}
+            SITE_URL=${{ vars.FRONTEND_URL }}
             CORS_ORIGINS=${{ vars.CORS_ORIGINS }}
             CADDY_EMAIL=${{ vars.CADDY_EMAIL }}
             BROWSER_WORKER_MAX_SESSIONS=${{ vars.BROWSER_WORKER_MAX_SESSIONS }}
