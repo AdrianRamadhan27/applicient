@@ -8,6 +8,7 @@ type AuthContextValue = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -55,13 +56,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(newUser);
   }
 
+  // v2 Phase 1 (Google OAuth) — the callback page already has a real
+  // token (issued by /auth/google/callback), it just needs this
+  // context's `user` set from it. Deliberately NOT a full page reload
+  // to a page that re-checks localStorage on mount (what the callback
+  // page used to do): that had a real race — window.location.assign()
+  // can start unloading the current page before its own in-flight
+  // /auth/me resolves, so the result never lands anywhere. Setting
+  // `user` directly here, in the same JS context, has no such race.
+  async function loginWithToken(token: string) {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    const me = await api.me();
+    setUser(me);
+  }
+
   function logout() {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, signup, loginWithToken, logout }}>
+      {children}
+    </AuthContext.Provider>
   );
 }
 
