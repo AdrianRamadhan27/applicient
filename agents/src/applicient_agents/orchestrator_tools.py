@@ -38,15 +38,17 @@ from sqlalchemy.orm import sessionmaker
 from applicient_agents.application_service import start_application_attempt
 
 from applicient_api import schemas
+from applicient_api.billing_service import current_period_spend_usd
 from applicient_api.claim_verification_service import (
     VerificationError,
     regenerate_from_last_verification,
     run_verification_attempt,
 )
 from applicient_api.cover_letter_service import generate_cover_letter
-from applicient_api.models.agents import RunEvent
+from applicient_api.models.agents import AgentRun, RunEvent
+from applicient_api.models.billing import Plan, Subscription
 from applicient_api.models.discovery import Job, SavedSearch, Source
-from applicient_api.models.pipeline import Application, ApplicationAttempt
+from applicient_api.models.pipeline import Application, ApplicationAttempt, PipelineStage
 from applicient_api.models.profile import Persona, Preference, Profile
 from applicient_api.models.scoring import FitScore
 from applicient_api.radar import run_radar_search
@@ -171,8 +173,10 @@ def build_orchestrator_tools(
         creates one from every currently enabled source on this
         account and the role titles you pass in. Returns an error
         string (not an exception) if there are no enabled sources at
-        all — that's a real blocker only a human can fix (add a
-        source in Radar's Setup dialog first)."""
+        all — that's a real blocker only a human can fix (pick at
+        least one platform — LinkedIn, Indeed, RemoteOK, or an ATS
+        board — when creating a saved search in Radar first; this tool
+        can't provision a source on its own)."""
 
         with session_factory() as db:
             existing = (
@@ -183,7 +187,10 @@ def build_orchestrator_tools(
 
             enabled_sources = db.query(Source).filter_by(user_id=user_id, enabled=True).all()
             if not enabled_sources:
-                return "error: no enabled sources exist on this account — add at least one in Radar's Setup dialog first"
+                return (
+                    "error: no sources exist on this account yet — in Radar, create a saved search and pick "
+                    "at least one platform (LinkedIn, Indeed, RemoteOK, or an ATS board) first"
+                )
 
             saved_search = SavedSearch(
                 user_id=user_id, persona_id=persona_id, name="Assistant search",
@@ -599,6 +606,140 @@ def build_orchestrator_tools(
             )
 
     @tool
+    def list_saved_searches() -> str:
+        """List this persona's saved searches — name, role titles,
+        active/paused state, schedule, source count, and when each
+        last ran. Check this before ensure_saved_search/run_discovery:
+        an existing active search may already cover what the human's
+        asking for, so there's no need to create a new one."""
+
+        with session_factory() as db:
+            searches = (
+                db.query(SavedSearch)
+                .filter_by(persona_id=persona_id, user_id=user_id)
+                .order_by(SavedSearch.created_at.desc())
+                .all()
+            )
+            if not searches:
+                return "no saved searches exist yet for this persona"
+
+            lines = []
+            for s in searches:
+                last_run = (
+                    db.query(AgentRun)
+                    .filter_by(saved_search_id=s.id, run_type="radar")
+                    .order_by(AgentRun.started_at.desc())
+                    .first()
+                )
+                if last_run is None:
+                    last_run_desc = "never run"
+                else:
+                    when = last_run.finished_at or last_run.started_at
+                    last_run_desc = f"last run {last_run.status} at {when.isoformat()}"
+                lines.append(
+                    f"- saved_search_id={s.id} | {s.name} | roles={', '.join(s.role_titles) or '(none)'} | "
+                    f"{'active' if s.active else 'paused'} | schedule={s.schedule_cron or 'manual only'} | "
+                    f"sources={len(s.source_ids)} | {last_run_desc}"
+                )
+            return "\n".join(lines)
+
+    @tool
+    def list_job_inbox(recommendation: str | None = None, limit: int = 15) -> str:
+        """List jobs in this persona's Job Inbox, most recently
+        discovered first — broader than list_top_jobs (which only
+        returns strong_apply/apply): this includes unscored and
+        lower-ranked jobs too, so it's the right tool for "what's
+        in my inbox" rather than "what should I apply to". Pass
+        recommendation ("strong_apply", "apply", "maybe", or "pass")
+        to filter to one bucket; omit it to see everything."""
+
+        with session_factory() as db:
+            query = (
+                db.query(Job, FitScore)
+                .outerjoin(FitScore, (FitScore.job_id == Job.id) & (FitScore.persona_id == persona_id))
+                .filter(Job.user_id == user_id)
+            )
+            if recommendation:
+                query = query.filter(FitScore.recommendation == recommendation)
+            rows = query.order_by(Job.created_at.desc()).limit(limit).all()
+            if not rows:
+                return "no jobs in the inbox yet — run discovery first"
+            lines = [
+                f"- job_id={job.id} | {job.title} at {job.company_name_raw} | "
+                f"{job.location or 'location not stated'} | "
+                + (f"score={float(fs.overall_score)} ({fs.recommendation})" if fs else "not yet scored")
+                for job, fs in rows
+            ]
+            emit_card("jobs", {
+                "jobs": [
+                    {
+                        "job_id": str(job.id), "title": job.title, "company_name": job.company_name_raw,
+                        "location": job.location,
+                        "score": float(fs.overall_score) if fs else None,
+                        "recommendation": fs.recommendation if fs else None,
+                    }
+                    for job, fs in rows
+                ],
+            })
+            return "\n".join(lines)
+
+    @tool
+    def list_pipeline() -> str:
+        """List this persona's Application Pipeline, grouped by stage
+        — what's been applied to and where each one currently stands.
+        Stage names come from this user's own custom PipelineStage
+        labels (renamed any time from the Pipeline page), not a fixed
+        vocabulary — match against exactly what's returned here, never
+        assume a literal stage name like "applied" or "interview"."""
+
+        with session_factory() as db:
+            rows = (
+                db.query(Application, Job)
+                .join(Job, Job.id == Application.job_id)
+                .filter(Application.user_id == user_id, Application.persona_id == persona_id)
+                .order_by(Application.updated_at.desc())
+                .all()
+            )
+            if not rows:
+                return "no applications tracked yet for this persona"
+
+            stages = {s.key: s.display_name for s in db.query(PipelineStage).filter_by(user_id=user_id).all()}
+            grouped: dict[str, list[str]] = {}
+            for app, job in rows:
+                stage_label = stages.get(app.state, app.state)
+                grouped.setdefault(stage_label, []).append(
+                    f"application_id={app.id} | {job.title} at {job.company_name_raw}"
+                )
+
+            lines = []
+            for stage_label, entries in grouped.items():
+                lines.append(f"{stage_label} ({len(entries)}):")
+                lines.extend(f"  - {e}" for e in entries)
+            return "\n".join(lines)
+
+    @tool
+    def get_usage_status() -> str:
+        """Check this account's current billing-period LLM spend
+        against its plan's monthly usage cap. Call this before
+        starting an expensive operation (tailor_cv, run_discovery,
+        run_application_agent) if the human seems cost-conscious, or
+        right after a tool call fails with a usage-cap error."""
+
+        with session_factory() as db:
+            subscription = db.query(Subscription).filter_by(user_id=user_id).one_or_none()
+            if subscription is None:
+                return "no subscription found for this account"
+            plan = db.get(Plan, subscription.plan_id)
+            if plan is None:
+                return "subscription exists but its plan could not be found"
+            spend = current_period_spend_usd(db, user_id=user_id, subscription=subscription)
+            cap = float(plan.monthly_usage_cap_usd)
+            return (
+                f"plan={plan.name} | spent ${spend:.2f} of ${cap:.2f} this billing period "
+                f"(${max(cap - spend, 0):.2f} remaining)"
+            )
+
+    @tool
     async def ask_user(question: str) -> str:
         """Ask the human a specific question when you're genuinely
         blocked — an ambiguous choice only they can make, or
@@ -624,5 +765,9 @@ def build_orchestrator_tools(
         create_application_for_job,
         run_application_agent,
         check_application_attempt_status,
+        list_saved_searches,
+        list_job_inbox,
+        list_pipeline,
+        get_usage_status,
         ask_user,
     ]

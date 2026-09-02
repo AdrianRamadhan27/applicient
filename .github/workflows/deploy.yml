@@ -64,6 +64,7 @@ jobs:
         working-directory: web
         env:
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_DODO_PAYMENTS_MODE: ${{ vars.NEXT_PUBLIC_DODO_PAYMENTS_MODE }}
         run: pnpm run build
 
   build-and-push:
@@ -110,6 +111,7 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_DODO_PAYMENTS_MODE=${{ vars.NEXT_PUBLIC_DODO_PAYMENTS_MODE }}
           tags: |
             ${{ env.IMAGE_NAMESPACE }}/applicient-web:latest
             ${{ env.IMAGE_NAMESPACE }}/applicient-web:${{ github.sha }}
@@ -176,8 +178,9 @@ jobs:
             GMAIL_REDIRECT_URI=${{ vars.GMAIL_REDIRECT_URI }}
             GOOGLE_LOGIN_REDIRECT_URI=${{ vars.GOOGLE_LOGIN_REDIRECT_URI }}
             GMAIL_PUBSUB_TOPIC=${{ vars.GMAIL_PUBSUB_TOPIC }}
-            XENDIT_SECRET_KEY=${{ secrets.XENDIT_SECRET_KEY }}
-            XENDIT_WEBHOOK_TOKEN=${{ secrets.XENDIT_WEBHOOK_TOKEN }}
+            DODO_PAYMENTS_API_KEY=${{ secrets.DODO_PAYMENTS_API_KEY }}
+            DODO_PAYMENTS_ENVIRONMENT=${{ vars.DODO_PAYMENTS_ENVIRONMENT }}
+            DODO_PAYMENTS_WEBHOOK_KEY=${{ secrets.DODO_PAYMENTS_WEBHOOK_KEY }}
             ENVEOF
             chmod 600 /opt/applicient/.env
             cd /opt/applicient

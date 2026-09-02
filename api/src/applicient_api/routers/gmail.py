@@ -86,7 +86,10 @@ def update_connection(
     conn = db.query(GmailConnection).filter_by(id=connection_id, user_id=user_id).one_or_none()
     if conn is None:
         raise HTTPException(404, "connection not found")
-    conn.scan_window_days = body.scan_window_days
+    if body.scan_window_days is not None:
+        conn.scan_window_days = body.scan_window_days
+    if body.polling_enabled is not None:
+        conn.polling_enabled = body.polling_enabled
     db.commit()
     db.refresh(conn)
     return conn

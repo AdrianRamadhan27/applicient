@@ -36,6 +36,7 @@ export type Subscription = {
   status: string;
   current_period_spend_usd: number;
   current_period_end: string | null;
+  pending_plan_id: string | null;
   pending_plan_name: string | null;
 };
 
@@ -121,6 +122,7 @@ export type GmailConnection = {
   google_email: string;
   label_name: string;
   scan_window_days: number;
+  polling_enabled: boolean;
   status: string;
   last_synced_at: string | null;
   last_error: string | null;
@@ -682,6 +684,42 @@ export type InboxJobDetail = InboxJob & {
   sightings: JobSighting[];
 };
 
+// Manual job entry — type every field in by hand, or paste a URL and
+// let parseJobUrl prefill this same shape for review before saving.
+export type JobDraft = {
+  title: string;
+  company_name: string;
+  location?: string | null;
+  remote_policy?: string | null;
+  seniority?: string | null;
+  employment_type?: string | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  salary_currency?: string | null;
+  requirements?: string | null;
+  responsibilities?: string | null;
+  benefits?: string | null;
+  apply_url?: string | null;
+  source_url?: string | null;
+};
+
+export type ParsedJob = {
+  found: boolean;
+  title: string | null;
+  company_name: string | null;
+  location: string | null;
+  remote_policy: string | null;
+  seniority: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  requirements: string | null;
+  responsibilities: string | null;
+  benefits: string | null;
+  apply_url: string | null;
+};
+
 // --- F6/F7 — application execution and the pipeline board ---
 
 // M5 follow-up — pipeline stages are now a per-user customizable list
@@ -939,7 +977,7 @@ export const api = {
     return `${API_BASE_URL}/gmail/connect${qs}`;
   },
   listGmailConnections: () => request<GmailConnection[]>("/gmail/connections"),
-  updateGmailConnection: (id: string, body: { scan_window_days: number }) =>
+  updateGmailConnection: (id: string, body: Partial<{ scan_window_days: number; polling_enabled: boolean }>) =>
     request<GmailConnection>(`/gmail/connections/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteGmailConnection: (id: string) => request<void>(`/gmail/connections/${id}`, { method: "DELETE" }),
 
@@ -988,6 +1026,23 @@ export const api = {
 
   listEvidence: (profileId: string) =>
     request<EvidenceItem[]>(`/profiles/${profileId}/evidence-items`),
+  createEvidence: (
+    profileId: string,
+    body: {
+      category: EvidenceCategory;
+      title?: string | null;
+      text: string;
+      skills?: string[];
+      metrics?: Record<string, string>;
+      employer?: string | null;
+      date_start?: string | null;
+      date_end?: string | null;
+    },
+  ) =>
+    request<EvidenceItem>(`/profiles/${profileId}/evidence-items`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   deleteEvidence: (profileId: string, evidenceId: string) =>
     request<void>(`/profiles/${profileId}/evidence-items/${evidenceId}`, {
       method: "DELETE",
@@ -1188,6 +1243,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ job_ids: jobIds }),
     }),
+  /** Preview only — never saves anything. Pastes a job posting URL
+   * (any site) through a real browser + LLM extraction; the result
+   * prefills the manual "Add job" form for review before createJob
+   * actually saves it. `found: false` means it didn't look like a
+   * real job posting page. */
+  parseJobUrl: (url: string) =>
+    request<ParsedJob>("/jobs/parse-url", { method: "POST", body: JSON.stringify({ url }) }),
+  createJob: (body: JobDraft) => request<InboxJob>("/jobs", { method: "POST", body: JSON.stringify(body) }),
+  scoreJob: (jobId: string, personaId: string) =>
+    request<InboxJob>(`/jobs/${jobId}/score`, { method: "POST", body: JSON.stringify({ persona_id: personaId }) }),
 
   // --- M3 §2-4/F5.10 — job groups, tailoring, verification, rendering ---
 
@@ -1643,7 +1708,11 @@ export const api = {
   getMySubscription: () => request<Subscription>("/billing/subscription"),
   startCheckout: (planId: string) =>
     request<{ checkout_url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ plan_id: planId }) }),
-  syncSubscription: () => request<Subscription>("/billing/sync", { method: "POST" }),
+  syncSubscription: (dodoSubscriptionId?: string) =>
+    request<Subscription>(
+      `/billing/sync${dodoSubscriptionId ? `?dodo_subscription_id=${encodeURIComponent(dodoSubscriptionId)}` : ""}`,
+      { method: "POST" },
+    ),
 
   listPlans: () => request<Plan[]>("/admin/plans"),
   createPlan: (body: { name: string; price_idr: number; monthly_usage_cap_usd: number; is_active?: boolean }) =>

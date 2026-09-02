@@ -310,8 +310,8 @@ of `.env`, written fresh on every deploy:
 | `SECRET_KEY` | `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` — **never rotate this once real users exist**, it's the encryption key for every tenant's stored credentials |
 | `DEMO_USER_PASSWORD` | any password — only used by the seeded demo account |
 | `RESEND_API_KEY` | Resend dashboard → API Keys — used for verification/scheduled-run emails (v2 Phase 0) |
-| `XENDIT_SECRET_KEY` | Xendit dashboard → Settings → API Keys (sandbox key to start) |
-| `XENDIT_WEBHOOK_TOKEN` | Xendit dashboard → Settings → Developers → Callbacks |
+| `DODO_PAYMENTS_API_KEY` | Dodo dashboard → Developer → API Keys (a test-mode key to start) |
+| `DODO_PAYMENTS_WEBHOOK_KEY` | Dodo dashboard → Developer → Webhooks → your endpoint → signing secret |
 | `LANGSMITH_API_KEY` | optional — leave the secret unset if you're not using LangSmith |
 | `GMAIL_CLIENT_SECRET` | optional — only needed for step 10 (Gmail) |
 
@@ -322,6 +322,8 @@ of `.env`, written fresh on every deploy:
 |---|---|
 | `DOCKERHUB_USERNAME` | your Docker Hub username |
 | `NEXT_PUBLIC_API_URL` | `https://api.applicient.my.id` |
+| `NEXT_PUBLIC_DODO_PAYMENTS_MODE` | `test` until step 9 confirms billing end to end, then `live` |
+| `DODO_PAYMENTS_ENVIRONMENT` | `test_mode` until step 9 confirms billing end to end, then `live_mode` |
 | `ADMIN_EMAIL` | the real email you'll sign up with — that account becomes admin automatically |
 | `FRONTEND_URL` | `https://applicient.my.id` |
 | `API_BASE_URL` | `https://api.applicient.my.id` — the API's own public URL, used to build the email-verification link (v2 Phase 1) |
@@ -363,27 +365,41 @@ docker compose up -d
 1. Go to `https://applicient.my.id/signup` and sign up with the exact
    email you set as `ADMIN_EMAIL` (step 7). That account becomes
    `role=admin` automatically on signup — no manual DB step.
-2. Log in, confirm you see the "Admin" nav section (Models, Credentials,
-   Cost, Users, Plans) that a regular signup won't see.
+2. Log in, confirm you see the "Admin" nav section (Models, Cost, Run
+   Console, Users, Plans) that a regular signup won't see.
 3. In the admin Models/Providers page, connect at least one LLM provider
    — nothing in the app can call an LLM until an admin-owned model
    profile exists.
 
 ## 9. Test billing end to end
 
-1. In the Xendit dashboard (still using the sandbox key at this point),
-   set the webhook callback URL to `https://api.applicient.my.id/webhooks/xendit`
-   and confirm the callback token there matches `XENDIT_WEBHOOK_TOKEN`.
-2. From a regular (non-admin) test account, walk `/billing` → upgrade →
-   Xendit-hosted checkout → back to `/billing` and confirm the
-   subscription shows active (the page also has a manual "Sync payment
-   status" button if the webhook hasn't landed yet — polling is
-   authoritative, the webhook is just a faster nudge).
-3. Once that round-trip works end to end, update the `XENDIT_SECRET_KEY`
-   GitHub secret with your live key and the `XENDIT_WEBHOOK_TOKEN` secret
-   to match the live Xendit dashboard's callback token, push (or re-run
-   the workflow) to redeploy, and do one small real payment yourself to
-   confirm the live path too before announcing the site.
+1. In the Dodo dashboard (still using the test-mode key at this point),
+   add a webhook endpoint pointed at
+   `https://api.applicient.my.id/webhooks/dodo`, subscribed to at least
+   the `subscription.*` events, and confirm its signing secret matches
+   `DODO_PAYMENTS_WEBHOOK_KEY`.
+2. From a regular (non-admin) test account, walk `/billing` → Upgrade
+   on a paid plan. The first click for a given plan creates its Dodo
+   Product automatically (routers/admin.py/billing_service.py's
+   `ensure_product_for_plan` — no manual "create a product" step in the
+   Dodo dashboard), then opens the embedded checkout overlay right on
+   the page — it should never redirect you away from Applicient. Pay
+   with a Dodo test card and confirm `/billing` shows the subscription
+   active once the overlay closes (there's also a manual "Sync payment
+   status" button if that doesn't happen automatically — polling is
+   authoritative, the webhook is just a faster nudge; see
+   billing_service.py's own docstring).
+3. Once that round-trip works end to end: update the
+   `DODO_PAYMENTS_API_KEY`/`DODO_PAYMENTS_WEBHOOK_KEY` GitHub secrets
+   with your live-mode key and the live webhook endpoint's signing
+   secret, set the `DODO_PAYMENTS_ENVIRONMENT` and
+   `NEXT_PUBLIC_DODO_PAYMENTS_MODE` variables to `live_mode`/`live`,
+   push (or re-run the workflow) to redeploy, and do one small real
+   payment yourself to confirm the live path too before announcing the
+   site. A live-mode redeploy creates fresh live-mode Dodo Products the
+   first time each plan is checked out again (test-mode and live-mode
+   products are separate in Dodo, same as most payment processors) —
+   expected, not a bug.
 
 ## 10. (Optional) Gmail integration on the real domain
 

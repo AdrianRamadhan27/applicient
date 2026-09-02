@@ -12,7 +12,7 @@ leave.
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY
 
 from sqlalchemy.orm import Mapped, mapped_column
@@ -38,6 +38,10 @@ class GmailConnection(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     # cap (raised directly: a flat maxResults cap could silently miss
     # older matches instead of bounding by something meaningful).
     scan_window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    # v2 Phase 2 — pause/resume without deleting the connection (the
+    # only previous on/off signal was the row's existence at all).
+    # scheduler._poll_all_gmail_connections filters on this.
+    polling_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Fernet, via security.py's encrypt_api_key/decrypt_api_key — same
     # mechanism ProviderConnection.api_key_encrypted already uses, fed
     # the raw refresh-token string.

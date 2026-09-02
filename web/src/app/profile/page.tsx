@@ -108,6 +108,10 @@ function draftFromItem(item: EvidenceItem): EvidenceDraft {
   };
 }
 
+function emptyEvidenceDraft(): EvidenceDraft {
+  return { category: "experience", title: "", text: "", skills: "", metrics: "{}", employer: "", date_start: "", date_end: "" };
+}
+
 function hasParsedProfile(profile: Profile): boolean {
   return Object.values(profile.parsed_profile ?? {}).some((value) =>
     Array.isArray(value) ? value.length > 0 : Boolean(value),
@@ -436,6 +440,9 @@ export default function ProfileStudioPage() {
   const [editing, setEditing] = React.useState<EvidenceItem | null>(null);
   const [draft, setDraft] = React.useState<EvidenceDraft | null>(null);
   const [savingEdit, setSavingEdit] = React.useState(false);
+  const [addingEvidence, setAddingEvidence] = React.useState(false);
+  const [newDraft, setNewDraft] = React.useState<EvidenceDraft>(emptyEvidenceDraft());
+  const [savingNew, setSavingNew] = React.useState(false);
   const [editingProfile, setEditingProfile] = React.useState(false);
   const [profileDraft, setProfileDraft] = React.useState<ProfileDraft | null>(null);
   const [savingProfile, setSavingProfile] = React.useState(false);
@@ -593,6 +600,52 @@ export default function ProfileStudioPage() {
       toast.error(String(e));
     } finally {
       setSavingEdit(false);
+    }
+  }
+
+  async function handleCreateEvidence() {
+    if (!profile) return;
+    if (!newDraft.text.trim()) {
+      toast.error("Evidence text cannot be empty");
+      return;
+    }
+
+    let metrics: Record<string, string>;
+    try {
+      const parsed = JSON.parse(newDraft.metrics || "{}");
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+        throw new Error("metrics must be a JSON object");
+      }
+      metrics = parsed as Record<string, string>;
+    } catch (e) {
+      toast.error(`Metrics JSON is invalid: ${String(e)}`);
+      return;
+    }
+
+    setSavingNew(true);
+    try {
+      const created = await api.createEvidence(profile.id, {
+        category: newDraft.category,
+        title: newDraft.title.trim() || null,
+        text: newDraft.text.trim(),
+        skills: newDraft.skills
+          .split(",")
+          .map((skill) => skill.trim())
+          .filter(Boolean),
+        metrics,
+        employer: newDraft.employer.trim() || null,
+        date_start: newDraft.date_start || null,
+        date_end: newDraft.date_end || null,
+      });
+      setItems((prev) => [...prev, created]);
+      setAddingEvidence(false);
+      setNewDraft(emptyEvidenceDraft());
+      setProfile(await api.getProfile(profile.id));
+      toast.success("Evidence added and embedded");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSavingNew(false);
     }
   }
 
@@ -885,9 +938,14 @@ export default function ProfileStudioPage() {
                   {embeddedCount}/{items.length} embedded
                 </span>
               </div>
-              <span className="font-mono text-[10px] text-muted-foreground">
-                {profile.confirmed ? "verified for downstream use" : "review before confirming"}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {profile.confirmed ? "verified for downstream use" : "review before confirming"}
+                </span>
+                <Button size="sm" variant="outline" onClick={() => setAddingEvidence(true)}>
+                  Add evidence
+                </Button>
+              </div>
             </div>
 
             {items.length > 0 && (
@@ -1148,6 +1206,118 @@ export default function ProfileStudioPage() {
             </Button>
             <Button onClick={handleSaveEdit} disabled={savingEdit}>
               {savingEdit ? "Saving…" : "Save evidence"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={addingEvidence}
+        onOpenChange={(open) => {
+          setAddingEvidence(open);
+          if (!open) setNewDraft(emptyEvidenceDraft());
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Add evidence</DialogTitle>
+            <DialogDescription>
+              A manually-added accomplishment, embedded the same way a parsed one is — usable by scoring and
+              tailoring right away, not just kept for display.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-evidence-category">Category</Label>
+              <Select
+                value={newDraft.category}
+                onValueChange={(value) =>
+                  setNewDraft((current) => ({ ...current, category: value as EvidenceCategory }))
+                }
+              >
+                <SelectTrigger id="new-evidence-category" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EVIDENCE_CATEGORIES.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      {CATEGORY_LABEL[category]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-evidence-title">Title (role / degree / certificate)</Label>
+              <Input
+                id="new-evidence-title"
+                placeholder="e.g. Machine Learning Engineer Intern"
+                value={newDraft.title}
+                onChange={(event) => setNewDraft((current) => ({ ...current, title: event.target.value }))}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-evidence-text">Evidence text</Label>
+              <textarea
+                id="new-evidence-text"
+                placeholder="One clear, standalone sentence describing a single accomplishment."
+                value={newDraft.text}
+                onChange={(event) => setNewDraft((current) => ({ ...current, text: event.target.value }))}
+                className="min-h-24 w-full border border-input bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:border-ring"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-evidence-skills">Skills (comma separated)</Label>
+              <Input
+                id="new-evidence-skills"
+                value={newDraft.skills}
+                onChange={(event) => setNewDraft((current) => ({ ...current, skills: event.target.value }))}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-evidence-employer">Employer / project</Label>
+              <Input
+                id="new-evidence-employer"
+                value={newDraft.employer}
+                onChange={(event) => setNewDraft((current) => ({ ...current, employer: event.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="new-evidence-start">Start date</Label>
+                <Input
+                  id="new-evidence-start"
+                  type="date"
+                  value={newDraft.date_start}
+                  onChange={(event) => setNewDraft((current) => ({ ...current, date_start: event.target.value }))}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="new-evidence-end">End date</Label>
+                <Input
+                  id="new-evidence-end"
+                  type="date"
+                  value={newDraft.date_end}
+                  onChange={(event) => setNewDraft((current) => ({ ...current, date_end: event.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-evidence-metrics">Metrics (JSON object)</Label>
+              <textarea
+                id="new-evidence-metrics"
+                value={newDraft.metrics}
+                onChange={(event) => setNewDraft((current) => ({ ...current, metrics: event.target.value }))}
+                className="min-h-20 w-full border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none focus-visible:border-ring"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddingEvidence(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateEvidence} disabled={savingNew || !newDraft.text.trim()}>
+              {savingNew ? "Adding…" : "Add evidence"}
             </Button>
           </DialogFooter>
         </DialogContent>

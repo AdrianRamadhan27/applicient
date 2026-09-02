@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, type AdminUser } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 
 function money(v: number) {
@@ -80,7 +81,9 @@ export default function AdminUsersPage() {
                 <span className={cn("text-[11px] font-mono", u.is_active ? "text-ok" : "text-crit")}>
                   {u.is_active ? "active" : "suspended"}
                 </span>
-                <span className="text-xs text-muted-foreground">{u.plan_name ?? "—"}</span>
+                <TierLabel planName={u.plan_name} className="text-xs text-muted-foreground">
+                  {u.plan_name ?? "—"}
+                </TierLabel>
                 <span className="text-xs font-mono tabular">{money(u.current_period_spend_usd)}</span>
                 <div className="flex justify-end gap-1.5">
                   <Button

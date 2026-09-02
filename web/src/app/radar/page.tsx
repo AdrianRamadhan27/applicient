@@ -5,7 +5,6 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   api,
-  SOURCE_ADAPTERS,
   type AgentRunSummary,
   type CompanyCandidate,
   type JobSummary,
@@ -20,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -34,55 +34,76 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { usePersona } from "@/components/persona-provider";
 import { ChevronDown, ChevronUp, Loader2, Radar as RadarIcon } from "lucide-react";
 
-const ADAPTER_LABEL: Record<SourceAdapterKey, string> = {
-  greenhouse: "Greenhouse (ATS board)",
-  lever: "Lever (ATS board)",
-  workable: "Workable (ATS board)",
-  ashby: "Ashby (ATS board)",
-  smartrecruiters: "SmartRecruiters (ATS board)",
-  recruitee: "Recruitee (ATS board)",
-  remoteok: "RemoteOK (free aggregator)",
-  jsearch: "JSearch (aggregator, needs RapidAPI key)",
-  jobspy: "Multi-board scraper (LinkedIn/Indeed/Glassdoor/Google/ZipRecruiter)",
-  socialfetch: "SocialFetch (LinkedIn, paid/credit-metered)",
+// User-facing platform picker — deliberately hides the underlying
+// adapter/library (jobspy powers LinkedIn+Indeed under the hood, one
+// Source row per platform with `config.sites` fixed to just that
+// platform) and drops JSearch/SocialFetch entirely: both need a paid
+// API key up front before anything works, which was the actual
+// complaint ("too complex, user shouldn't need to know what api key
+// is needed"). JobStreet/Glints are listed disabled ("coming soon")
+// since they were asked for by name even though nothing backs them
+// yet — everything else here maps to a real, working adapter.
+type PlatformKey =
+  | "greenhouse"
+  | "lever"
+  | "workable"
+  | "ashby"
+  | "smartrecruiters"
+  | "recruitee"
+  | "linkedin"
+  | "indeed"
+  | "remoteok"
+  | "jobstreet"
+  | "glints";
+
+type PlatformConfigKind = "company_identifiers" | "jobspy_linkedin" | "jobspy_indeed" | "none" | "coming_soon";
+
+type PlatformDef = {
+  key: PlatformKey;
+  label: string;
+  mark: string;
+  color: string;
+  adapterKey: SourceAdapterKey | null;
+  configKind: PlatformConfigKind;
 };
 
-// Scraping-based sources (vs. legitimate public/paid APIs) — shown
-// with an explicit warning in the add-source form rather than left
-// looking identical to Greenhouse/Lever/RemoteOK.
-const SCRAPING_ADAPTERS: SourceAdapterKey[] = ["jobspy", "socialfetch"];
+const PLATFORMS: PlatformDef[] = [
+  { key: "greenhouse", label: "Greenhouse", mark: "Gh", color: "#24A47F", adapterKey: "greenhouse", configKind: "company_identifiers" },
+  { key: "lever", label: "Lever", mark: "Lv", color: "#5B57D1", adapterKey: "lever", configKind: "company_identifiers" },
+  { key: "workable", label: "Workable", mark: "Wk", color: "#2FAE6A", adapterKey: "workable", configKind: "company_identifiers" },
+  { key: "ashby", label: "Ashby", mark: "As", color: "#1F2933", adapterKey: "ashby", configKind: "company_identifiers" },
+  { key: "smartrecruiters", label: "SmartRecruiters", mark: "Sr", color: "#1F6FEB", adapterKey: "smartrecruiters", configKind: "company_identifiers" },
+  { key: "recruitee", label: "Recruitee", mark: "Rc", color: "#FF5C5C", adapterKey: "recruitee", configKind: "company_identifiers" },
+  { key: "linkedin", label: "LinkedIn", mark: "in", color: "#0A66C2", adapterKey: "jobspy", configKind: "jobspy_linkedin" },
+  { key: "indeed", label: "Indeed", mark: "id", color: "#2557A7", adapterKey: "jobspy", configKind: "jobspy_indeed" },
+  { key: "remoteok", label: "RemoteOK", mark: "OK", color: "#111111", adapterKey: "remoteok", configKind: "none" },
+  { key: "jobstreet", label: "JobStreet", mark: "JS", color: "#009E9E", adapterKey: null, configKind: "coming_soon" },
+  { key: "glints", label: "Glints", mark: "Gl", color: "#4B3FE4", adapterKey: null, configKind: "coming_soon" },
+];
 
-// Which config field(s) each adapter needs. All six ATS boards share
-// the `company_identifiers` scan-list shape (M2 §6 retrofitted
-// greenhouse/lever onto it too, matching the four M2 §4 adapters that
-// started on it directly) — one Source scans every identifier the
-// list holds, growable by discovery (PRD F2.10) or by hand here.
-// Existing M1-era Source rows still carry the older singular
-// `board_token` key; the adapters themselves read it as a one-element
-// list (no data migration needed), but this form only ever writes the
-// new `company_identifiers` shape going forward. jsearch/socialfetch
-// need an API key, remoteok needs nothing at all (public, keyless),
-// jobspy needs a site selection.
-const ADAPTER_CONFIG: Record<SourceAdapterKey, "company_identifiers" | "api_key" | "none" | "jobspy"> = {
-  greenhouse: "company_identifiers",
-  lever: "company_identifiers",
-  workable: "company_identifiers",
-  ashby: "company_identifiers",
-  smartrecruiters: "company_identifiers",
-  recruitee: "company_identifiers",
-  remoteok: "none",
-  jsearch: "api_key",
-  jobspy: "jobspy",
-  socialfetch: "api_key",
-};
+const PLATFORM_BY_KEY = Object.fromEntries(PLATFORMS.map((p) => [p.key, p])) as Record<PlatformKey, PlatformDef>;
 
-const COMPANY_IDENTIFIER_HINT: Record<string, string> = {
+// Best-effort inverse of the above, for rendering existing Source rows
+// (including ones created before this picker existed) with a logo —
+// falls back to the raw adapter_key label when a row can't be mapped
+// to exactly one platform (a legacy multi-site jobspy row, or a
+// jsearch/socialfetch row from before those were dropped).
+function platformForSource(s: Source): PlatformDef | undefined {
+  if (s.adapter_key === "jobspy") {
+    const sites = String(s.config?.sites ?? "");
+    if (sites === "linkedin") return PLATFORM_BY_KEY.linkedin;
+    if (sites === "indeed") return PLATFORM_BY_KEY.indeed;
+    return undefined;
+  }
+  return PLATFORMS.find((p) => p.adapterKey === s.adapter_key);
+}
+
+const COMPANY_IDENTIFIER_HINT: Partial<Record<PlatformKey, string>> = {
   greenhouse: "the board token, e.g. job-boards.greenhouse.io/gitlab",
   lever: "the board token, e.g. jobs.lever.co/palantir",
   workable: "the account slug, e.g. apply.workable.com/huggingface",
@@ -91,39 +112,173 @@ const COMPANY_IDENTIFIER_HINT: Record<string, string> = {
   recruitee: "the subdomain, e.g. channable.recruitee.com",
 };
 
-const API_KEY_PLACEHOLDER: Partial<Record<SourceAdapterKey, string>> = {
-  jsearch: "RapidAPI key for JSearch",
-  socialfetch: "SocialFetch API key (sfk_...)",
+function PlatformLogo({ mark, color, size = 26 }: { mark: string; color: string; size?: number }) {
+  return (
+    <span
+      className="inline-flex items-center justify-center shrink-0 font-mono font-bold text-white leading-none"
+      style={{ backgroundColor: color, width: size, height: size, fontSize: size * 0.42 }}
+    >
+      {mark}
+    </span>
+  );
+}
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const WEEKDAY_ABBR = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const HOURLY_INTERVAL_OPTIONS = [1, 2, 3, 4, 6, 8, 12];
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+function timeOfDay(h: string | number, m: string | number): string | null {
+  const hNum = Number(h);
+  const mNum = Number(m);
+  if (!Number.isInteger(hNum) || !Number.isInteger(mNum) || hNum < 0 || hNum > 23 || mNum < 0 || mNum > 59) {
+    return null;
+  }
+  const period = hNum < 12 ? "AM" : "PM";
+  const h12 = hNum % 12 === 0 ? 12 : hNum % 12;
+  return `${h12}:${String(mNum).padStart(2, "0")} ${period}`;
+}
+
+/** Crontab syntax is exact but not something most people can read at a
+ * glance — covers everything the schedule builder below can produce
+ * (hourly/daily/weekly/monthly) plus reasonable hand-typed variations,
+ * falling back to the raw expression only for genuinely custom
+ * schedules (multiple constraints combined, step values elsewhere,
+ * etc.) rather than risk describing one wrong. */
+function formatCronSchedule(cron: string): string {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return cron;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  if (month !== "*") return cron;
+
+  if (dayOfMonth !== "*" && dayOfWeek === "*") {
+    const domNum = Number(dayOfMonth);
+    const time = timeOfDay(hour, minute);
+    if (Number.isInteger(domNum) && domNum >= 1 && domNum <= 31 && time) {
+      return `Monthly on the ${ordinal(domNum)} at ${time}`;
+    }
+    return cron;
+  }
+  if (dayOfMonth !== "*") return cron;
+
+  if (dayOfWeek === "*") {
+    const minuteEvery = minute.match(/^\*\/(\d+)$/);
+    if (minuteEvery && hour === "*") return `Every ${minuteEvery[1]} minute${minuteEvery[1] === "1" ? "" : "s"}`;
+    if (minute === "0") {
+      if (hour === "*") return "Every hour";
+      const hourEvery = hour.match(/^\*\/(\d+)$/);
+      if (hourEvery) return `Every ${hourEvery[1]} hour${hourEvery[1] === "1" ? "" : "s"}`;
+    }
+    const time = timeOfDay(hour, minute);
+    return time ? `Daily at ${time}` : cron;
+  }
+
+  const time = timeOfDay(hour, minute);
+  if (!time) return cron;
+  if (dayOfWeek === "1-5") return `Weekdays at ${time}`;
+  if (dayOfWeek === "0,6" || dayOfWeek === "6,0") return `Weekends at ${time}`;
+
+  const days = dayOfWeek.split(",").map((d) => Number(d));
+  if (days.length > 0 && days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
+    const names = days.map((d) => WEEKDAY_NAMES[d]);
+    return names.length === 1 ? `Every ${names[0]} at ${time}` : `${names.join(", ")} at ${time}`;
+  }
+
+  return cron;
+}
+
+// v2 Phase 2 — a real schedule builder (frequency + day-of-week/day-of-
+// month + time-of-day) instead of hand-typed crontab syntax, with a
+// "Custom" mode left as an escape hatch for anything it can't express.
+// `draftScheduleCron` still holds the custom-mode raw text; every other
+// mode derives the real cron via buildCronFromSchedule below.
+type ScheduleMode = "none" | "hourly" | "daily" | "weekly" | "monthly" | "custom";
+
+const SCHEDULE_MODE_LABELS: Record<ScheduleMode, string> = {
+  none: "Manual only",
+  hourly: "Hourly",
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+  custom: "Custom",
 };
 
-// F10.1 — cron presets for the saved-search schedule field. Plain
-// crontab syntax, same convention as the backend's own `schedule_cron`
-// column and APScheduler's `CronTrigger.from_crontab` — no schedule
-// builder widget, just presets that fill the raw expression plus a
-// free-text field for anything else.
-const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
-  { label: "Every hour", cron: "0 * * * *" },
-  { label: "Every 6 hours", cron: "0 */6 * * *" },
-  { label: "Daily at 8am", cron: "0 8 * * *" },
-  { label: "Weekdays at 8am", cron: "0 8 * * 1-5" },
-];
+type ScheduleBuilderState = {
+  mode: ScheduleMode;
+  hour: number;
+  minute: number;
+  weekdays: Set<number>;
+  dayOfMonth: number;
+  intervalHours: number;
+};
 
-const JOBSPY_SITES = [
-  { value: "indeed", label: "Indeed" },
-  { value: "linkedin", label: "LinkedIn" },
-  { value: "glassdoor", label: "Glassdoor" },
-  { value: "google", label: "Google Jobs" },
-  { value: "zip_recruiter", label: "ZipRecruiter" },
-] as const;
+function defaultScheduleBuilder(): ScheduleBuilderState {
+  return { mode: "none", hour: 8, minute: 0, weekdays: new Set([1, 2, 3, 4, 5]), dayOfMonth: 1, intervalHours: 6 };
+}
 
-function statusColor(status: Source["status"]) {
-  switch (status) {
-    case "ok":
-      return "bg-ok-bg text-ok";
-    case "untested":
-      return "bg-muted text-muted-foreground";
-    default:
-      return "bg-crit-bg text-crit";
+/** Inverse of buildCronFromSchedule, used when opening a saved search
+ * for edit — best-effort: anything that doesn't cleanly round-trip
+ * through one of the four structured modes lands in "custom" showing
+ * the raw expression rather than mangling it. */
+function parseCronToBuilder(cron: string | null): ScheduleBuilderState {
+  const base = defaultScheduleBuilder();
+  if (!cron) return base;
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return { ...base, mode: "custom" };
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  if (month !== "*") return { ...base, mode: "custom" };
+
+  const hourEvery = hour.match(/^\*\/(\d+)$/);
+  if (dayOfMonth === "*" && dayOfWeek === "*" && minute === "0" && hourEvery) {
+    return { ...base, mode: "hourly", intervalHours: Number(hourEvery[1]) };
+  }
+
+  const hNum = Number(hour);
+  const mNum = Number(minute);
+  const validTime = Number.isInteger(hNum) && Number.isInteger(mNum) && hNum >= 0 && hNum <= 23 && mNum >= 0 && mNum <= 59;
+  if (!validTime) return { ...base, mode: "custom" };
+
+  if (dayOfMonth === "*" && dayOfWeek === "*") {
+    return { ...base, mode: "daily", hour: hNum, minute: mNum };
+  }
+  if (dayOfMonth === "*" && dayOfWeek !== "*") {
+    if (dayOfWeek === "1-5") return { ...base, mode: "weekly", hour: hNum, minute: mNum, weekdays: new Set([1, 2, 3, 4, 5]) };
+    if (dayOfWeek === "0,6" || dayOfWeek === "6,0") return { ...base, mode: "weekly", hour: hNum, minute: mNum, weekdays: new Set([0, 6]) };
+    const days = dayOfWeek.split(",").map(Number);
+    if (days.length > 0 && days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
+      return { ...base, mode: "weekly", hour: hNum, minute: mNum, weekdays: new Set(days) };
+    }
+    return { ...base, mode: "custom" };
+  }
+  const domNum = Number(dayOfMonth);
+  if (dayOfWeek === "*" && Number.isInteger(domNum) && domNum >= 1 && domNum <= 31) {
+    return { ...base, mode: "monthly", hour: hNum, minute: mNum, dayOfMonth: Math.min(domNum, 28) };
+  }
+  return { ...base, mode: "custom" };
+}
+
+function buildCronFromSchedule(b: ScheduleBuilderState, customCron: string): string | null {
+  switch (b.mode) {
+    case "none":
+      return null;
+    case "custom":
+      return customCron.trim() || null;
+    case "hourly":
+      return `0 */${b.intervalHours} * * *`;
+    case "daily":
+      return `${b.minute} ${b.hour} * * *`;
+    case "weekly": {
+      if (b.weekdays.size === 0) return null;
+      const days = Array.from(b.weekdays).sort((a, c) => a - c).join(",");
+      return `${b.minute} ${b.hour} * * ${days}`;
+    }
+    case "monthly":
+      return `${b.minute} ${b.hour} ${b.dayOfMonth} * *`;
   }
 }
 
@@ -183,7 +338,6 @@ export default function RadarPage() {
   const [savedSearches, setSavedSearches] = React.useState<SavedSearch[]>([]);
   const [loading, setLoading] = React.useState(true);
 
-  const [setupOpen, setSetupOpen] = React.useState(false);
   // M2 §5 — F2.10 discovery review/approval. Its own dialog, always
   // scoped to the globally-selected persona — discovery acts *for*
   // that persona, so there's no separate local override here.
@@ -192,26 +346,28 @@ export default function RadarPage() {
   const [loadingCandidates, setLoadingCandidates] = React.useState(false);
   const [discovering, setDiscovering] = React.useState(false);
   const [updatingCandidateId, setUpdatingCandidateId] = React.useState<string | null>(null);
-  const [newSourceName, setNewSourceName] = React.useState("");
-  const [newSourceAdapter, setNewSourceAdapter] = React.useState<SourceAdapterKey>("greenhouse");
-  // Comma-separated, same tag-input convention as Preference's
-  // target_roles/locations — one Source scans every identifier here
-  // (M2 §4/§6), not one Source per company.
-  const [newSourceCompanyIdentifiers, setNewSourceCompanyIdentifiers] = React.useState("");
-  const [newSourceApiKey, setNewSourceApiKey] = React.useState("");
-  const [newSourceJobspySites, setNewSourceJobspySites] = React.useState<Set<string>>(new Set(["indeed"]));
-  const [newSourceJobspyCountry, setNewSourceJobspyCountry] = React.useState("");
-  const [creatingSource, setCreatingSource] = React.useState(false);
-  const [testingSourceId, setTestingSourceId] = React.useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editingSearchId, setEditingSearchId] = React.useState<string | null>(null);
   const [draftName, setDraftName] = React.useState("");
   const [draftRoleTitles, setDraftRoleTitles] = React.useState("");
   const [draftPersonaId, setDraftPersonaId] = React.useState<string>("");
-  const [draftSourceIds, setDraftSourceIds] = React.useState<Set<string>>(new Set());
+  // Platform picker replaces manual Source setup — picking a platform
+  // here either reuses this user's existing Source row for it (config
+  // prefilled, editable) or provisions one on submit. Rows that don't
+  // map to exactly one of the 11 picker platforms (a legacy multi-site
+  // jobspy row, or a pre-existing jsearch/socialfetch row) are kept as
+  // opaque ids in draftUnmappedSourceIds so editing a search never
+  // silently drops them.
+  const [draftSelectedPlatforms, setDraftSelectedPlatforms] = React.useState<Set<PlatformKey>>(new Set());
+  const [draftPlatformConfig, setDraftPlatformConfig] = React.useState<
+    Partial<Record<PlatformKey, { companyIdentifiers?: string; country?: string }>>
+  >({});
+  const [draftUnmappedSourceIds, setDraftUnmappedSourceIds] = React.useState<Set<string>>(new Set());
   const [draftLocation, setDraftLocation] = React.useState("");
   const [draftScheduleCron, setDraftScheduleCron] = React.useState("");
+  const [scheduleBuilder, setScheduleBuilder] = React.useState<ScheduleBuilderState>(defaultScheduleBuilder());
+  const [draftActive, setDraftActive] = React.useState(true);
   const [creatingSearch, setCreatingSearch] = React.useState(false);
 
   // Keyed by saved-search id, not a single slot — every saved search
@@ -343,7 +499,28 @@ export default function RadarPage() {
           sinceSeq = e.seq;
         }
         isFirstBatch = false;
-        if (token.cancelled || run_status !== "running") break;
+        if (token.cancelled) break;
+        if (run_status !== "running") {
+          // Safety net for a real bug found live: a run can end up
+          // status="cancelled" server-side with no matching
+          // "run_cancelled" event ever written (a gap in the
+          // cancel-without-a-live-generator path, now fixed at the
+          // source too — see streaming.py). Without this, polling
+          // just stops here forever with `cancelled` never having
+          // flipped, leaving the row stuck showing "Running…"
+          // indefinitely. Reconciles directly against run_status
+          // instead of only ever trusting the event stream.
+          setRuns((prev) => {
+            const existing = prev[savedSearch.id];
+            if (!existing || existing.result !== null || existing.error !== null || existing.cancelled) return prev;
+            if (run_status === "cancelled") return { ...prev, [savedSearch.id]: { ...existing, cancelled: true } };
+            if (run_status === "failed") {
+              return { ...prev, [savedSearch.id]: { ...existing, error: "Run failed (no further detail recorded)" } };
+            }
+            return prev;
+          });
+          break;
+        }
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     } catch (e) {
@@ -425,91 +602,102 @@ export default function RadarPage() {
     }
   }
 
-  async function handleCreateSource() {
-    if (!newSourceName.trim()) return;
-    const configKind = ADAPTER_CONFIG[newSourceAdapter];
-    const jobspySitesNeedingCountry = ["indeed", "glassdoor"];
-    const companyIdentifiers = newSourceCompanyIdentifiers
-      .split(",")
-      .map((v) => v.trim())
-      .filter(Boolean);
-    const config: Record<string, string | string[]> =
-      configKind === "company_identifiers"
-        ? { company_identifiers: companyIdentifiers }
-        : configKind === "api_key"
-          ? { api_key: newSourceApiKey.trim() }
-          : configKind === "jobspy"
-            ? {
-                sites: Array.from(newSourceJobspySites).join(","),
-                ...(newSourceJobspyCountry.trim() ? { country: newSourceJobspyCountry.trim() } : {}),
-              }
-            : {};
-    if (configKind === "company_identifiers" && companyIdentifiers.length === 0) {
-      toast.error(`At least one company identifier is required for ${ADAPTER_LABEL[newSourceAdapter]}`);
-      return;
+  // Picking a platform prefills its config from an existing Source of
+  // that platform, if this user already has one (reused, not
+  // duplicated, on submit) — otherwise the fields start blank and a
+  // new Source gets provisioned on submit.
+  function toggleDraftPlatform(key: PlatformKey) {
+    const platform = PLATFORM_BY_KEY[key];
+    if (platform.configKind === "coming_soon") return;
+    const next = new Set(draftSelectedPlatforms);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+      const existing = sources.find((s) => platformForSource(s)?.key === key);
+      if (existing) {
+        setDraftPlatformConfig((cfg) => ({
+          ...cfg,
+          [key]:
+            platform.configKind === "company_identifiers"
+              ? { companyIdentifiers: ((existing.config.company_identifiers as string[] | undefined) ?? []).join(", ") }
+              : platform.configKind === "jobspy_indeed"
+                ? { country: String(existing.config.country ?? "") }
+                : {},
+        }));
+      }
     }
-    if (configKind === "api_key" && !config.api_key) {
-      toast.error(`API key is required for ${ADAPTER_LABEL[newSourceAdapter]}`);
-      return;
-    }
-    if (configKind === "jobspy" && newSourceJobspySites.size === 0) {
-      toast.error("Pick at least one site to scrape");
-      return;
-    }
-    if (
-      configKind === "jobspy" &&
-      !config.country &&
-      Array.from(newSourceJobspySites).some((s) => jobspySitesNeedingCountry.includes(s))
-    ) {
-      toast.error("Country is required when Indeed or Glassdoor is selected");
-      return;
-    }
-    setCreatingSource(true);
-    try {
-      const source = await api.createSource({
-        name: newSourceName.trim(),
-        tier: "tier1_api",
-        adapter_key: newSourceAdapter,
-        config,
-      });
-      setSources((prev) => [...prev, source]);
-      setNewSourceName("");
-      setNewSourceCompanyIdentifiers("");
-      setNewSourceApiKey("");
-      setNewSourceJobspyCountry("");
-      toast.success("Source added — test it to verify");
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setCreatingSource(false);
-    }
+    setDraftSelectedPlatforms(next);
   }
 
-  async function handleTestSource(id: string) {
-    setTestingSourceId(id);
-    try {
-      const updated = await api.testSource(id);
-      setSources((prev) => prev.map((s) => (s.id === id ? updated : s)));
-      toast[updated.status === "ok" ? "success" : "error"](
-        updated.status === "ok" ? "Connection OK" : (updated.last_error ?? updated.status),
-      );
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setTestingSourceId(null);
-    }
+  function setDraftPlatformField(key: PlatformKey, field: "companyIdentifiers" | "country", value: string) {
+    setDraftPlatformConfig((cfg) => ({ ...cfg, [key]: { ...cfg[key], [field]: value } }));
   }
 
-  async function handleDeleteSource(id: string) {
-    try {
-      await api.deleteSource(id);
-      setSources((prev) => prev.filter((s) => s.id !== id));
-      // A saved search referencing this source by id just skips it at
-      // run time (radar.py emits a "source no longer exists" event) —
-      // nothing here needs to touch saved_searches.
-    } catch (e) {
-      toast.error(String(e));
+  // Turns the picker's selected platforms into real Source ids —
+  // reusing this user's existing Source per platform (PATCHing it if
+  // the config text changed) or creating one, all in parallel since
+  // each platform resolves independently. Returns null (having
+  // already toasted) if a selected platform is missing required
+  // config. Replaces the old standalone "Setup" step entirely: a
+  // platform only needs an API key for jsearch/socialfetch, both
+  // dropped from the picker, so there's nothing left to "set up" and
+  // test ahead of time.
+  async function resolveSourceIds(): Promise<string[] | null> {
+    const keys = Array.from(draftSelectedPlatforms);
+    for (const key of keys) {
+      const platform = PLATFORM_BY_KEY[key];
+      const cfg = draftPlatformConfig[key];
+      if (platform.configKind === "company_identifiers") {
+        const ids = (cfg?.companyIdentifiers ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+        if (ids.length === 0) {
+          toast.error(`At least one company identifier is required for ${platform.label}`);
+          return null;
+        }
+      }
+      if (platform.configKind === "jobspy_indeed" && !cfg?.country?.trim()) {
+        toast.error("Country is required for Indeed — it's country-scoped.");
+        return null;
+      }
     }
+
+    const resolved = await Promise.all(
+      keys.map(async (key) => {
+        const platform = PLATFORM_BY_KEY[key];
+        const cfg = draftPlatformConfig[key];
+        const existing = sources.find((s) => platformForSource(s)?.key === key);
+
+        let config: Record<string, string | string[]>;
+        if (platform.configKind === "company_identifiers") {
+          config = {
+            company_identifiers: (cfg?.companyIdentifiers ?? "")
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean),
+          };
+        } else if (platform.configKind === "jobspy_indeed") {
+          config = { sites: "indeed", country: cfg!.country!.trim() };
+        } else if (platform.configKind === "jobspy_linkedin") {
+          config = { sites: "linkedin" };
+        } else {
+          config = {};
+        }
+
+        if (existing) {
+          if (JSON.stringify(existing.config) === JSON.stringify(config)) return existing;
+          return api.updateSource(existing.id, { config });
+        }
+        return api.createSource({ name: platform.label, tier: "tier1_api", adapter_key: platform.adapterKey!, config });
+      }),
+    );
+
+    setSources((prev) => {
+      const byId = new Map(prev.map((s) => [s.id, s]));
+      for (const s of resolved) byId.set(s.id, s);
+      return Array.from(byId.values());
+    });
+
+    return [...resolved.map((s) => s.id), ...Array.from(draftUnmappedSourceIds)];
   }
 
   function openCreateSearch() {
@@ -517,9 +705,13 @@ export default function RadarPage() {
     setDraftName("");
     setDraftRoleTitles("");
     setDraftPersonaId(selectedPersonaId);
-    setDraftSourceIds(new Set());
+    setDraftSelectedPlatforms(new Set());
+    setDraftPlatformConfig({});
+    setDraftUnmappedSourceIds(new Set());
     setDraftLocation("");
     setDraftScheduleCron("");
+    setScheduleBuilder(defaultScheduleBuilder());
+    setDraftActive(true);
     setCreateOpen(true);
   }
 
@@ -528,10 +720,47 @@ export default function RadarPage() {
     setDraftName(s.name);
     setDraftRoleTitles(s.role_titles.join(", "));
     setDraftPersonaId(s.persona_id);
-    setDraftSourceIds(new Set(s.source_ids));
+
+    const platforms = new Set<PlatformKey>();
+    const config: Partial<Record<PlatformKey, { companyIdentifiers?: string; country?: string }>> = {};
+    const unmapped = new Set<string>();
+    for (const id of s.source_ids) {
+      const source = sources.find((src) => src.id === id);
+      const platform = source ? platformForSource(source) : undefined;
+      if (!source || !platform) {
+        unmapped.add(id);
+        continue;
+      }
+      platforms.add(platform.key);
+      if (platform.configKind === "company_identifiers") {
+        config[platform.key] = {
+          companyIdentifiers: ((source.config.company_identifiers as string[] | undefined) ?? []).join(", "),
+        };
+      } else if (platform.configKind === "jobspy_indeed") {
+        config[platform.key] = { country: String(source.config.country ?? "") };
+      }
+    }
+    setDraftSelectedPlatforms(platforms);
+    setDraftPlatformConfig(config);
+    setDraftUnmappedSourceIds(unmapped);
+
     setDraftLocation(s.filters.location ?? "");
     setDraftScheduleCron(s.schedule_cron ?? "");
+    setScheduleBuilder(parseCronToBuilder(s.schedule_cron));
+    setDraftActive(s.active);
     setCreateOpen(true);
+  }
+
+  async function handleToggleActive(id: string, active: boolean) {
+    // Quick toggle straight from the list — doesn't need the full edit
+    // dialog open, PATCH already accepts `active` on its own
+    // (routers/saved_searches.py re-syncs APScheduler on this exact call).
+    try {
+      const updated = await api.updateSavedSearch(id, { active });
+      setSavedSearches((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (e) {
+      toast.error(String(e));
+    }
   }
 
   async function handleCreateSearch() {
@@ -539,21 +768,29 @@ export default function RadarPage() {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    if (!draftName.trim() || !draftPersonaId || roleTitles.length === 0 || draftSourceIds.size === 0) {
+    if (
+      !draftName.trim() ||
+      !draftPersonaId ||
+      roleTitles.length === 0 ||
+      (draftSelectedPlatforms.size === 0 && draftUnmappedSourceIds.size === 0)
+    ) {
       toast.error("Name, persona, at least one role title, and at least one source are all required");
       return;
     }
     setCreatingSearch(true);
     try {
+      const sourceIds = await resolveSourceIds();
+      if (sourceIds === null) return;
       const filters = draftLocation.trim() ? { location: draftLocation.trim() } : {};
-      const scheduleCron = draftScheduleCron.trim() || null;
+      const scheduleCron = buildCronFromSchedule(scheduleBuilder, draftScheduleCron);
       if (editingSearchId) {
         const updated = await api.updateSavedSearch(editingSearchId, {
           name: draftName.trim(),
           role_titles: roleTitles,
-          source_ids: Array.from(draftSourceIds),
+          source_ids: sourceIds,
           filters,
           schedule_cron: scheduleCron,
+          active: draftActive,
         });
         setSavedSearches((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
         toast.success("Saved search updated");
@@ -562,7 +799,7 @@ export default function RadarPage() {
           name: draftName.trim(),
           persona_id: draftPersonaId,
           role_titles: roleTitles,
-          source_ids: Array.from(draftSourceIds),
+          source_ids: sourceIds,
           filters,
           schedule_cron: scheduleCron,
         });
@@ -770,142 +1007,11 @@ export default function RadarPage() {
   return (
     <div className="flex flex-col h-full">
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center gap-3 px-5">
-        <span className="text-sm font-semibold">Radar</span>
+        <span className="text-sm font-semibold">Job Search</span>
         <div className="ml-auto flex gap-2">
           <Button size="sm" variant="outline" disabled={!personas.length} onClick={openDiscovery}>
             Discover companies
           </Button>
-          <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="outline">
-                Setup
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-xl">
-              <DialogHeader>
-                <DialogTitle>Sources</DialogTitle>
-                <DialogDescription>
-                  A saved search runs against a persona (switch personas from the sidebar) and one or more
-                  sources — set sources up here.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex flex-col gap-5 py-2 max-h-[60vh] overflow-auto">
-                <div className="flex flex-col gap-2">
-                  <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                    Sources
-                  </span>
-                  {sources.map((s) => (
-                    <div key={s.id} className="flex items-center gap-2 border border-border px-3 py-1.5 text-sm">
-                      <span className="flex-1 truncate">
-                        {s.name} <span className="text-muted-foreground font-mono text-[10px]">({s.adapter_key})</span>
-                      </span>
-                      <span className={cn("px-1.5 py-0.5 font-mono text-[9px] uppercase", statusColor(s.status))}>
-                        {s.status}
-                      </span>
-                      <Button size="sm" variant="outline" disabled={testingSourceId === s.id} onClick={() => handleTestSource(s.id)}>
-                        Test
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleDeleteSource(s.id)}>
-                        Delete
-                      </Button>
-                    </div>
-                  ))}
-                  <div className="flex flex-col gap-2 border border-dashed border-input p-3">
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Label, e.g. GitLab"
-                        value={newSourceName}
-                        onChange={(e) => setNewSourceName(e.target.value)}
-                      />
-                      <Select value={newSourceAdapter} onValueChange={(v) => setNewSourceAdapter(v as SourceAdapterKey)}>
-                        <SelectTrigger className="w-56">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SOURCE_ADAPTERS.map((a) => (
-                            <SelectItem key={a} value={a}>
-                              {ADAPTER_LABEL[a]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {ADAPTER_CONFIG[newSourceAdapter] === "company_identifiers" && (
-                      <div className="flex flex-col gap-1">
-                        <Input
-                          placeholder="e.g. huggingface, notion, ..."
-                          value={newSourceCompanyIdentifiers}
-                          onChange={(e) => setNewSourceCompanyIdentifiers(e.target.value)}
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          Comma-separated — this one source scans every company listed, all in one run. Not a
-                          secret, no signup: {COMPANY_IDENTIFIER_HINT[newSourceAdapter]}.
-                        </span>
-                      </div>
-                    )}
-                    {ADAPTER_CONFIG[newSourceAdapter] === "api_key" && (
-                      <Input
-                        placeholder={API_KEY_PLACEHOLDER[newSourceAdapter]}
-                        type="password"
-                        value={newSourceApiKey}
-                        onChange={(e) => setNewSourceApiKey(e.target.value)}
-                      />
-                    )}
-                    {ADAPTER_CONFIG[newSourceAdapter] === "jobspy" && (
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex flex-wrap gap-3">
-                          {JOBSPY_SITES.map((site) => (
-                            <label key={site.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={newSourceJobspySites.has(site.value)}
-                                onChange={(e) =>
-                                  setNewSourceJobspySites((prev) => {
-                                    const next = new Set(prev);
-                                    if (e.target.checked) next.add(site.value);
-                                    else next.delete(site.value);
-                                    return next;
-                                  })
-                                }
-                              />
-                              {site.label}
-                            </label>
-                          ))}
-                        </div>
-                        {(newSourceJobspySites.has("indeed") || newSourceJobspySites.has("glassdoor")) && (
-                          <div className="flex flex-col gap-1">
-                            <Input
-                              placeholder="Country, e.g. Indonesia, USA, United Kingdom"
-                              value={newSourceJobspyCountry}
-                              onChange={(e) => setNewSourceJobspyCountry(e.target.value)}
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              Required for Indeed/Glassdoor — they&apos;re country-scoped. Without it, a search
-                              outside the default country silently returns zero results instead of an error.
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {SCRAPING_ADAPTERS.includes(newSourceAdapter) && (
-                      <span className="text-xs text-warn border border-warn/40 bg-warn-bg px-2 py-1.5">
-                        Scraping, not an official API — violates the target site&apos;s terms of service and can
-                        get blocked or rate-limited. Enabled deliberately, with that understood.
-                      </span>
-                    )}
-                    {ADAPTER_CONFIG[newSourceAdapter] === "none" && (
-                      <span className="text-xs text-muted-foreground">
-                        No configuration needed — public and keyless.
-                      </span>
-                    )}
-                    <Button size="sm" onClick={handleCreateSource} disabled={creatingSource || !newSourceName.trim()}>
-                      Add source
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
           <Dialog open={discoveryOpen} onOpenChange={setDiscoveryOpen}>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
@@ -985,7 +1091,7 @@ export default function RadarPage() {
               </div>
             </DialogContent>
           </Dialog>
-          <Button size="sm" disabled={!personas.length || !sources.length} onClick={openCreateSearch}>
+          <Button size="sm" disabled={!personas.length} onClick={openCreateSearch}>
             New saved search
           </Button>
         </div>
@@ -996,7 +1102,7 @@ export default function RadarPage() {
           <div className="text-sm text-muted-foreground font-mono">loading…</div>
         ) : savedSearches.length === 0 ? (
           <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center">
-            No saved searches yet. Set up a persona and at least one source, then create one.
+            No saved searches yet. Set up a persona, then create one.
           </div>
         ) : (
           savedSearches.map((s) => {
@@ -1011,10 +1117,16 @@ export default function RadarPage() {
                     <div className="flex items-center gap-2">
                       <RadarIcon className="size-3.5 text-muted-foreground shrink-0" />
                       <span className="text-sm font-medium">{s.name}</span>
-                      {!s.active && (
-                        <Badge variant="secondary" className="text-[9px] font-mono bg-muted text-muted-foreground">
-                          inactive
-                        </Badge>
+                      {s.schedule_cron && (
+                        <label className="flex items-center gap-1.5 ml-1" title="Pause/resume the scheduled runs">
+                          <Switch
+                            checked={s.active}
+                            onCheckedChange={(checked) => handleToggleActive(s.id, checked)}
+                          />
+                          <span className="text-[9px] font-mono text-muted-foreground">
+                            {s.active ? "scheduled" : "paused"}
+                          </span>
+                        </label>
                       )}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1.5">
@@ -1028,7 +1140,7 @@ export default function RadarPage() {
                       persona: {persona?.name ?? "?"} · {s.source_ids.length} source{s.source_ids.length === 1 ? "" : "s"}
                       {s.filters.location ? ` · ${s.filters.location}` : ""}
                       {s.schedule_cron ? (
-                        <span className="font-mono"> · scheduled: {s.schedule_cron}</span>
+                        <span title={s.schedule_cron}> · {formatCronSchedule(s.schedule_cron)}</span>
                       ) : (
                         " · manual only"
                       )}
@@ -1359,67 +1471,219 @@ export default function RadarPage() {
             </div>
             <div className="grid gap-1.5">
               <Label>Sources</Label>
-              <div className="flex flex-col gap-1 border border-border">
-                {sources.map((s) => (
-                  <label
-                    key={s.id}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm border-b border-border last:border-b-0 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={draftSourceIds.has(s.id)}
-                      onChange={(e) =>
-                        setDraftSourceIds((prev) => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(s.id);
-                          else next.delete(s.id);
-                          return next;
-                        })
-                      }
-                    />
-                    {s.name}
-                    <span className="text-muted-foreground font-mono text-[10px]">({s.adapter_key})</span>
-                  </label>
-                ))}
+              <div className="flex flex-wrap gap-1.5">
+                {PLATFORMS.map((p) => {
+                  const selected = draftSelectedPlatforms.has(p.key);
+                  return (
+                    <button
+                      key={p.key}
+                      type="button"
+                      disabled={p.configKind === "coming_soon"}
+                      onClick={() => toggleDraftPlatform(p.key)}
+                      className={cn(
+                        "flex items-center gap-1.5 border px-2 py-1.5 text-xs",
+                        selected ? "border-foreground bg-accent" : "border-border",
+                        p.configKind === "coming_soon" && "opacity-40 cursor-not-allowed",
+                      )}
+                    >
+                      <PlatformLogo mark={p.mark} color={p.color} size={20} />
+                      {p.label}
+                      {p.configKind === "coming_soon" && (
+                        <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                          Coming soon
+                        </Badge>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
+              {Array.from(draftSelectedPlatforms).map((key) => {
+                const platform = PLATFORM_BY_KEY[key];
+                if (platform.configKind === "company_identifiers") {
+                  return (
+                    <div key={key} className="flex flex-col gap-1">
+                      <span className="text-xs font-medium">{platform.label} companies</span>
+                      <Input
+                        placeholder="e.g. huggingface, notion, ..."
+                        value={draftPlatformConfig[key]?.companyIdentifiers ?? ""}
+                        onChange={(e) => setDraftPlatformField(key, "companyIdentifiers", e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        Comma-separated — this scans every company listed, all in one run. Not a secret, no
+                        signup: {COMPANY_IDENTIFIER_HINT[key]}.
+                      </span>
+                    </div>
+                  );
+                }
+                if (platform.configKind === "jobspy_indeed") {
+                  return (
+                    <div key={key} className="flex flex-col gap-1">
+                      <span className="text-xs font-medium">Indeed country</span>
+                      <Input
+                        placeholder="Country, e.g. Indonesia, USA, United Kingdom"
+                        value={draftPlatformConfig[key]?.country ?? ""}
+                        onChange={(e) => setDraftPlatformField(key, "country", e.target.value)}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        Required — Indeed is country-scoped. Without it, a search outside the default country
+                        silently returns zero results instead of an error.
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+              {(draftSelectedPlatforms.has("linkedin") || draftSelectedPlatforms.has("indeed")) && (
+                <span className="text-xs text-warn border border-warn/40 bg-warn-bg px-2 py-1.5">
+                  Scraping, not an official API — can get rate-limited. Enabled deliberately, with that
+                  understood.
+                </span>
+              )}
+              {draftUnmappedSourceIds.size > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  + {draftUnmappedSourceIds.size} other already-attached source
+                  {draftUnmappedSourceIds.size === 1 ? "" : "s"} kept as-is.
+                </span>
+              )}
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="search-location">Location filter (optional)</Label>
               <Input id="search-location" value={draftLocation} onChange={(e) => setDraftLocation(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="search-schedule">Schedule (optional, crontab syntax)</Label>
-              <Input
-                id="search-schedule"
-                placeholder="e.g. 0 8 * * * — leave blank for manual runs only"
-                value={draftScheduleCron}
-                onChange={(e) => setDraftScheduleCron(e.target.value)}
-              />
+              <Label>Schedule (optional)</Label>
               <div className="flex flex-wrap gap-1.5">
-                {SCHEDULE_PRESETS.map((p) => (
+                {(Object.keys(SCHEDULE_MODE_LABELS) as ScheduleMode[]).map((m) => (
                   <Button
-                    key={p.cron}
+                    key={m}
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant={scheduleBuilder.mode === m ? "default" : "outline"}
                     className="h-6 px-2 text-[11px]"
-                    onClick={() => setDraftScheduleCron(p.cron)}
+                    onClick={() => setScheduleBuilder((prev) => ({ ...prev, mode: m }))}
                   >
-                    {p.label}
+                    {SCHEDULE_MODE_LABELS[m]}
                   </Button>
                 ))}
-                {draftScheduleCron && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-6 px-2 text-[11px]"
-                    onClick={() => setDraftScheduleCron("")}
-                  >
-                    Clear
-                  </Button>
-                )}
               </div>
+
+              {scheduleBuilder.mode === "hourly" && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span>Every</span>
+                  <Select
+                    value={String(scheduleBuilder.intervalHours)}
+                    onValueChange={(v) => setScheduleBuilder((prev) => ({ ...prev, intervalHours: Number(v) }))}
+                  >
+                    <SelectTrigger className="h-7 w-[70px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {HOURLY_INTERVAL_OPTIONS.map((h) => (
+                        <SelectItem key={h} value={String(h)}>
+                          {h}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span>hour(s)</span>
+                </div>
+              )}
+
+              {scheduleBuilder.mode === "weekly" && (
+                <div className="flex items-center gap-1.5">
+                  {WEEKDAY_ABBR.map((abbr, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      title={WEEKDAY_NAMES[idx]}
+                      onClick={() =>
+                        setScheduleBuilder((prev) => {
+                          const next = new Set(prev.weekdays);
+                          if (next.has(idx)) next.delete(idx);
+                          else next.add(idx);
+                          return { ...prev, weekdays: next };
+                        })
+                      }
+                      className={cn(
+                        "h-6 px-1.5 text-[10px] font-mono border border-input",
+                        scheduleBuilder.weekdays.has(idx)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {abbr}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {scheduleBuilder.mode === "monthly" && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span>Day</span>
+                  <Select
+                    value={String(scheduleBuilder.dayOfMonth)}
+                    onValueChange={(v) => setScheduleBuilder((prev) => ({ ...prev, dayOfMonth: Number(v) }))}
+                  >
+                    <SelectTrigger className="h-7 w-[70px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                        <SelectItem key={d} value={String(d)}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground">
+                    of each month (capped at 28 so it&apos;s consistent every month)
+                  </span>
+                </div>
+              )}
+
+              {(scheduleBuilder.mode === "daily" ||
+                scheduleBuilder.mode === "weekly" ||
+                scheduleBuilder.mode === "monthly") && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span>at</span>
+                  <input
+                    type="time"
+                    value={`${String(scheduleBuilder.hour).padStart(2, "0")}:${String(scheduleBuilder.minute).padStart(2, "0")}`}
+                    onChange={(e) => {
+                      const [h, m] = e.target.value.split(":").map(Number);
+                      if (Number.isInteger(h) && Number.isInteger(m)) {
+                        setScheduleBuilder((prev) => ({ ...prev, hour: h, minute: m }));
+                      }
+                    }}
+                    className="h-7 border border-input bg-transparent px-2 text-xs"
+                  />
+                </div>
+              )}
+
+              {scheduleBuilder.mode === "custom" && (
+                <Input
+                  placeholder="e.g. 0 8 * * *"
+                  value={draftScheduleCron}
+                  onChange={(e) => setDraftScheduleCron(e.target.value)}
+                />
+              )}
+
+              {scheduleBuilder.mode !== "none" &&
+                (() => {
+                  const cron = buildCronFromSchedule(scheduleBuilder, draftScheduleCron);
+                  return (
+                    <span className="text-[11px] text-muted-foreground">
+                      {cron ? formatCronSchedule(cron) : "Select at least one day"}
+                    </span>
+                  );
+                })()}
+
+              {scheduleBuilder.mode !== "none" && (
+                <label className="mt-1 flex items-center gap-2 text-xs">
+                  <Switch checked={draftActive} onCheckedChange={setDraftActive} />
+                  {draftActive ? "Runs on schedule" : "Paused — schedule saved but won't run"}
+                </label>
+              )}
             </div>
           </div>
           <DialogFooter>

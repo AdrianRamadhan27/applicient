@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Eye, EyeOff, Mail } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 const SCAN_WINDOW_OPTIONS = [1, 3, 7, 14, 30];
 
@@ -41,6 +42,7 @@ function GmailSection() {
   const [loading, setLoading] = React.useState(true);
   const [disconnecting, setDisconnecting] = React.useState(false);
   const [updatingWindow, setUpdatingWindow] = React.useState(false);
+  const [togglingPolling, setTogglingPolling] = React.useState(false);
 
   const load = React.useCallback(async () => {
     try {
@@ -73,6 +75,19 @@ function GmailSection() {
       toast.error(String(e));
     } finally {
       setUpdatingWindow(false);
+    }
+  }
+
+  async function handleTogglePolling(enabled: boolean) {
+    if (!connection) return;
+    setTogglingPolling(true);
+    try {
+      const updated = await api.updateGmailConnection(connection.id, { polling_enabled: enabled });
+      setConnection(updated);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTogglingPolling(false);
     }
   }
 
@@ -114,6 +129,16 @@ function GmailSection() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <label className="flex items-center gap-1.5" title="Pause/resume Gmail inbox polling">
+              <Switch
+                checked={connection.polling_enabled}
+                disabled={togglingPolling}
+                onCheckedChange={handleTogglePolling}
+              />
+              <span className="text-xs text-muted-foreground">
+                {connection.polling_enabled ? "polling" : "paused"}
+              </span>
+            </label>
             <span className="text-xs text-muted-foreground">scan last</span>
             <Select
               value={String(connection.scan_window_days)}

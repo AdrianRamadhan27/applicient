@@ -3,7 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Target, Settings, LogOut, MailWarning } from "lucide-react";
+import { Target, Settings, LogOut, MailWarning, PanelLeft } from "lucide-react";
+import { TierIcon, tierColor } from "@/lib/plan-tiers";
 import { toast } from "sonner";
 import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -169,6 +170,8 @@ const AUTHENTICATED_HOME = "/assistant";
 // the real boundary (current_admin_user) regardless.
 const ADMIN_ROUTE_PREFIXES = NAV_ITEMS.filter((item) => item.adminOnly).map((item) => item.href);
 
+const SIDEBAR_COLLAPSED_KEY = "applicient.sidebar-collapsed";
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -177,6 +180,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [manageOpen, setManageOpen] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [resendingVerification, setResendingVerification] = React.useState(false);
+  const [planName, setPlanName] = React.useState<string | null>(null);
+  // Lazily read localStorage in the initializer (not a plain
+  // useState(false) + effect), same reasoning as pipeline/page.tsx's
+  // own panel-width state — avoids a visible expanded->collapsed snap
+  // right after mount for a user who collapsed it last session.
+  const [collapsed, setCollapsed] = React.useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // best-effort — a per-viewer convenience, not data that needs to persist reliably
+      }
+      return next;
+    });
+  }
 
   async function handleResendVerification() {
     setResendingVerification(true);
@@ -216,6 +244,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [user, refreshUnreadCount, pathname]);
 
+  // Drives the tier decoration next to the user's own name in the
+  // footer — best-effort, same as unreadCount above; a user with no
+  // Subscription row at all (shouldn't happen, same gap
+  // billing_service.enforce_usage_cap already tolerates) just shows no
+  // decoration rather than an error.
+  React.useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sub = await api.getMySubscription();
+        if (!cancelled) setPlanName(sub.plan_name);
+      } catch {
+        // no decoration — not worth surfacing an error for this
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+
   React.useEffect(() => {
     if (authLoading) return;
     if (!user && !isNoChromeRoute) router.replace("/login");
@@ -240,51 +290,70 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen">
-      <aside className="w-[196px] shrink-0 border-r border-border bg-card flex flex-col">
-        <Link href="/" className="h-12 flex items-center gap-2 px-4 border-b border-border hover:bg-secondary/40">
-          <Target className="size-4 text-primary" strokeWidth={1.5} />
-          <span className="font-mono text-sm font-semibold tracking-tight">
-            applicient
-          </span>
+      <aside
+        className={cn(
+          "shrink-0 border-r border-border bg-card flex flex-col transition-[width] duration-150",
+          collapsed ? "w-[52px]" : "w-[196px]",
+        )}
+      >
+        <Link
+          href="/"
+          className={cn(
+            "h-12 flex items-center gap-2 border-b border-border hover:bg-secondary/40",
+            collapsed ? "justify-center px-0" : "px-4",
+          )}
+        >
+          <Target className="size-4 shrink-0 text-primary" strokeWidth={1.5} />
+          {!collapsed && <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>}
         </Link>
 
-        <div className="px-3 py-2.5 border-b border-border flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">Persona</span>
-            <button
-              onClick={() => setManageOpen(true)}
-              className="text-muted-foreground hover:text-foreground"
-              title="Manage personas"
-            >
-              <Settings className="size-3.5" />
-            </button>
-          </div>
-          {loading ? (
-            <span className="text-xs text-muted-foreground font-mono">loading…</span>
-          ) : personas.length === 0 ? (
-            <button
-              onClick={() => setManageOpen(true)}
-              className="text-xs text-left text-muted-foreground hover:text-foreground underline"
-            >
-              + New persona
-            </button>
-          ) : (
-            <Select value={selectedPersonaId} onValueChange={setSelectedPersonaId}>
-              <SelectTrigger className="h-8 w-full text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {personas.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+        <button
+          onClick={toggleCollapsed}
+          className="h-6 flex items-center justify-center border-b border-border text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <PanelLeft className="size-3.5" />
+        </button>
 
-        <nav className="flex flex-col py-2">
+        {!collapsed && (
+          <div className="px-3 py-2.5 border-b border-border flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">Persona</span>
+              <button
+                onClick={() => setManageOpen(true)}
+                className="text-muted-foreground hover:text-foreground"
+                title="Manage personas"
+              >
+                <Settings className="size-3.5" />
+              </button>
+            </div>
+            {loading ? (
+              <span className="text-xs text-muted-foreground font-mono">loading…</span>
+            ) : personas.length === 0 ? (
+              <button
+                onClick={() => setManageOpen(true)}
+                className="text-xs text-left text-muted-foreground hover:text-foreground underline"
+              >
+                + New persona
+              </button>
+            ) : (
+              <Select value={selectedPersonaId} onValueChange={setSelectedPersonaId}>
+                <SelectTrigger className="h-8 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {personas.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        )}
+
+        <nav className="flex flex-col py-2 overflow-y-auto">
           {SECTIONS.map((section) => {
             const items = NAV_ITEMS.filter(
               (item) => item.section === section && (!item.adminOnly || user?.role === "admin"),
@@ -292,25 +361,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             if (items.length === 0) return null;
             return (
             <div key={section}>
-              <div className="px-4 pt-3.5 pb-1 font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                {section}
-              </div>
+              {!collapsed && (
+                <div className="px-4 pt-3.5 pb-1 font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                  {section}
+                </div>
+              )}
               {items.map(
                 (item) => {
                   const active = pathname.startsWith(item.href);
+                  const Icon = item.icon;
+                  const showBadge = item.href === "/notifications" && unreadCount > 0;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
+                      title={collapsed ? `${item.label}${showBadge ? ` (${unreadCount})` : ""}` : undefined}
                       className={cn(
-                        "flex items-center px-4 py-1.5 text-sm border-l-2 border-transparent",
+                        "flex items-center gap-2 py-1.5 text-sm border-l-2 border-transparent",
+                        collapsed ? "justify-center px-0" : "px-4",
                         active
                           ? "bg-accent text-accent-foreground font-medium border-l-primary"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      <span className="flex-1">{item.label}</span>
-                      {item.href === "/notifications" && unreadCount > 0 && (
+                      <Icon className="size-3.5 shrink-0" strokeWidth={1.5} />
+                      {!collapsed && <span className="flex-1">{item.label}</span>}
+                      {!collapsed && showBadge && (
                         <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-mono leading-none text-primary-foreground">
                           {unreadCount > 99 ? "99+" : unreadCount}
                         </span>
@@ -324,11 +400,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="mt-auto border-t border-border px-4 py-2.5 flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[11px] font-mono text-muted-foreground" title={user.email}>
-            {user.email}
-          </span>
-          <div className="flex items-center gap-2.5 shrink-0">
+        <div
+          className={cn(
+            "mt-auto border-t border-border py-2.5 flex items-center gap-2",
+            collapsed ? "flex-col px-0" : "justify-between px-4",
+          )}
+        >
+          {!collapsed && (
+            <span className="min-w-0 flex items-center gap-1.5 truncate text-[11px] font-mono text-muted-foreground" title={user.email}>
+              <TierIcon planName={planName} />
+              <span className="truncate" style={{ color: tierColor(planName) }}>
+                {user.email}
+              </span>
+            </span>
+          )}
+          <div className={cn("flex items-center gap-2.5 shrink-0", collapsed && "flex-col")}>
+            {collapsed && <TierIcon planName={planName} showTitle={user.email} />}
             <ThemeToggle className="size-3.5" />
             <button
               onClick={() => {
@@ -358,7 +445,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         )}
-        {children}
+        <div className="flex-1 min-h-0 flex flex-col">{children}</div>
       </main>
 
       <ManagePersonasDialog open={manageOpen} onOpenChange={setManageOpen} />

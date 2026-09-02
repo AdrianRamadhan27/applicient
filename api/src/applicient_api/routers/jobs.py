@@ -20,17 +20,26 @@ Python sort is far easier to read and change than SQL that encodes
 """
 
 import uuid
+from asyncio import to_thread
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
-from applicient_api.deps import current_user_id, get_db
+from applicient_api.deps import current_user_id, get_db, get_session_factory
+from applicient_api.job_url_parsing import JobUrlParseError, open_snapshot_and_close, parse_job_snapshot
+from applicient_api.models.agents import AgentRun
 from applicient_api.models.discovery import Job, JobSighting, Source
+from applicient_api.models.enums import SourceTier
 from applicient_api.models.profile import Persona
 from applicient_api.models.scoring import FitScore, PrefilterResult
+from applicient_api.normalization import normalize_and_upsert
+from applicient_api.scoring_service import score_job
+from applicient_api.tier_resolution import TierResolutionError, resolve_tier
+from applicient_sources.base import RawPosting
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -43,6 +52,74 @@ def _owned_persona(db: Session, persona_id: uuid.UUID, user_id: uuid.UUID) -> Pe
     if persona is None:
         raise HTTPException(404, "persona not found")
     return persona
+
+
+def _find_or_create_manual_source(db: Session, user_id: uuid.UUID) -> Source:
+    """One shared Source per user for every hand-typed/URL-pasted job —
+    same find-or-create-by-name shape as company_candidates.py's own
+    `_find_or_create_scan_source`, minus the `get_adapter()` lookup
+    (there's no real SourceAdapter registered for "manual"; nothing on
+    this create-job path calls get_adapter, only
+    `_SOURCE_PREFERENCE.get(adapter_key, 0)` in normalization.py, which
+    defaults an unknown key to the lowest rank — correct here, since a
+    manually-entered job should never override a sighting from a real
+    ATS/aggregator source)."""
+
+    source = db.query(Source).filter_by(user_id=user_id, adapter_key="manual").one_or_none()
+    if source is None:
+        source = Source(
+            user_id=user_id, name="Manually added", tier=SourceTier.TIER2_PORTAL.value,
+            adapter_key="manual", config={}, status="ok",
+        )
+        db.add(source)
+        db.flush()
+    return source
+
+
+def _inbox_job_out(
+    db: Session, user_id: uuid.UUID, job: Job, persona_id: uuid.UUID | None = None
+) -> schemas.InboxJobOut:
+    """`persona_id=None` for a job with no meaningful score context yet
+    (right after manual creation, before it's ever been scored for
+    anyone) — fit_score/prefilter both come back None rather than
+    querying with a persona that doesn't apply."""
+
+    fit_score = prefilter = None
+    if persona_id is not None:
+        fit_score = (
+            db.query(FitScore)
+            .filter_by(job_id=job.id, persona_id=persona_id)
+            .order_by(FitScore.created_at.desc())
+            .first()
+        )
+        prefilter = (
+            db.query(PrefilterResult)
+            .filter_by(job_id=job.id, persona_id=persona_id)
+            .order_by(PrefilterResult.created_at.desc())
+            .first()
+        )
+    source_names = _source_names_by_job_id(db, user_id, [job.id]).get(job.id, [])
+    return schemas.InboxJobOut(
+        id=job.id,
+        title=job.title,
+        company_name_raw=job.company_name_raw,
+        location=job.location,
+        remote_policy=job.remote_policy,
+        employment_type=job.employment_type,
+        seniority=job.seniority,
+        salary_min=job.salary_min,
+        salary_max=job.salary_max,
+        salary_currency=job.salary_currency,
+        apply_url=job.apply_url,
+        posted_at=job.posted_at,
+        discovered_at=job.created_at,
+        ghost_job_score=job.ghost_job_score,
+        ghost_job_reasons=job.ghost_job_reasons,
+        repost_count=job.repost_count,
+        fit_score=schemas.FitScoreOut.model_validate(fit_score) if fit_score else None,
+        prefilter=schemas.PrefilterResultOut.model_validate(prefilter) if prefilter else None,
+        source_names=source_names,
+    )
 
 
 def _latest_by_job_id(rows: list) -> dict[uuid.UUID, object]:
@@ -288,3 +365,131 @@ def bulk_delete_jobs(
     )
     db.commit()
     return schemas.BulkDeleteJobsOut(deleted=deleted)
+
+
+@router.post("/parse-url", response_model=schemas.ParsedJobOut)
+async def parse_job_url(
+    body: schemas.ParseJobUrlIn,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """Preview only — never saves anything. The frontend prefills the
+    manual "Add job" form with whatever this returns so the human
+    reviews/edits before POST /jobs actually creates a Job. Opens the
+    real page in a browser (job boards are JS-heavy/anti-bot-gated —
+    same reasoning as sources/generic_scraper.py, see job_url_parsing.py's
+    own docstring) and asks an LLM to extract it; a real AgentRun is
+    created either way so the LLM cost shows up in Cost & Usage, same
+    convention as every other tier-resolved call in this codebase."""
+
+    run = AgentRun(user_id=user_id, run_type="job-url-parse", status="running", started_at=datetime.now(timezone.utc))
+    db.add(run)
+    db.commit()
+
+    def _fail() -> None:
+        run.status = "failed"
+        run.finished_at = datetime.now(timezone.utc)
+        db.commit()
+
+    snapshot = await open_snapshot_and_close(body.url)
+    if snapshot is None:
+        _fail()
+        raise HTTPException(502, "couldn't open that URL — it may be unreachable or blocking automated access")
+
+    try:
+        model = await to_thread(
+            resolve_tier, db, user_id=user_id, tier="fast", stage="job-url-parse",
+            agent_run_id=run.id, session_factory=get_session_factory(),
+        )
+        extracted = await to_thread(parse_job_snapshot, model, body.url, snapshot)
+    except TierResolutionError as exc:
+        _fail()
+        raise HTTPException(409, f"model routing not configured: {exc}") from exc
+    except JobUrlParseError as exc:
+        _fail()
+        raise HTTPException(502, f"couldn't parse that page: {exc}") from exc
+
+    run.status = "completed"
+    run.finished_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return schemas.ParsedJobOut(**extracted.model_dump())
+
+
+@router.post("", response_model=schemas.InboxJobOut)
+def create_job_manual(
+    body: schemas.JobCreateIn,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """Whether the human typed every field by hand or reviewed/edited a
+    parse_job_url preview first, both end up here — one path in, so
+    dedup/lineage stays identical either way. Deliberately does NOT
+    score the job (score_job needs a persona to score against, and
+    this endpoint has none) — call POST /jobs/{id}/score once it's
+    visible in the Inbox, same as the "Score this job" button does."""
+
+    source = _find_or_create_manual_source(db, user_id)
+    posting = RawPosting(
+        source_url=body.source_url or f"manual://{uuid.uuid4()}",
+        title=body.title,
+        company_name=body.company_name,
+        location=body.location,
+        remote_policy=body.remote_policy,
+        seniority=body.seniority,
+        employment_type=body.employment_type,
+        salary_min=body.salary_min,
+        salary_max=body.salary_max,
+        salary_currency=body.salary_currency,
+        requirements=body.requirements,
+        responsibilities=body.responsibilities,
+        benefits=body.benefits,
+        apply_url=body.apply_url or body.source_url,
+    )
+    job, _is_new = normalize_and_upsert(
+        db, user_id=user_id, source=source, posting=posting, now=datetime.now(timezone.utc)
+    )
+    db.commit()
+    return _inbox_job_out(db, user_id, job)
+
+
+@router.post("/{job_id}/score", response_model=schemas.InboxJobOut)
+async def score_job_on_demand(
+    job_id: uuid.UUID,
+    body: schemas.ScoreJobIn,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """On-demand scoring for a job that hasn't gone through Radar's own
+    automated scoring pass — a manually-added job, most often. Same
+    score_job() call radar.py's own scoring step makes, wrapped in
+    to_thread for the same reason every other blocking LangChain call
+    in this codebase is (score_job opens its own session and makes
+    real, synchronous LLM calls)."""
+
+    job = db.query(Job).filter_by(id=job_id, user_id=user_id).one_or_none()
+    if job is None:
+        raise HTTPException(404, "job not found")
+    persona = _owned_persona(db, body.persona_id, user_id)
+
+    run = AgentRun(user_id=user_id, run_type="manual-score", status="running", started_at=datetime.now(timezone.utc))
+    db.add(run)
+    db.commit()
+
+    try:
+        await to_thread(
+            score_job, get_session_factory(), job_id=job.id, persona_id=persona.id,
+            profile_id=persona.profile_id, user_id=user_id, agent_run_id=run.id,
+        )
+    except TierResolutionError as exc:
+        run.status = "failed"
+        run.finished_at = datetime.now(timezone.utc)
+        db.commit()
+        raise HTTPException(409, f"model routing not configured: {exc}") from exc
+
+    run.status = "completed"
+    run.finished_at = datetime.now(timezone.utc)
+    db.commit()
+
+    db.refresh(job)
+    return _inbox_job_out(db, user_id, job, persona_id=persona.id)

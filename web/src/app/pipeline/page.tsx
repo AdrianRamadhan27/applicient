@@ -189,7 +189,7 @@ export default function PipelinePage() {
     <div className="flex h-full">
       <div className="flex flex-col flex-1 min-w-0">
         <header className="h-12 shrink-0 border-b border-border bg-card flex items-center justify-between px-5">
-          <span className="text-sm font-semibold">Pipeline</span>
+          <span className="text-sm font-semibold">Application Pipeline</span>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground font-mono">{applications.length} applications</span>
             <Button size="sm" variant="outline" onClick={() => setManageStagesOpen(true)}>

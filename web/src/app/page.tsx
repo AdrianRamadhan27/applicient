@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 
 // Structure follows the saas-ui-nextjs-landing-page template's own
@@ -81,7 +82,7 @@ const FAQ = [
   },
   {
     q: "Is my payment information secure?",
-    a: "Payments are handled by Xendit's own hosted checkout page — Applicient never sees or stores your card or e-wallet details directly.",
+    a: "Payments are handled by Dodo Payments' own embedded checkout — Applicient never sees or stores your card or e-wallet details directly.",
   },
   {
     q: "What happens if I hit my plan's usage limit?",
@@ -263,7 +264,7 @@ export default function LandingPage() {
             {plans.map((p) => (
               <div key={p.id} className="flex flex-col gap-4 border border-border bg-card p-6">
                 <div>
-                  <span className="text-sm font-medium">{p.name}</span>
+                  <TierLabel planName={p.name} className="text-sm font-medium" iconClassName="size-4" />
                   <div className="mt-1 text-2xl font-semibold tracking-tight">
                     {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
                     {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}

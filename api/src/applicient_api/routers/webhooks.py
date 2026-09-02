@@ -11,7 +11,6 @@ somewhere public, per F8.1's "two adapters, one interface."
 """
 
 import base64
-import hmac
 import json
 import logging
 import os
@@ -57,38 +56,51 @@ async def gmail_push(request: Request, background_tasks: BackgroundTasks, author
     return {"ok": True}
 
 
-@router.post("/xendit", status_code=200)
-async def xendit_webhook(request: Request, x_callback_token: str | None = Header(default=None)):
+@router.post("/dodo", status_code=200)
+async def dodo_webhook(request: Request):
     """A best-effort nudge, not the source of truth — see
-    billing_service.py's own module docstring. Xendit's exact payload
-    shape for `payment_session.completed` couldn't be fully confirmed
-    from their docs during this build, so this handler doesn't trust
-    any field beyond `reference_id` (used only to look up which of our
-    own `Subscription` rows to re-sync); everything else is re-derived
-    from a direct, confirmed-shape GET against Xendit's own API inside
-    `sync_subscription_from_xendit`. Always acks 200 on a structurally
-    valid, correctly-signed request — a sync failure here just means
-    the user's own "sync" button (or the next webhook) catches it,
-    rather than making Xendit retry-storm an event this handler can't
-    act on differently next time anyway."""
+    billing_service.py's own module docstring. Signature verification
+    (Standard Webhooks spec: webhook-id/webhook-signature/
+    webhook-timestamp headers, HMAC-SHA256) happens inside
+    unwrap_webhook_event via the official `standardwebhooks` library,
+    not hand-rolled here — it raises rather than silently accepting an
+    unsigned or mis-signed request. Only subscription.* events matter
+    to this app; everything else (payments, refunds, disputes, license
+    keys, ...) is acked and ignored. Never trusts the webhook's own
+    `data` fields to mutate billing state directly — only uses
+    subscription_id/customer_id to find which of our own Subscription
+    rows to re-sync, then re-derives the rest from a direct GET inside
+    sync_subscription_from_dodo. Always acks 200 on a validly-signed
+    request — a sync failure here just means the user's own return to
+    /billing (or the next webhook) catches it, rather than making Dodo
+    retry-storm an event this handler can't act on differently next
+    time anyway."""
 
-    expected = billing_service.webhook_token()
-    if not expected or not x_callback_token or not hmac.compare_digest(x_callback_token, expected):
-        raise HTTPException(403, "invalid or unconfigured Xendit webhook token")
+    raw_body = await request.body()
+    headers = {
+        "webhook-id": request.headers.get("webhook-id", ""),
+        "webhook-signature": request.headers.get("webhook-signature", ""),
+        "webhook-timestamp": request.headers.get("webhook-timestamp", ""),
+    }
+    try:
+        event = billing_service.unwrap_webhook_event(raw_body, headers)
+    except Exception:
+        raise HTTPException(403, "invalid or unverifiable Dodo webhook signature")
 
-    body = await request.json()
-    event = body.get("event", "unknown")
-    reference_id = body.get("data", {}).get("reference_id") or body.get("reference_id")
-    logger.info("xendit webhook received", extra={"event": event, "reference_id": reference_id})
-    if not reference_id:
+    if not event.type.startswith("subscription."):
         return {"ok": True}
 
+    data = event.data
+    logger.info("dodo webhook received", extra={"event": event.type, "subscription_id": data.subscription_id})
+
     with get_session_factory()() as db:
-        subscription = billing_service.find_subscription_by_reference(db, reference_id)
+        subscription = billing_service.find_subscription_by_dodo_ids(
+            db, dodo_subscription_id=data.subscription_id, dodo_customer_id=data.customer.customer_id
+        )
         if subscription is None:
             return {"ok": True}
         try:
-            await billing_service.sync_subscription_from_xendit(db, subscription)
-        except billing_service.XenditError:
-            logger.exception("xendit webhook-triggered sync failed", extra={"reference_id": reference_id})
+            await billing_service.sync_subscription_from_dodo(db, subscription, dodo_subscription_id=data.subscription_id)
+        except billing_service.DodoError:
+            logger.exception("dodo webhook-triggered sync failed", extra={"subscription_id": data.subscription_id})
     return {"ok": True}

@@ -68,6 +68,7 @@ class GmailConnectionOut(BaseModel):
     google_email: str
     label_name: str
     scan_window_days: int
+    polling_enabled: bool
     status: str
     last_synced_at: datetime | None
     last_error: str | None
@@ -75,7 +76,8 @@ class GmailConnectionOut(BaseModel):
 
 
 class GmailConnectionUpdate(BaseModel):
-    scan_window_days: int = Field(ge=1, le=90)
+    scan_window_days: int | None = Field(default=None, ge=1, le=90)
+    polling_enabled: bool | None = None
 
 
 class EmailMessageOut(BaseModel):
@@ -747,6 +749,61 @@ class BulkDeleteJobsOut(BaseModel):
     deleted: int
 
 
+# --- manual job entry: type it in by hand, or paste a URL and let an
+# LLM fill the same fields in for review before saving. Both paths end
+# at the same JobCreateIn -> POST /jobs. ---
+
+
+class ParseJobUrlIn(BaseModel):
+    url: str
+
+
+class ParsedJobOut(BaseModel):
+    """A preview, not a saved Job — the frontend prefills the manual
+    form with this so the human reviews/edits before POST /jobs
+    actually saves anything. `found=False` means the page didn't look
+    like a real job posting; every other field is null in that case."""
+
+    found: bool
+    title: str | None
+    company_name: str | None
+    location: str | None
+    remote_policy: str | None
+    seniority: str | None
+    employment_type: str | None
+    salary_min: float | None
+    salary_max: float | None
+    salary_currency: str | None
+    requirements: str | None
+    responsibilities: str | None
+    benefits: str | None
+    apply_url: str | None
+
+
+class JobCreateIn(BaseModel):
+    title: str
+    company_name: str
+    location: str | None = None
+    remote_policy: str | None = None
+    seniority: str | None = None
+    employment_type: str | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    requirements: str | None = None
+    responsibilities: str | None = None
+    benefits: str | None = None
+    apply_url: str | None = None
+    # The URL it was pasted from, if the URL-parse path was used —
+    # kept as this job's own source lineage (JobSighting.source_url).
+    # Left blank for a fully hand-typed job with no URL at all.
+    source_url: str | None = None
+
+
+class ScoreJobIn(BaseModel):
+    persona_id: uuid.UUID
+
+
 # --- M3 §2/F5.10 — job groups, tailoring ---
 
 
@@ -972,6 +1029,7 @@ class SubscriptionOut(BaseModel):
     status: str
     current_period_spend_usd: float
     current_period_end: datetime | None
+    pending_plan_id: uuid.UUID | None
     pending_plan_name: str | None
 
 

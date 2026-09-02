@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
-from applicient_api.billing_service import current_period_spend_usd
+from applicient_api.billing_service import DodoError, current_period_spend_usd, ensure_product_for_plan, sync_product_for_plan
 from applicient_api.deps import current_admin_user, get_db
 from applicient_api.models.billing import Plan, Subscription
 from applicient_api.models.profile import User
@@ -110,7 +110,9 @@ def list_plans(db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(cur
 
 
 @router.post("/plans", response_model=schemas.PlanOut, status_code=201)
-def create_plan(body: schemas.PlanCreate, db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)):
+async def create_plan(
+    body: schemas.PlanCreate, db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)
+):
     plan = Plan(
         name=body.name.strip(),
         price_idr=body.price_idr,
@@ -120,11 +122,20 @@ def create_plan(body: schemas.PlanCreate, db: Session = Depends(get_db), _admin_
     db.add(plan)
     db.commit()
     db.refresh(plan)
+    # "Product creation into the setup" — a paid plan gets its Dodo
+    # Product created right away rather than waiting for the first
+    # checkout to trigger it lazily (ensure_product_for_plan is
+    # idempotent either way, so this is purely for immediate feedback
+    # if Dodo rejects it, not a correctness requirement).
+    try:
+        await ensure_product_for_plan(db, plan)
+    except DodoError as exc:
+        raise HTTPException(502, f"plan saved, but its Dodo product could not be created: {exc}")
     return plan
 
 
 @router.patch("/plans/{plan_id}", response_model=schemas.PlanOut)
-def update_plan(
+async def update_plan(
     plan_id: uuid.UUID,
     body: schemas.PlanUpdate,
     db: Session = Depends(get_db),
@@ -133,8 +144,24 @@ def update_plan(
     plan = db.get(Plan, plan_id)
     if plan is None:
         raise HTTPException(404, "plan not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changed = body.model_dump(exclude_unset=True)
+    for field, value in changed.items():
         setattr(plan, field, value)
     db.commit()
     db.refresh(plan)
+
+    # Keep Dodo's own product in sync rather than letting it silently
+    # drift from what this row now says — a still-free plan that just
+    # got a real price needs a product created for the first time; an
+    # already-paid plan whose name/price changed gets that product
+    # patched in place (confirmed live: both are patchable, only the
+    # pricing model itself is immutable).
+    if "name" in changed or "price_idr" in changed:
+        try:
+            if plan.dodo_product_id:
+                await sync_product_for_plan(db, plan)
+            else:
+                await ensure_product_for_plan(db, plan)
+        except DodoError as exc:
+            raise HTTPException(502, f"plan saved, but its Dodo product could not be updated: {exc}")
     return plan

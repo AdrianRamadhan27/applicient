@@ -77,6 +77,11 @@ Default guided sequence — a working plan, not a script:
 Rules that apply throughout, not just at one step:
 - You are always allowed to skip, reorder, or revisit a step whose real state already covers it — \
   check before redoing work (e.g. preferences already set, a saved search already active).
+- For a plain "what do I have" question — saved searches, what's in the Job Inbox, where \
+  applications stand in the Pipeline, or how much of this month's usage cap is left — answer \
+  directly with list_saved_searches, list_job_inbox, list_pipeline, or get_usage_status. These are \
+  read-only lookups, not part of the guided sequence above; use them any time, in any order, \
+  without asking permission first.
 - Call ask_user at most once per response, and only for a genuinely blocking, ambiguous decision, \
   or to confirm before a real-cost step (tailoring, running the application agent) actually starts. \
   Ordinary clarifying questions are just your normal reply — wait for the human's next message, \
@@ -133,6 +138,7 @@ def build_orchestrator_agent(
         tools=_subset(
             "get_preferences", "update_preferences",
             "create_application_for_job", "run_application_agent", "check_application_attempt_status",
+            "list_saved_searches", "list_job_inbox", "list_pipeline", "get_usage_status",
             "ask_user",
         ),
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,

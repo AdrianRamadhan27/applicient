@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -40,7 +41,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from dateutil import parser as date_parser
 from sqlalchemy.orm import sessionmaker
 
-from applicient_api import email_ingestion, gmail_service, notification_service
+from applicient_api import email_ingestion, email_service, gmail_service, notification_service
 from applicient_api.models.discovery import Job, SavedSearch
 from applicient_api.models.email import EmailMessage
 from applicient_api.models.enums import Recommendation
@@ -109,7 +110,12 @@ async def run_scheduled_search(saved_search_id: uuid.UUID, user_id: uuid.UUID) -
     the manual "run saved search" route checks synchronously
     (routers/radar.py) — a schedule firing against a since-deactivated
     search/persona/profile degrades to a skipped, logged run rather
-    than crashing the scheduler."""
+    than crashing the scheduler.
+
+    v2 Phase 2 — a cron-fired run used to silently update state with no
+    signal the user ever ran it; now notifies (in-app + email) the same
+    "quiet runs stay quiet" way _daily_digest already does — nothing
+    written if the run found nothing new."""
 
     assert _session_factory is not None
     with _session_factory() as session:
@@ -125,12 +131,56 @@ async def run_scheduled_search(saved_search_id: uuid.UUID, user_id: uuid.UUID) -
         if profile is None or not profile.confirmed:
             logger.info("scheduled run for saved search %s skipped — profile not confirmed", saved_search_id)
             return
+        saved_search_name = saved_search.name
 
+    run_started_at = datetime.now(timezone.utc)
     try:
         async for _event in run_radar_search(saved_search_id, user_id, _session_factory):
             pass
     except Exception:
         logger.exception("scheduled run for saved search %s failed", saved_search_id)
+        return
+
+    with _session_factory() as session:
+        new_jobs = session.query(Job).filter(Job.user_id == user_id, Job.created_at >= run_started_at).count()
+        strong = (
+            session.query(FitScore)
+            .filter(
+                FitScore.user_id == user_id,
+                FitScore.created_at >= run_started_at,
+                FitScore.recommendation == Recommendation.STRONG_APPLY.value,
+            )
+            .count()
+        )
+        if not new_jobs and not strong:
+            return
+
+        parts = []
+        if new_jobs:
+            parts.append(f"{new_jobs} new job{'s' if new_jobs != 1 else ''}")
+        if strong:
+            parts.append(f"{strong} strong match{'es' if strong != 1 else ''}")
+        notification_service.create_notification(
+            session, user_id=user_id, subject=f"{saved_search_name}: " + ", ".join(parts),
+        )
+        session.commit()
+        user = session.get(User, user_id)
+
+    if user is None:
+        return
+    radar_url = f"{os.environ.get('FRONTEND_URL') or 'http://localhost:3000'}/radar"
+    try:
+        await email_service.send_scheduled_run_summary_email(
+            to=user.email,
+            saved_search_name=saved_search_name,
+            new_jobs_count=new_jobs,
+            strong_matches_count=strong,
+            radar_url=radar_url,
+        )
+    except (RuntimeError, email_service.EmailSendError):
+        # Same non-blocking treatment as auth.py's verification email —
+        # the in-app notification above already landed regardless.
+        logger.warning("scheduled-run summary email failed for user %s", user_id, extra={"user_id": user_id})
 
 
 async def _poll_one_connection(connection_id: uuid.UUID, user_id: uuid.UUID, semaphore: asyncio.Semaphore) -> None:
@@ -160,7 +210,11 @@ async def _poll_one_connection(connection_id: uuid.UUID, user_id: uuid.UUID, sem
 async def _poll_all_gmail_connections() -> None:
     assert _session_factory is not None
     with _session_factory() as session:
-        connections = session.query(GmailConnection.id, GmailConnection.user_id).all()
+        connections = (
+            session.query(GmailConnection.id, GmailConnection.user_id)
+            .filter(GmailConnection.polling_enabled.is_(True))
+            .all()
+        )
     semaphore = asyncio.Semaphore(GMAIL_POLL_CONCURRENCY)
     await asyncio.gather(
         *(_poll_one_connection(cid, uid, semaphore) for cid, uid in connections)

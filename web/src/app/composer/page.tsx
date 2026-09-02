@@ -1210,7 +1210,7 @@ export default function ComposerPage() {
   return (
     <div className="flex flex-col h-full">
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center px-5 justify-between">
-        <span className="text-sm font-semibold">Composer</span>
+        <span className="text-sm font-semibold">CV Composer</span>
         {selectedPersona && (
           <span className="text-xs text-muted-foreground font-mono">Persona: {selectedPersona.name}</span>
         )}

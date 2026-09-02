@@ -13,11 +13,12 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
 from applicient_api.deps import current_user_id, get_db
-from applicient_api.models.agents import AgentRun, AgentStep
+from applicient_api.models.agents import AgentRun, AgentStep, RunEvent
 from applicient_api.models.llm import LlmCall
 from applicient_api.radar import _CANCEL_EVENTS
 
@@ -63,6 +64,19 @@ def cancel_agent_run(run_id: uuid.UUID, db: Session = Depends(get_db), user_id: 
       already disconnected and nothing is left listening for the flag.
       Mark it directly instead, same real-partial-cost-preserved
       discipline as radar.py's own disconnect handling.
+
+    Bug fix (found live): this second branch used to only update
+    `AgentRun.status`, never writing a matching RunEvent — but the
+    frontend's reconnect/replay path (radar/page.tsx's watchRun) learns
+    a run finished/was cancelled *exclusively* by replaying a
+    "run_cancelled"-type event, never by reading `status` directly. A
+    run cancelled through this branch stayed shown as "Running…"
+    forever (polling stops once run_status != "running", but no event
+    ever flipped the frontend's own `cancelled` flag) — the user's only
+    escape was deleting the saved search. Writing the same event type
+    radar.py's generator itself emits on cancellation closes that gap
+    at the source instead of teaching the frontend a second way to
+    detect the same thing.
     """
     run = db.query(AgentRun).filter_by(id=run_id, user_id=user_id).one_or_none()
     if run is None:
@@ -77,6 +91,13 @@ def cancel_agent_run(run_id: uuid.UUID, db: Session = Depends(get_db), user_id: 
         run.status = "cancelled"
         run.finished_at = datetime.now(timezone.utc)
         run.total_cost_usd = sum(float(c.cost_usd) for c in db.query(LlmCall).filter_by(agent_run_id=run.id).all())
+        next_seq = (db.query(func.max(RunEvent.seq)).filter_by(agent_run_id=run.id).scalar() or 0) + 1
+        db.add(
+            RunEvent(
+                user_id=user_id, agent_run_id=run.id, seq=next_seq,
+                event_type="run_cancelled", data={"agent_run_id": str(run.id)},
+            )
+        )
         db.commit()
         db.refresh(run)
 

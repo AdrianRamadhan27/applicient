@@ -58,6 +58,27 @@ def create_evidence(
         date_end=parse_loose_date(body.date_end),
     )
     db.add(item)
+    db.flush()
+
+    # Same embed-before-commit discipline as update_evidence's own
+    # title/text/skills/metrics path below — without this, a manually
+    # added item's `embedding` stays NULL forever, and
+    # scoring_engine.retrieve_relevant_evidence filters on
+    # `embedding.isnot(None)`, so it would silently never surface for
+    # scoring or tailoring despite existing in the bank.
+    try:
+        embeddings_client, provider = resolve_embedding_tier(db, user_id=user_id)
+        embed_evidence_items(
+            db, embeddings_client, [item], user_id=user_id,
+            session_factory=get_session_factory(), provider=provider, stage="evidence-create",
+        )
+    except TierResolutionError as exc:
+        db.rollback()
+        raise HTTPException(409, f"model routing not configured: {exc}") from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(502, f"could not embed evidence: {str(exc)[:240]}") from exc
+
     profile = db.query(Profile).filter_by(id=profile_id, user_id=user_id).one()
     profile.revision += 1
     profile.confirmed = False

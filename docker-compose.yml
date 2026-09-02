@@ -96,8 +96,9 @@ services:
       GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
       GOOGLE_LOGIN_REDIRECT_URI: ${GOOGLE_LOGIN_REDIRECT_URI:-}
       GMAIL_PUBSUB_TOPIC: ${GMAIL_PUBSUB_TOPIC:-}
-      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
-      XENDIT_WEBHOOK_TOKEN: ${XENDIT_WEBHOOK_TOKEN:-}
+      DODO_PAYMENTS_API_KEY: ${DODO_PAYMENTS_API_KEY:-}
+      DODO_PAYMENTS_ENVIRONMENT: ${DODO_PAYMENTS_ENVIRONMENT:-test_mode}
+      DODO_PAYMENTS_WEBHOOK_KEY: ${DODO_PAYMENTS_WEBHOOK_KEY:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:${API_PORT:-8000}}
@@ -160,6 +161,7 @@ services:
         # host port), not the in-network "http://api:8000" the web
         # container itself would use.
         NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:${API_PORT:-8000}}"
+        NEXT_PUBLIC_DODO_PAYMENTS_MODE: "${NEXT_PUBLIC_DODO_PAYMENTS_MODE:-test}"
     # See api's image comment — same build-locally/pull-in-prod split.
     image: ${DOCKERHUB_USERNAME:-your-dockerhub-username}/applicient-web:${IMAGE_TAG:-latest}
     restart: unless-stopped

@@ -72,14 +72,27 @@ function CardBubble({ card }: { card: ConversationCard }) {
   return <ApplicationCard card={card} />;
 }
 
-export function ChatLog({ items, typing }: { items: LogItem[]; typing?: boolean }) {
+export function ChatLog({
+  items,
+  typing,
+  className,
+}: {
+  items: LogItem[];
+  typing?: boolean;
+  className?: string;
+}) {
   const bottomRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [items, typing]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-background p-3 max-h-64 overflow-y-auto">
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-md border border-border bg-background p-3 max-h-64 overflow-y-auto",
+        className,
+      )}
+    >
       {items.map((item, i) =>
         item.kind === "agent" ? (
           <div key={i} className="flex items-start gap-2">

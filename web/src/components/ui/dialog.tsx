@@ -61,7 +61,21 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // `max-sm:max-w-[...]` (mobile ceiling) and `max-w-sm` (the
+          // at-rest default width) are deliberately split into two
+          // different modifier groups rather than the more obvious
+          // `max-w-[calc(100%-2rem)] sm:max-w-sm` — tailwind-merge only
+          // cancels a class sharing the exact same modifier, so a
+          // caller's own unprefixed `className="max-w-xl"` (or any
+          // other override) correctly replaces this bare `max-w-sm`
+          // wherever it's used, instead of silently losing to it: at
+          // any viewport ≥640px, Tailwind's own variant ordering places
+          // `sm:max-w-sm` AFTER an unprefixed override in the generated
+          // stylesheet, so the old `sm:`-prefixed default always won
+          // regardless of what a caller passed — confirmed live, every
+          // dialog in this app that customized width was silently
+          // stuck at 24rem on desktop.
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-sm:max-w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
@@ -71,7 +85,11 @@ function DialogContent({
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-2 right-2"
+              // z-20: stays above a caller's own `sticky` in-content
+              // header (e.g. a scrollable dialog body that pins its
+              // title bar while scrolling) rather than getting covered
+              // by it — see inbox/page.tsx's JobDetailDrawer.
+              className="absolute top-2 right-2 z-20"
               size="icon-sm"
             >
               <XIcon
