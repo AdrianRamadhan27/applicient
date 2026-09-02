@@ -159,10 +159,13 @@ jobs:
             S3_BUCKET=applicient
             SECRET_KEY=${{ secrets.SECRET_KEY }}
             DEMO_USER_PASSWORD=${{ secrets.DEMO_USER_PASSWORD }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            EMAIL_FROM=${{ vars.EMAIL_FROM }}
             ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
             LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}
             LANGSMITH_PROJECT=${{ vars.LANGSMITH_PROJECT }}
             FRONTEND_URL=${{ vars.FRONTEND_URL }}
+            API_BASE_URL=${{ vars.API_BASE_URL }}
             CORS_ORIGINS=${{ vars.CORS_ORIGINS }}
             CADDY_EMAIL=${{ vars.CADDY_EMAIL }}
             BROWSER_WORKER_MAX_SESSIONS=${{ vars.BROWSER_WORKER_MAX_SESSIONS }}
@@ -171,6 +174,7 @@ jobs:
             GMAIL_CLIENT_ID=${{ vars.GMAIL_CLIENT_ID }}
             GMAIL_CLIENT_SECRET=${{ secrets.GMAIL_CLIENT_SECRET }}
             GMAIL_REDIRECT_URI=${{ vars.GMAIL_REDIRECT_URI }}
+            GOOGLE_LOGIN_REDIRECT_URI=${{ vars.GOOGLE_LOGIN_REDIRECT_URI }}
             GMAIL_PUBSUB_TOPIC=${{ vars.GMAIL_PUBSUB_TOPIC }}
             XENDIT_SECRET_KEY=${{ secrets.XENDIT_SECRET_KEY }}
             XENDIT_WEBHOOK_TOKEN=${{ secrets.XENDIT_WEBHOOK_TOKEN }}

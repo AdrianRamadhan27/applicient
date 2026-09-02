@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Target, Settings, LogOut } from "lucide-react";
+import { Target, Settings, LogOut, MailWarning } from "lucide-react";
 import { toast } from "sonner";
 import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -156,7 +156,7 @@ function ManagePersonasDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 // no sidebar chrome for everyone, signed in or not, and unlike
 // /login|/signup never redirects anyone away from it. AUTH_ENTRY_ROUTES
 // are the ones an already-authenticated user has no reason to be on.
-const NO_CHROME_ROUTES = ["/", "/login", "/signup"];
+const NO_CHROME_ROUTES = ["/", "/login", "/signup", "/auth/google/callback", "/privacy", "/terms"];
 const AUTH_ENTRY_ROUTES = ["/login", "/signup"];
 // Where an authenticated user gets sent instead of an auth-entry page
 // or a forbidden admin route — nav.ts's own comment already calls this
@@ -176,6 +176,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { personas, loading, selectedPersonaId, setSelectedPersonaId } = usePersona();
   const [manageOpen, setManageOpen] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
+  const [resendingVerification, setResendingVerification] = React.useState(false);
+
+  async function handleResendVerification() {
+    setResendingVerification(true);
+    try {
+      await api.resendVerification();
+      toast.success("Verification email sent — check your inbox.");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setResendingVerification(false);
+    }
+  }
 
   const isNoChromeRoute = NO_CHROME_ROUTES.includes(pathname);
   const isAuthEntryRoute = AUTH_ENTRY_ROUTES.includes(pathname);
@@ -332,6 +345,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        {user && !user.email_verified && (
+          <div className="flex items-center gap-2 border-b border-warn bg-warn/10 px-4 py-1.5 text-xs text-warn">
+            <MailWarning className="size-3.5 shrink-0" />
+            <span className="flex-1">Verify your email to keep full access to your account.</span>
+            <button
+              onClick={handleResendVerification}
+              disabled={resendingVerification}
+              className="shrink-0 underline hover:no-underline disabled:opacity-50"
+            >
+              {resendingVerification ? "Sending…" : "Resend email"}
+            </button>
+          </div>
+        )}
         {children}
       </main>
 

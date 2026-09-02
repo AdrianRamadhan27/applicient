@@ -17,7 +17,7 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export type User = { id: string; email: string; role: "user" | "admin" };
+export type User = { id: string; email: string; role: "user" | "admin"; email_verified: boolean };
 
 // SaaS pivot — admin-only surfaces.
 export type Plan = {
@@ -902,6 +902,13 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   me: () => request<User>("/auth/me"),
+  /** Not a fetch — a real browser navigation to Google's own consent
+   * screen, same reasoning as gmailConnectUrl() below (an unauthenticated
+   * login flow, so there's no token to attach anyway). */
+  googleLoginUrl(): string {
+    return `${API_BASE_URL}/auth/google/login`;
+  },
+  resendVerification: () => request<void>("/auth/resend-verification", { method: "POST" }),
 
   listConnections: () => request<ProviderConnection[]>("/provider-connections"),
   createConnection: (body: {

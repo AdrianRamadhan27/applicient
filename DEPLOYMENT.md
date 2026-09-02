@@ -309,6 +309,7 @@ of `.env`, written fresh on every deploy:
 | `S3_SECRET_KEY` | generate a real one |
 | `SECRET_KEY` | `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` — **never rotate this once real users exist**, it's the encryption key for every tenant's stored credentials |
 | `DEMO_USER_PASSWORD` | any password — only used by the seeded demo account |
+| `RESEND_API_KEY` | Resend dashboard → API Keys — used for verification/scheduled-run emails (v2 Phase 0) |
 | `XENDIT_SECRET_KEY` | Xendit dashboard → Settings → API Keys (sandbox key to start) |
 | `XENDIT_WEBHOOK_TOKEN` | Xendit dashboard → Settings → Developers → Callbacks |
 | `LANGSMITH_API_KEY` | optional — leave the secret unset if you're not using LangSmith |
@@ -323,12 +324,15 @@ of `.env`, written fresh on every deploy:
 | `NEXT_PUBLIC_API_URL` | `https://api.applicient.my.id` |
 | `ADMIN_EMAIL` | the real email you'll sign up with — that account becomes admin automatically |
 | `FRONTEND_URL` | `https://applicient.my.id` |
+| `API_BASE_URL` | `https://api.applicient.my.id` — the API's own public URL, used to build the email-verification link (v2 Phase 1) |
 | `CORS_ORIGINS` | `https://applicient.my.id,https://www.applicient.my.id` |
 | `CADDY_EMAIL` | your real email — Let's Encrypt renewal/expiry notices |
+| `EMAIL_FROM` | optional — leave unset to use Resend's shared sandbox sender until you have a verified sending domain |
 | `BROWSER_WORKER_MAX_SESSIONS` | `2` (see step 1) |
 | `LANGSMITH_PROJECT` | `applicient` — optional |
 | `GMAIL_CLIENT_ID` | optional — only needed for step 10 (Gmail) |
 | `GMAIL_REDIRECT_URI` | optional — only needed for step 10 (Gmail) |
+| `GOOGLE_LOGIN_REDIRECT_URI` | `https://api.applicient.my.id/auth/google/callback` — a second redirect URI on the *same* Google OAuth client as `GMAIL_REDIRECT_URI` (v2 Phase 1, "Continue with Google") |
 | `GMAIL_PUBSUB_TOPIC` | optional — only needed for step 10 (Gmail) |
 
 **Keep your own copy of what you just typed**, somewhere like a password

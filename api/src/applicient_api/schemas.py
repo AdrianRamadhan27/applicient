@@ -17,6 +17,7 @@ class UserOut(BaseModel):
     id: uuid.UUID
     email: str
     role: str
+    email_verified: bool
 
 
 class SignupIn(BaseModel):

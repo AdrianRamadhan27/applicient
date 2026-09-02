@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Target } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,12 @@ export default function LoginPage() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("verified") === "1") {
+      toast.success("Email verified — you can log in now.");
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -70,6 +77,19 @@ export default function LoginPage() {
               {submitting ? "Logging in…" : "Log in"}
             </Button>
           </form>
+          <div className="my-4 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => window.location.assign(api.googleLoginUrl())}
+          >
+            Continue with Google
+          </Button>
           <p className="mt-4 text-center text-xs text-muted-foreground">
             No account?{" "}
             <Link href="/signup" className="underline hover:text-foreground">

@@ -28,6 +28,15 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    # v2 Phase 1 — Google-only accounts (google_id set, no password) are
+    # created with email_verified=True immediately, since Google already
+    # proved the address; password signups start False until they click
+    # the verification link. Not a hard login gate (see routers/auth.py).
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Nullable/unique — set on first "Continue with Google" use, either
+    # linking an existing password account (matched by email) or
+    # identifying a Google-only account (password_hash stays None).
+    google_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     # SaaS pivot — no self-service path to "admin" exists; see
     # routers/auth.py signup's ADMIN_EMAIL bootstrap.
     role: Mapped[str] = mapped_column(String(20), nullable=False, default=UserRole.USER.value)  # UserRole

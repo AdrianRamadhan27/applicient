@@ -43,7 +43,13 @@ def seed() -> None:
         user = session.query(User).filter_by(email=DEMO_EMAIL).one_or_none()
         if user is None:
             role = "admin" if admin_email and DEMO_EMAIL == admin_email else "user"
-            user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_USER_PASSWORD), role=role)
+            # email_verified=True — this account bypasses signup()'s real
+            # verification-email flow entirely (constructed directly, not
+            # via the endpoint), so leaving it False would show a
+            # perpetual "verify your email" banner for a dev-only seed.
+            user = User(
+                email=DEMO_EMAIL, password_hash=hash_password(DEMO_USER_PASSWORD), role=role, email_verified=True
+            )
             session.add(user)
             session.flush()  # populate user.id via server_default before use below
             print(f"created user {user.id} ({user.email}, role={role}) — dev password from DEMO_USER_PASSWORD")

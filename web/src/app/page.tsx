@@ -330,6 +330,8 @@ export default function LandingPage() {
             <a href="#features" className="hover:text-foreground">Features</a>
             <a href="#pricing" className="hover:text-foreground">Pricing</a>
             <a href="#faq" className="hover:text-foreground">FAQ</a>
+            <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
+            <Link href="/terms" className="hover:text-foreground">Terms</Link>
             <Link href="/login" className="hover:text-foreground">Log in</Link>
           </nav>
           <span className="text-xs text-muted-foreground">© {new Date().getFullYear()} Applicient</span>
