@@ -4,13 +4,14 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Target } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { PasswordInput } from "@/components/ui/password-input";
+import { AuthLayout } from "@/components/auth-layout";
+import { GoogleIcon } from "@/components/icons/google-icon";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -39,65 +40,57 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <div className="flex items-center gap-2 mb-1">
-            <Target className="size-4 text-primary" strokeWidth={1.5} />
-            <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>
-          </div>
-          <CardTitle>Log in</CardTitle>
-          <CardDescription>Welcome back.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <Button type="submit" disabled={submitting} className="mt-1">
-              {submitting ? "Logging in…" : "Log in"}
-            </Button>
-          </form>
-          <div className="my-4 flex items-center gap-3">
-            <div className="h-px flex-1 bg-border" />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">or</span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={() => window.location.assign(api.googleLoginUrl())}
-          >
-            Continue with Google
-          </Button>
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            No account?{" "}
-            <Link href="/signup" className="underline hover:text-foreground">
-              Sign up
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <AuthLayout>
+      <h1 className="text-2xl font-semibold tracking-tight">Welcome back!</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Don&apos;t have an account?{" "}
+        <Link href="/signup" className="text-primary underline hover:text-primary/80">
+          Create one now
+        </Link>
+        , it&apos;s free.
+      </p>
+
+      <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="password">Password</Label>
+          <PasswordInput
+            id="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        <Button type="submit" disabled={submitting} className="mt-1">
+          {submitting ? "Logging in…" : "Log in"}
+        </Button>
+      </form>
+
+      <div className="my-4 flex items-center gap-3">
+        <div className="h-px flex-1 bg-border" />
+        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">or</span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={() => window.location.assign(api.googleLoginUrl())}
+      >
+        <GoogleIcon className="size-4" />
+        Continue with Google
+      </Button>
+    </AuthLayout>
   );
 }

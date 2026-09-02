@@ -848,7 +848,7 @@ function ApplicationDetailPanel({
     return (
       <div
         style={{ width: panelWidth }}
-        className="shrink-0 border-l border-border bg-card p-4 text-sm text-muted-foreground font-mono"
+        className="shrink-0 border-l border-border bg-card p-4 text-sm text-muted-foreground font-mono max-lg:fixed max-lg:inset-0 max-lg:z-50 max-lg:!w-full"
       >
         loading…
       </div>
@@ -862,12 +862,19 @@ function ApplicationDetailPanel({
   return (
     <div
       style={{ width: panelWidth }}
-      className="relative shrink-0 border-l border-border bg-card flex flex-col h-full"
+      // Below `lg` this becomes a full-screen overlay instead of a
+      // side panel — the panel's own min width (320px) next to even a
+      // horizontally-scrolled board left almost nothing for either on
+      // a phone-width viewport. `!w-full` overrides the inline
+      // `style.width` above, which class utilities can't beat on
+      // their own. The resize handle stays in the DOM but is inert
+      // there (nothing to drag against on a full-width panel).
+      className="relative shrink-0 border-l border-border bg-card flex flex-col h-full max-lg:fixed max-lg:inset-0 max-lg:z-50 max-lg:!w-full"
     >
       <div
         onMouseDown={handleResizeStart}
         className={cn(
-          "absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize z-10",
+          "absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize z-10 max-lg:hidden",
           "hover:bg-primary/40",
           resizing && "bg-primary/60",
         )}

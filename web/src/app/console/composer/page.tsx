@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { DeltaDiffView } from "@/components/delta-diff-view";
 import { usePersona } from "@/components/persona-provider";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -280,7 +281,7 @@ const COVER_LETTER_LENGTHS: { value: CoverLetterLength; label: string }[] = [
 ];
 
 /** Shown before any job group has been created/selected — an
- * untailored CV straight from Profile Studio's evidence bank, so
+ * untailored CV straight from the Dashboard's evidence bank, so
  * there's something real to look at/export immediately rather than
  * an empty "select a job group" screen (raised by Adrian). Fully
  * self-contained/stateless on the server side (api.renderBaseCv never
@@ -355,7 +356,7 @@ function BaseCvPanel({ personaId }: { personaId: string }) {
       <div>
         <h2 className="text-lg font-semibold">Base CV</h2>
         <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-          An untailored CV straight from your Profile Studio evidence bank — every entry, as recorded, nothing
+          An untailored CV straight from your Dashboard evidence bank — every entry, as recorded, nothing
           selected or reworded for a specific role yet. Create a job group above and generate a tailored CV once
           you have specific jobs to target.
         </p>
@@ -392,7 +393,7 @@ function BaseCvPanel({ personaId }: { personaId: string }) {
           <iframe src={previewUrl} className="w-full h-full" title="Base CV preview" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground font-mono">
-            {rendering ? "Rendering…" : "No evidence yet — add some in Profile Studio"}
+            {rendering ? "Rendering…" : "No evidence yet — add some in the Dashboard"}
           </div>
         )}
       </div>
@@ -633,7 +634,7 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
           </div>
 
           {delta && selectedDoc && (
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <div className="space-y-2 text-sm min-w-0">
                 <Badge variant={selectedDoc.verified ? "default" : "destructive"}>
                   {selectedDoc.verified ? "verified" : "unverified — export blocked"}
@@ -933,6 +934,11 @@ export default function ComposerPage() {
   const [evidenceBank, setEvidenceBank] = React.useState<EvidenceItem[]>([]);
   const [selectedGroupId, setSelectedGroupId] = React.useState<string | null>(null);
   const [loadingGroups, setLoadingGroups] = React.useState(false);
+  // Below `lg` the job-groups sidebar (permanently visible on desktop)
+  // becomes a toggled full-screen browse overlay instead — a fixed
+  // 256px sidebar next to the editor left almost nothing usable on a
+  // phone width.
+  const [groupsPanelOpen, setGroupsPanelOpen] = React.useState(false);
 
   const [newGroupOpen, setNewGroupOpen] = React.useState(false);
   const [newGroupName, setNewGroupName] = React.useState("");
@@ -1312,10 +1318,22 @@ export default function ComposerPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="h-12 shrink-0 border-b border-border bg-card flex items-center px-5 justify-between">
-        <span className="text-sm font-semibold">CV Composer</span>
+      <header className="h-12 shrink-0 border-b border-border bg-card flex items-center gap-2 px-5 justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          {selectedPersonaId && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="lg:hidden shrink-0"
+              onClick={() => setGroupsPanelOpen(true)}
+            >
+              {selectedGroup ? selectedGroup.name : "Base CV"}
+            </Button>
+          )}
+          <span className="text-sm font-semibold">CV Composer</span>
+        </div>
         {selectedPersona && (
-          <span className="text-xs text-muted-foreground font-mono">Persona: {selectedPersona.name}</span>
+          <span className="text-xs text-muted-foreground font-mono truncate">Persona: {selectedPersona.name}</span>
         )}
       </header>
 
@@ -1324,11 +1342,41 @@ export default function ComposerPage() {
           Select or create a persona in the sidebar first
         </div>
       ) : (
-        <div className="flex-1 flex overflow-hidden">
-          {/* Job groups sidebar */}
-          <div className="w-64 shrink-0 border-r border-border overflow-y-auto p-3 space-y-2">
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Backdrop — mobile only, closes the job-groups browse
+              overlay below the same way tapping outside any other
+              drawer in this app does. */}
+          {groupsPanelOpen && (
+            <div
+              className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+              onClick={() => setGroupsPanelOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+
+          {/* Job groups sidebar — permanently visible on desktop;
+              below `lg` it's a toggled full-screen browse overlay
+              instead (opened via the header button above), since a
+              permanent 256px sidebar next to the editor left almost
+              nothing usable on a phone width. */}
+          <div
+            className={cn(
+              "w-64 shrink-0 border-r border-border overflow-y-auto p-3 space-y-2 bg-card",
+              "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:w-[85%] max-lg:max-w-xs max-lg:transition-transform max-lg:duration-200",
+              groupsPanelOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full",
+            )}
+          >
+            <div className="flex items-center justify-between lg:hidden">
+              <span className="text-xs font-semibold text-muted-foreground uppercase">Browse</span>
+              <Button size="icon" variant="ghost" className="size-6" onClick={() => setGroupsPanelOpen(false)}>
+                <X className="size-4" />
+              </Button>
+            </div>
             <button
-              onClick={() => setSelectedGroupId(null)}
+              onClick={() => {
+                setSelectedGroupId(null);
+                setGroupsPanelOpen(false);
+              }}
               className={`flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-sm text-left ${
                 !selectedGroupId ? "bg-muted font-medium" : "hover:bg-muted/50 text-muted-foreground"
               }`}
@@ -1356,7 +1404,10 @@ export default function ComposerPage() {
                 className={`group flex items-center justify-between rounded-md px-2 py-1.5 text-sm cursor-pointer ${
                   g.id === selectedGroupId ? "bg-muted" : "hover:bg-muted/50"
                 }`}
-                onClick={() => setSelectedGroupId(g.id)}
+                onClick={() => {
+                  setSelectedGroupId(g.id);
+                  setGroupsPanelOpen(false);
+                }}
               >
                 <div className="min-w-0">
                   <div className="truncate">{g.name}</div>
@@ -1578,7 +1629,7 @@ export default function ComposerPage() {
               </div>
 
               {selectedDoc && (
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <div className="space-y-4 min-w-0">
                     <div className="flex items-center gap-2">
                       <Badge variant={selectedDoc.verified ? "default" : "destructive"}>

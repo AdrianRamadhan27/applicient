@@ -20,8 +20,9 @@ const PersonaContext = React.createContext<PersonaContextValue | null>(null);
 /** App-wide "which persona am I working with" — the first shared
  * state this app has (confirmed: everything else is page-local
  * `useState`). Every persona now owns its own Profile/evidence bank
- * exclusively, so which persona is selected actually changes what
- * Profile Studio shows, not just a saved-search default. Persisted to
+ * exclusively, so which persona is selected actually changes what the
+ * Dashboard's Preferences/Profile/Experience tabs show, not just a
+ * saved-search default. Persisted to
  * localStorage (first use of it in this app) so a reload doesn't
  * silently reset back to whichever persona happens to sort first. */
 export function PersonaProvider({ children }: { children: React.ReactNode }) {

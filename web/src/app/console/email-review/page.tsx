@@ -3,9 +3,165 @@
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { api, type ApplicationDetail, type EmailMessage } from "@/lib/api";
+import { api, type ApplicationDetail, type EmailMessage, type GmailConnection } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Mail } from "lucide-react";
+
+const SCAN_WINDOW_OPTIONS = [1, 3, 7, 14, 30];
+
+/** M5 F8.1/F8.2 — one Gmail account per user, feeding email ingestion.
+ * Was on the Credentials page; moved here to sit next to the feature
+ * it actually feeds instead of alongside unrelated site-login
+ * credentials (raised directly by Adrian). Connect is a real
+ * navigation (not a fetch) since OAuth needs the browser at Google's
+ * own consent screen; the callback lands back here with
+ * ?gmail=connected, which just triggers a toast + reload. */
+function GmailSection() {
+  const [connection, setConnection] = React.useState<GmailConnection | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [disconnecting, setDisconnecting] = React.useState(false);
+  const [updatingWindow, setUpdatingWindow] = React.useState(false);
+  const [togglingPolling, setTogglingPolling] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    try {
+      const list = await api.listGmailConnections();
+      setConnection(list[0] ?? null);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      await load();
+      if (new URLSearchParams(window.location.search).get("gmail") === "connected") {
+        toast.success("Gmail connected");
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    })();
+  }, [load]);
+
+  async function handleScanWindowChange(days: string) {
+    if (!connection) return;
+    setUpdatingWindow(true);
+    try {
+      const updated = await api.updateGmailConnection(connection.id, { scan_window_days: Number(days) });
+      setConnection(updated);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setUpdatingWindow(false);
+    }
+  }
+
+  async function handleTogglePolling(enabled: boolean) {
+    if (!connection) return;
+    setTogglingPolling(true);
+    try {
+      const updated = await api.updateGmailConnection(connection.id, { polling_enabled: enabled });
+      setConnection(updated);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTogglingPolling(false);
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!connection) return;
+    if (!window.confirm(`Disconnect ${connection.google_email}? Email ingestion stops until reconnected.`)) return;
+    setDisconnecting(true);
+    try {
+      await api.deleteGmailConnection(connection.id);
+      setConnection(null);
+      toast.success("Gmail disconnected");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  return (
+    <div className="border border-border bg-card p-4 mb-5">
+      <div className="flex items-center gap-2 mb-2">
+        <Mail className="size-4 text-muted-foreground" strokeWidth={1.5} />
+        <span className="text-sm font-semibold">Gmail</span>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          read-only — scanned for application-related keywords (interview, offer, rejection, etc.), not your whole
+          inbox verbatim
+        </span>
+      </div>
+      {loading ? (
+        <div className="text-sm text-muted-foreground font-mono">loading…</div>
+      ) : connection ? (
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs min-w-0">
+            <div className="font-mono">{connection.google_email}</div>
+            <div className="text-muted-foreground mt-0.5">
+              status: {connection.status}
+              {connection.last_synced_at && ` · last synced ${new Date(connection.last_synced_at).toLocaleString()}`}
+              {connection.last_error && <span className="text-crit"> · {connection.last_error}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="flex items-center gap-1.5" title="Pause/resume Gmail inbox polling">
+              <Switch
+                checked={connection.polling_enabled}
+                disabled={togglingPolling}
+                onCheckedChange={handleTogglePolling}
+              />
+              <span className="text-xs text-muted-foreground">
+                {connection.polling_enabled ? "polling" : "paused"}
+              </span>
+            </label>
+            <span className="text-xs text-muted-foreground">scan last</span>
+            <Select
+              value={String(connection.scan_window_days)}
+              onValueChange={handleScanWindowChange}
+              disabled={updatingWindow}
+            >
+              <SelectTrigger className="h-7 w-[90px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCAN_WINDOW_OPTIONS.map((d) => (
+                  <SelectItem key={d} value={String(d)}>
+                    {d} day{d !== 1 ? "s" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="destructive" disabled={disconnecting} onClick={handleDisconnect}>
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            Not connected — the assistant can&apos;t read application-related emails yet.
+          </span>
+          <Button size="sm" asChild>
+            <a href={api.gmailConnectUrl()}>Connect Gmail</a>
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** M5 F8.4/F8.6 — the review queue for anything email_ingestion.py
  * flagged `review_needed`: either a low-confidence/unmatched email, or
@@ -174,6 +330,7 @@ export default function EmailReviewPage() {
       </header>
 
       <div className="flex-1 overflow-auto p-5">
+        <GmailSection />
         {loading ? (
           <div className="text-sm text-muted-foreground font-mono">loading…</div>
         ) : messages.length === 0 ? (

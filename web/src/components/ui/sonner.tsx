@@ -10,6 +10,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme={theme as ToasterProps["theme"]}
+      // A toast otherwise only ever goes away on its own timeout, or
+      // by clicking the toast body itself (easy to miss as a
+      // dismiss action, and does nothing while the toast is mid-hover-
+      // pause) — an explicit close button lets it be dismissed right
+      // away instead of waiting it out (raised directly by Adrian).
+      closeButton
       className="toaster group"
       icons={{
         success: (

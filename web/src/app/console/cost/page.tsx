@@ -115,7 +115,7 @@ export default function CostPage() {
           <div className="text-sm text-muted-foreground font-mono">loading…</div>
         ) : (
           <>
-            <section className="grid grid-cols-4 gap-3">
+            <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="border border-border bg-card p-4 flex flex-col gap-1">
                 <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
                   Total spend

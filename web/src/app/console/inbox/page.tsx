@@ -36,6 +36,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { platformForSourceName } from "@/lib/platforms";
+import { PlatformLogo } from "@/components/platform-logo";
+import { RECOMMENDATION_LABEL, recommendationColor } from "@/lib/recommendation";
 import { Layers, Plus, Search, Send, Sparkles, Trash2, X } from "lucide-react";
 
 // Skills come straight from the model's own free-form output, not a
@@ -50,28 +53,6 @@ import { Layers, Plus, Search, Send, Sparkles, Trash2, X } from "lucide-react";
 const SKILL_BADGE_CLASS = "text-[9px] font-mono whitespace-normal h-auto max-w-full break-words text-left leading-snug py-1";
 
 const RECOMMENDATIONS: (Recommendation | "unscored")[] = ["strong_apply", "apply", "stretch", "skip", "unscored"];
-
-const RECOMMENDATION_LABEL: Record<Recommendation | "unscored", string> = {
-  strong_apply: "strong apply",
-  apply: "apply",
-  stretch: "stretch",
-  skip: "skip",
-  unscored: "unscored",
-};
-
-function recommendationColor(rec: Recommendation | "unscored") {
-  switch (rec) {
-    case "strong_apply":
-    case "apply":
-      return "bg-ok-bg text-ok";
-    case "stretch":
-      return "bg-warn-bg text-warn";
-    case "skip":
-      return "bg-crit-bg text-crit";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 function money(v: number) {
   if (v === 0) return "$0.00";
@@ -641,7 +622,7 @@ function AddJobDialog({
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="job-title">Title *</Label>
               <Input id="job-title" value={draft.title} onChange={(e) => field("title", e.target.value)} />
@@ -1030,17 +1011,23 @@ export default function InboxPage() {
         <div className="flex-1 overflow-auto flex flex-col isolate">
           <div className="sticky top-0 z-20 border-b border-border bg-card px-5 py-3 flex flex-col gap-3 shadow-md">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={!!jobs && jobs.length > 0 && selectedIds.size === jobs.length}
-                  onCheckedChange={toggleSelectAll}
-                  disabled={!jobs || jobs.length === 0}
-                  aria-label="Select all filtered jobs"
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  {selectedIds.size > 0 ? `${selectedIds.size} selected` : "select all"}
-                </span>
-              </div>
+              {/* Hidden until at least one row's own checkbox is
+                  checked — a per-row checkbox is the discoverable way
+                  to start selecting; this bar (select-all + bulk
+                  actions) is only useful once selection mode is
+                  already on, so it stays out of the way otherwise
+                  (raised directly by Adrian). */}
+              {selectedIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={!!jobs && jobs.length > 0 && selectedIds.size === jobs.length}
+                    onCheckedChange={toggleSelectAll}
+                    disabled={!jobs || jobs.length === 0}
+                    aria-label="Select all filtered jobs"
+                  />
+                  <span className="text-[11px] text-muted-foreground">{selectedIds.size} selected</span>
+                </div>
+              )}
               {selectedIds.size > 0 && (
                 <>
                   <Button
@@ -1244,11 +1231,25 @@ export default function InboxPage() {
                       <span title={new Date(job.discovered_at).toLocaleString()}>
                         · Scanned {relativeDays(job.discovered_at)}
                       </span>
-                      {job.source_names.map((s) => (
-                        <Badge key={s} variant="outline" className="text-[9px] font-mono">
-                          {s}
-                        </Badge>
-                      ))}
+                      {job.source_names.map((s) => {
+                        // Same logo/color used in the "New saved
+                        // search" source picker (raised directly by
+                        // Adrian) — falls back to a plain text badge
+                        // for a source name that doesn't map to one of
+                        // the known platforms (a renamed source, or a
+                        // legacy/custom one).
+                        const platform = platformForSourceName(s);
+                        return platform ? (
+                          <span key={s} className="inline-flex items-center gap-1 text-[9px] font-mono">
+                            <PlatformLogo mark={platform.mark} color={platform.color} size={14} />
+                            {platform.label}
+                          </span>
+                        ) : (
+                          <Badge key={s} variant="outline" className="text-[9px] font-mono">
+                            {s}
+                          </Badge>
+                        );
+                      })}
                       {job.ghost_job_reasons.length > 0 && (
                         <Badge className="text-[9px] font-mono bg-warn-bg text-warn">
                           ghost signal

@@ -916,6 +916,12 @@ export type ConversationCard =
 
 export type ConversationStreamEvent =
   | { type: "stage"; stage: string; status: string; message: string }
+  // The human's own side of the turn, persisted as a durable RunEvent
+  // (fixed alongside the "saved chats only show the AI's response"
+  // report — it used to only ever exist as an optimistic client-side
+  // log entry, never written down, so it vanished on reload or when
+  // switching conversations).
+  | { type: "message"; role: "user"; text: string }
   | { type: "interrupt"; requests: InterruptRequest[] }
   | { type: "done" }
   | { type: "cancelled" }

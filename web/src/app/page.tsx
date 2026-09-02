@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { TierLabel } from "@/lib/plan-tiers";
 import { detectCurrency, formatLocalizedPrice } from "@/lib/currency";
 import { cn } from "@/lib/utils";
+import { ParticleField } from "@/components/particle-field";
 
 // Structure follows the saas-ui-nextjs-landing-page template's own
 // section order (announcement banner -> header -> hero -> logos ->
@@ -398,51 +399,9 @@ function HighlightCarousel() {
   );
 }
 
-// Deterministic pseudo-scatter (no Math.random — that would render
-// differently server vs. client and trip a hydration mismatch) behind
-// the hero: small squares (zero radius, matching Terminal Ledger's own
-// rule, not circles) drifting and fading on an infinite loop, driven
-// by globals.css's `.particle`/`particle-drift` keyframe reading these
-// per-element custom properties.
-const PARTICLE_COUNT = 24;
-
-const PARTICLES = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
-  left: (i * 41 + 7) % 100,
-  top: (i * 67 + 13) % 100,
-  size: 4 + (i % 4) * 1.5,
-  duration: 3.5 + (i % 7) * 0.6,
-  delay: (i % 9) * 0.4,
-  driftX: ((i % 5) - 2) * 14,
-  driftY: -30 - (i % 4) * 12,
-  opacity: 0.3 + (i % 4) * 0.1,
-  primary: i % 3 === 0,
-}));
-
-function ParticleField() {
-  return (
-    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
-      {PARTICLES.map((p, i) => (
-        <span
-          key={i}
-          className={cn("particle absolute", p.primary ? "bg-primary" : "bg-muted-foreground")}
-          style={
-            {
-              left: `${p.left}%`,
-              top: `${p.top}%`,
-              width: p.size,
-              height: p.size,
-              "--duration": `${p.duration}s`,
-              "--delay": `${p.delay}s`,
-              "--drift-x": `${p.driftX}px`,
-              "--drift-y": `${p.driftY}px`,
-              "--particle-opacity": p.opacity,
-            } as React.CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
+// ParticleField (the hero's drifting-square background) now lives in
+// components/particle-field.tsx — shared with the auth pages' own
+// hero panel (auth-layout.tsx), not redefined here.
 
 // Below the hero — deliberately a different mark (small "+" crosses,
 // not the hero's solid squares) so the two fields read as distinct

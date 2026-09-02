@@ -25,6 +25,9 @@ import type { LogItem } from "@/components/chat-log";
 // live state from here, never their own separate copy of it.
 
 function toLogItem(evt: ConversationStreamEvent): LogItem | null {
+  if (evt.type === "message") {
+    return { kind: "user", text: evt.text };
+  }
   if (evt.type === "stage") {
     if (evt.stage === "agent" && evt.status === "message") {
       return { kind: "agent", text: evt.message };
@@ -60,6 +63,16 @@ function appendLogItem(prev: LogItem[], item: LogItem): LogItem[] {
   }
   return [...prev, item];
 }
+
+// A friendly opener for a conversation with no messages yet (raised by
+// Adrian) — purely local, never sent to the backend or written as a
+// RunEvent, so it only ever appears while the conversation is
+// genuinely empty: the moment a real "message"/"stage" event exists
+// (this conversation's own or replayed from history), that event list
+// is what renders instead, not this constant.
+const GREETING_LOG: LogItem[] = [
+  { kind: "agent", text: "Hello, I'm Applicient AI — what can I help you with?" },
+];
 
 export function conversationLabel(convo: Conversation): string {
   if (convo.title) return convo.title;
@@ -101,12 +114,11 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
 
   const loadConversationHistory = React.useCallback(async (id: string) => {
     const { events, pendingInterrupt: pending, runStatus } = await api.getConversationEvents(id);
-    setLog(
-      events.reduce<LogItem[]>((acc, evt) => {
-        const item = toLogItem(evt);
-        return item ? appendLogItem(acc, item) : acc;
-      }, []),
-    );
+    const replayed = events.reduce<LogItem[]>((acc, evt) => {
+      const item = toLogItem(evt);
+      return item ? appendLogItem(acc, item) : acc;
+    }, []);
+    setLog(replayed.length > 0 ? replayed : GREETING_LOG);
     setPendingInterrupt(pending?.requests ?? null);
     if (runStatus === "running") {
       toast.message("A previous message from this conversation is still processing — give it a moment and reload.");
@@ -160,7 +172,7 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
       const convo = await api.createConversation(selectedPersonaId);
       setConversations((prev) => [convo, ...prev]);
       setConversationId(convo.id);
-      setLog([]);
+      setLog(GREETING_LOG);
       setPendingInterrupt(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start a new chat");
@@ -213,7 +225,13 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
   async function sendMessage(text: string) {
     const trimmed = text.trim();
     if (!trimmed || !conversationId || running || pendingInterrupt) return;
-    setLog((prev) => [...prev, { kind: "user", text: trimmed }]);
+    // No optimistic local push here — the backend now writes the
+    // human's own message as the very first event of the stream (a
+    // real, persisted RunEvent, not just something this component
+    // remembers), and `consume` below renders it from that same event
+    // a moment later. That's also why it now survives a reload or a
+    // switch to another conversation and back (raised by Adrian: saved
+    // chats used to only ever show the AI's half).
     setRunning(true);
     await consume(api.streamOrchestratorMessage(conversationId, trimmed));
   }

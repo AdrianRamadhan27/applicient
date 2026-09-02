@@ -10,10 +10,10 @@ import {
   Inbox,
   KeyRound,
   Layers,
+  LayoutDashboard,
   Mail,
   Radar,
   Terminal,
-  UserCircle,
   Users,
   Workflow,
 } from "lucide-react";
@@ -32,14 +32,18 @@ export type NavItem = {
 
 // Ordered to mirror the actual work sequence (build a profile -> find
 // jobs -> tailor -> apply -> track), not the order features happened
-// to get built in — Profile Studio first since nothing downstream
-// means anything without it, raised directly by Adrian after the
+// to get built in — Dashboard first since nothing downstream means
+// anything without a profile, raised directly by Adrian after the
 // original build-order left it buried in the middle of the list.
 // Phase 14 (v2 plan) — every authenticated page lives under /console/*
-// now (app-shell.tsx's own AUTHENTICATED_HOME is the new /console
-// dashboard home, not a page in this list).
+// now (app-shell.tsx's own AUTHENTICATED_HOME is the same /console
+// page this Dashboard item points at, not a separate page). Profile
+// Studio was later merged straight into this Dashboard as its own
+// tabs (Preferences/Profile/Experience) alongside a new Overview tab
+// — also raised directly by Adrian — so this one entry now covers
+// what used to be two separate nav items.
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/console/profile", label: "Profile Studio", icon: UserCircle, section: "Work" },
+  { href: "/console", label: "Dashboard", icon: LayoutDashboard, section: "Work" },
   { href: "/console/assistant", label: "Assistant", icon: BotMessageSquare, section: "Work" },
   { href: "/console/radar", label: "Job Search", icon: Radar, section: "Work" },
   { href: "/console/inbox", label: "Job Inbox", icon: Inbox, section: "Work" },

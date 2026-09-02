@@ -11,7 +11,6 @@ import {
   type RadarRunProgressEvent,
   type SavedSearch,
   type Source,
-  type SourceAdapterKey,
   type SourceRun,
   toRadarProgressEvent,
 } from "@/lib/api";
@@ -38,70 +37,8 @@ import {
 import { cn } from "@/lib/utils";
 import { usePersona } from "@/components/persona-provider";
 import { ChevronDown, ChevronUp, Loader2, Radar as RadarIcon } from "lucide-react";
-
-// User-facing platform picker — deliberately hides the underlying
-// adapter/library (jobspy powers LinkedIn+Indeed under the hood, one
-// Source row per platform with `config.sites` fixed to just that
-// platform) and drops JSearch/SocialFetch entirely: both need a paid
-// API key up front before anything works, which was the actual
-// complaint ("too complex, user shouldn't need to know what api key
-// is needed"). JobStreet/Glints are listed disabled ("coming soon")
-// since they were asked for by name even though nothing backs them
-// yet — everything else here maps to a real, working adapter.
-type PlatformKey =
-  | "greenhouse"
-  | "lever"
-  | "workable"
-  | "ashby"
-  | "smartrecruiters"
-  | "recruitee"
-  | "linkedin"
-  | "indeed"
-  | "remoteok"
-  | "jobstreet"
-  | "glints";
-
-type PlatformConfigKind = "company_identifiers" | "jobspy_linkedin" | "jobspy_indeed" | "none" | "coming_soon";
-
-type PlatformDef = {
-  key: PlatformKey;
-  label: string;
-  mark: string;
-  color: string;
-  adapterKey: SourceAdapterKey | null;
-  configKind: PlatformConfigKind;
-};
-
-const PLATFORMS: PlatformDef[] = [
-  { key: "greenhouse", label: "Greenhouse", mark: "Gh", color: "#24A47F", adapterKey: "greenhouse", configKind: "company_identifiers" },
-  { key: "lever", label: "Lever", mark: "Lv", color: "#5B57D1", adapterKey: "lever", configKind: "company_identifiers" },
-  { key: "workable", label: "Workable", mark: "Wk", color: "#2FAE6A", adapterKey: "workable", configKind: "company_identifiers" },
-  { key: "ashby", label: "Ashby", mark: "As", color: "#1F2933", adapterKey: "ashby", configKind: "company_identifiers" },
-  { key: "smartrecruiters", label: "SmartRecruiters", mark: "Sr", color: "#1F6FEB", adapterKey: "smartrecruiters", configKind: "company_identifiers" },
-  { key: "recruitee", label: "Recruitee", mark: "Rc", color: "#FF5C5C", adapterKey: "recruitee", configKind: "company_identifiers" },
-  { key: "linkedin", label: "LinkedIn", mark: "in", color: "#0A66C2", adapterKey: "jobspy", configKind: "jobspy_linkedin" },
-  { key: "indeed", label: "Indeed", mark: "id", color: "#2557A7", adapterKey: "jobspy", configKind: "jobspy_indeed" },
-  { key: "remoteok", label: "RemoteOK", mark: "OK", color: "#111111", adapterKey: "remoteok", configKind: "none" },
-  { key: "jobstreet", label: "JobStreet", mark: "JS", color: "#009E9E", adapterKey: null, configKind: "coming_soon" },
-  { key: "glints", label: "Glints", mark: "Gl", color: "#4B3FE4", adapterKey: null, configKind: "coming_soon" },
-];
-
-const PLATFORM_BY_KEY = Object.fromEntries(PLATFORMS.map((p) => [p.key, p])) as Record<PlatformKey, PlatformDef>;
-
-// Best-effort inverse of the above, for rendering existing Source rows
-// (including ones created before this picker existed) with a logo —
-// falls back to the raw adapter_key label when a row can't be mapped
-// to exactly one platform (a legacy multi-site jobspy row, or a
-// jsearch/socialfetch row from before those were dropped).
-function platformForSource(s: Source): PlatformDef | undefined {
-  if (s.adapter_key === "jobspy") {
-    const sites = String(s.config?.sites ?? "");
-    if (sites === "linkedin") return PLATFORM_BY_KEY.linkedin;
-    if (sites === "indeed") return PLATFORM_BY_KEY.indeed;
-    return undefined;
-  }
-  return PLATFORMS.find((p) => p.adapterKey === s.adapter_key);
-}
+import { type PlatformKey, PLATFORMS, PLATFORM_BY_KEY, platformForSource } from "@/lib/platforms";
+import { PlatformLogo } from "@/components/platform-logo";
 
 const COMPANY_IDENTIFIER_HINT: Partial<Record<PlatformKey, string>> = {
   greenhouse: "the board token, e.g. job-boards.greenhouse.io/gitlab",
@@ -111,17 +48,6 @@ const COMPANY_IDENTIFIER_HINT: Partial<Record<PlatformKey, string>> = {
   smartrecruiters: "the company identifier, e.g. jobs.smartrecruiters.com/Equinox",
   recruitee: "the subdomain, e.g. channable.recruitee.com",
 };
-
-function PlatformLogo({ mark, color, size = 26 }: { mark: string; color: string; size?: number }) {
-  return (
-    <span
-      className="inline-flex items-center justify-center shrink-0 font-mono font-bold text-white leading-none"
-      style={{ backgroundColor: color, width: size, height: size, fontSize: size * 0.42 }}
-    >
-      {mark}
-    </span>
-  );
-}
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEKDAY_ABBR = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -554,6 +480,23 @@ export default function RadarPage() {
     };
   }, [loadAll]);
 
+  // Dashboard Overview's quick-search box lands here with `?prefill=`
+  // set to whatever was typed — opens straight into a prefilled "New
+  // saved search" instead of just landing on this page empty (raised
+  // directly by Adrian). Read directly off the URL (not useSearchParams,
+  // which forces a Suspense boundary) and stripped right after, same
+  // "read once off window.location.search, then history.replaceState it
+  // away" pattern already used for ?verified=1/?gmail=connected
+  // elsewhere in this app.
+  React.useEffect(() => {
+    const prefill = new URLSearchParams(window.location.search).get("prefill");
+    if (prefill) {
+      openCreateSearch(prefill);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function openDiscovery() {
     setDiscoveryOpen(true);
   }
@@ -700,10 +643,10 @@ export default function RadarPage() {
     return [...resolved.map((s) => s.id), ...Array.from(draftUnmappedSourceIds)];
   }
 
-  function openCreateSearch() {
+  function openCreateSearch(prefill?: string) {
     setEditingSearchId(null);
-    setDraftName("");
-    setDraftRoleTitles("");
+    setDraftName(prefill ?? "");
+    setDraftRoleTitles(prefill ?? "");
     setDraftPersonaId(selectedPersonaId);
     setDraftSelectedPlatforms(new Set());
     setDraftPlatformConfig({});
@@ -1013,8 +956,8 @@ export default function RadarPage() {
             Discover companies
           </Button>
           <Dialog open={discoveryOpen} onOpenChange={setDiscoveryOpen}>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
+            <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden">
+              <DialogHeader className="shrink-0">
                 <DialogTitle>Discover companies</DialogTitle>
                 <DialogDescription>
                   Proposes real companies from this persona&apos;s preferences and resolves each against the six
@@ -1022,7 +965,7 @@ export default function RadarPage() {
                   candidates you approve join that ATS&apos;s scan list for this persona.
                 </DialogDescription>
               </DialogHeader>
-              <div className="flex flex-col gap-3 py-2">
+              <div className="flex flex-col gap-3 overflow-y-auto py-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">
                     For: <span className="font-medium text-foreground">{personas.find((p) => p.id === selectedPersonaId)?.name ?? "?"}</span>
@@ -1039,7 +982,7 @@ export default function RadarPage() {
                     <div className="text-sm text-muted-foreground font-mono">loading…</div>
                   ) : candidates.length === 0 ? (
                     <div className="text-sm text-muted-foreground border border-dashed border-input p-6 text-center">
-                      No candidates yet — set preferences for this persona in Profile Studio, then run discovery.
+                      No candidates yet — set preferences for this persona in the Dashboard, then run discovery.
                     </div>
                   ) : (
                     candidates.map((c) => {
@@ -1091,7 +1034,7 @@ export default function RadarPage() {
               </div>
             </DialogContent>
           </Dialog>
-          <Button size="sm" disabled={!personas.length} onClick={openCreateSearch}>
+          <Button size="sm" disabled={!personas.length} onClick={() => openCreateSearch()}>
             New saved search
           </Button>
         </div>
@@ -1426,14 +1369,23 @@ export default function RadarPage() {
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        {/* This form's content grows a lot (platform config blocks,
+            schedule-mode options) depending on what's selected — the
+            base Dialog has no height cap by default, so on a shorter
+            screen the dialog itself used to run past the top/bottom
+            of the viewport instead of scrolling internally (raised
+            directly by Adrian: "still get overflowed... sometimes" —
+            the "sometimes" was exactly this content-dependent height).
+            Same flex-column + internal-scroll shape as the Job Inbox
+            detail dialog already uses for the same reason. */}
+        <DialogContent className="flex max-h-[85vh] max-w-lg flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{editingSearchId ? "Edit saved search" : "New saved search"}</DialogTitle>
             <DialogDescription>
               Runs manually via the Run button, and on a cron schedule if you set one below.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
+          <div className="flex flex-col gap-4 overflow-y-auto py-2">
             <div className="grid gap-1.5">
               <Label htmlFor="search-name">Name</Label>
               <Input id="search-name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
@@ -1686,7 +1638,7 @@ export default function RadarPage() {
               )}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button
               variant="outline"
               onClick={() => {

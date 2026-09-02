@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Target, Settings, LogOut, MailWarning, PanelLeft, ChevronUp } from "lucide-react";
+import { Target, Settings, LogOut, MailWarning, PanelLeft, ChevronUp, Menu, X } from "lucide-react";
 import { TierIcon, tierColor } from "@/lib/plan-tiers";
 import { toast } from "sonner";
 import { NAV_ITEMS } from "@/lib/nav";
@@ -61,7 +61,7 @@ function ManagePersonasDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       setNewName("");
       await refreshPersonas();
       setSelectedPersonaId(persona.id);
-      toast.success("Persona created — has its own blank profile, upload a CV in Profile Studio");
+      toast.success("Persona created — has its own blank profile, upload a CV in the Dashboard");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -187,6 +187,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading, logout } = useAuth();
   const { personas, loading, selectedPersonaId, setSelectedPersonaId } = usePersona();
   const [manageOpen, setManageOpen] = React.useState(false);
+  // The desktop rail (below) always participates in layout, sized by
+  // `collapsed`. Below the `lg` breakpoint it's replaced by this
+  // separate off-canvas drawer instead — a permanently-visible 196px
+  // (or even 52px icon-only) rail has no room to give up on a phone
+  // width, so it's `fixed`+off-screen by default there and slides in
+  // over the page instead of squeezing it (raised directly by Adrian:
+  // "make sure every page is responsive... when open in mobile the
+  // layout is adjusted" — this is the one piece of chrome every single
+  // page shares, so it's the first fix).
+  const [mobileOpen, setMobileOpen] = React.useState(false);
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [resendingVerification, setResendingVerification] = React.useState(false);
   const [planName, setPlanName] = React.useState<string | null>(null);
@@ -214,6 +224,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return next;
     });
   }
+
+  // Hovering a COLLAPSED rail temporarily shows it full-width (labels
+  // and all) without touching the persisted `collapsed` preference —
+  // it snaps back to icon-only the moment the pointer leaves. The
+  // toggle button above is the only thing that actually changes
+  // `collapsed` itself, which is what makes an expand "stick" instead
+  // of reverting on mouseleave (raised directly by Adrian). Never
+  // relevant while already expanded, so it's harmless there regardless
+  // of value.
+  const [hoverExpanded, setHoverExpanded] = React.useState(false);
+  const effectiveCollapsed = collapsed && !hoverExpanded;
 
   async function handleResendVerification() {
     setResendingVerification(true);
@@ -282,6 +303,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     else if (user && isAdminRoute && user.role !== "admin") router.replace(AUTHENTICATED_HOME);
   }, [authLoading, user, isNoChromeRoute, isAuthEntryRoute, isAdminRoute, pathname, router]);
 
+  // A route change is the clearest signal navigation actually happened
+  // — closing here (rather than only from each nav Link's own
+  // onClick) also catches back/forward and any programmatic
+  // router.push, so the drawer never stays open covering the page it
+  // just navigated to.
+  React.useEffect(() => {
+    (() => setMobileOpen(false))();
+  }, [pathname]);
+
   // "/", /login and /signup render standalone — no sidebar chrome, since
   // there's nothing authenticated to show yet (or, for "/", nothing that
   // needs to be — it's the public marketing page). No middleware.ts exists
@@ -297,44 +327,90 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return (
-    <div className="flex h-screen">
-      <aside
-        className={cn(
-          "shrink-0 border-r border-border bg-card flex flex-col transition-[width] duration-150",
-          collapsed ? "w-[52px]" : "w-[196px]",
-        )}
-      >
-        {/* Signed-in only by construction (this whole <aside> is never
+  // Shared between the desktop rail and the mobile drawer below — same
+  // content either way. `iconOnly` (labels hidden) is a desktop-only
+  // concept — driven by `effectiveCollapsed` there (the persisted
+  // `collapsed` preference, overridden false while hover-expanded), so
+  // the drawer always calls this with `iconOnly={false}`; `mobile`
+  // swaps the collapse-toggle row for a plain Close button and makes
+  // nav clicks close the drawer.
+  function renderSidebarBody(iconOnly: boolean, mobile = false) {
+    const closeIfMobile = mobile ? () => setMobileOpen(false) : undefined;
+    // TS can't carry the `!user` narrowing from the early return above
+    // across this nested closure (it can't prove `user` — a `const`
+    // from useAuth() — wasn't reassigned by the time this runs, even
+    // though it only ever runs synchronously within the same render) —
+    // re-asserted non-null once here instead of at each use below.
+    const authedUser = user!;
+    return (
+      <>
+        {/* Signed-in only by construction (this whole sidebar is never
             reached before the `!user` early-return above), so this
             always goes to the app's real home now — previously "/"
             sent an already-authenticated user out to the marketing
             landing page (raised by Adrian). */}
-        <Link
-          href="/console"
+        <div
           className={cn(
-            "h-12 flex items-center gap-2 border-b border-border hover:bg-secondary/40",
-            collapsed ? "justify-center px-0" : "px-4",
+            "h-12 flex items-center border-b border-border",
+            iconOnly ? "justify-center px-0" : "px-4",
           )}
         >
-          <Target className="size-4 shrink-0 text-primary" strokeWidth={1.5} />
-          {!collapsed && <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>}
-        </Link>
-
-        <div className="h-6 flex items-center border-b border-border">
-          <button
-            onClick={toggleCollapsed}
-            className="flex-1 h-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/40"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          <Link
+            href="/console"
+            onClick={closeIfMobile}
+            className={cn(
+              "flex items-center gap-2 hover:opacity-80",
+              // `flex-1` alone left nothing for the outer div's own
+              // justify-center to center — this single child had
+              // already stretched to fill the whole row, so the icon
+              // sat flush left instead (raised directly by Adrian).
+              // Collapsed: shrink-to-fit so centering has something to
+              // act on; expanded: back to filling the row as before.
+              iconOnly ? "justify-center" : "flex-1",
+            )}
           >
-            <PanelLeft className="size-3.5" />
-          </button>
-          <div className="flex-1 h-full flex items-center justify-center border-l border-border hover:bg-secondary/40">
-            <ThemeToggle className="size-3.5" />
-          </div>
+            <Target className="size-4 shrink-0 text-primary" strokeWidth={1.5} />
+            {!iconOnly && <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>}
+          </Link>
+          {mobile && (
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Close menu"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </div>
 
-        {!collapsed && (
+        <div className="h-6 flex items-center border-b border-border">
+          {mobile ? (
+            <div className="flex-1 h-full flex items-center justify-center">
+              <ThemeToggle className="size-3.5" />
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={toggleCollapsed}
+                className="flex-1 h-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+                // The real persisted preference, not `iconOnly` — while
+                // hover-expanded (iconOnly is false here, collapsed is
+                // still true), this must say "Expand" and mean it:
+                // clicking commits the hover preview as the new
+                // persisted state, it doesn't collapse what's already
+                // showing expanded.
+                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                <PanelLeft className="size-3.5" />
+              </button>
+              <div className="flex-1 h-full flex items-center justify-center border-l border-border hover:bg-secondary/40">
+                <ThemeToggle className="size-3.5" />
+              </div>
+            </>
+          )}
+        </div>
+
+        {!iconOnly && (
           <div className="px-3 py-2.5 border-b border-border flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">Persona</span>
@@ -380,32 +456,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             if (items.length === 0) return null;
             return (
             <div key={section}>
-              {!collapsed && (
+              {!iconOnly && (
                 <div className="px-4 pt-3.5 pb-1 font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
                   {section}
                 </div>
               )}
               {items.map(
                 (item) => {
-                  const active = pathname.startsWith(item.href);
+                  // Dashboard's own href is the bare "/console" root —
+                  // startsWith would make it match every OTHER
+                  // console page too (they all start with "/console"),
+                  // so it alone needs an exact match; every other item
+                  // is a real subpath, where startsWith is still right
+                  // (e.g. /console/pipeline/live should still light up
+                  // "Application Pipeline").
+                  const active = item.href === "/console" ? pathname === "/console" : pathname.startsWith(item.href);
                   const Icon = item.icon;
                   const showBadge = item.href === "/notifications" && unreadCount > 0;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      title={collapsed ? `${item.label}${showBadge ? ` (${unreadCount})` : ""}` : undefined}
+                      onClick={closeIfMobile}
+                      title={iconOnly ? `${item.label}${showBadge ? ` (${unreadCount})` : ""}` : undefined}
                       className={cn(
                         "flex items-center gap-2 py-1.5 text-sm border-l-2 border-transparent",
-                        collapsed ? "justify-center px-0" : "px-4",
+                        iconOnly ? "justify-center px-0" : "px-4",
                         active
                           ? "bg-accent text-accent-foreground font-medium border-l-primary"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
                       <Icon className="size-3.5 shrink-0" strokeWidth={1.5} />
-                      {!collapsed && <span className="flex-1">{item.label}</span>}
-                      {!collapsed && showBadge && (
+                      {!iconOnly && <span className="flex-1">{item.label}</span>}
+                      {!iconOnly && showBadge && (
                         <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-mono leading-none text-primary-foreground">
                           {unreadCount > 99 ? "99+" : unreadCount}
                         </span>
@@ -419,24 +503,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className={cn("mt-auto border-t border-border", collapsed ? "px-0" : "px-2 py-1")}>
+        <div className={cn("mt-auto border-t border-border", iconOnly ? "px-0" : "px-2 py-1")}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 className={cn(
                   "w-full flex items-center gap-2 py-2 hover:bg-secondary/40",
-                  collapsed ? "justify-center px-0" : "px-2",
+                  iconOnly ? "justify-center px-0" : "px-2",
                 )}
-                title={collapsed ? user.email : undefined}
+                title={iconOnly ? authedUser.email : undefined}
               >
-                <TierIcon planName={planName} showTitle={collapsed ? user.email : undefined} />
-                {!collapsed && (
+                <TierIcon planName={planName} showTitle={iconOnly ? authedUser.email : undefined} />
+                {!iconOnly && (
                   <>
                     <span
                       className="min-w-0 flex-1 truncate text-left text-[11px] font-mono"
                       style={{ color: tierColor(planName) }}
                     >
-                      {user.email}
+                      {authedUser.email}
                     </span>
                     <ChevronUp className="size-3.5 shrink-0 text-muted-foreground" />
                   </>
@@ -444,7 +528,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start" className="w-56">
-              <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
+              <DropdownMenuLabel>{authedUser.email}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
@@ -471,9 +555,74 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="flex h-screen">
+      {/* Mobile-only top bar — the desktop rail below is `hidden` under
+          `lg`, so without this there'd be no way to reach navigation
+          at all on a phone. */}
+      <div className="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-card px-3 lg:hidden">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="text-muted-foreground hover:text-foreground"
+          aria-label="Open menu"
+        >
+          <Menu className="size-4" />
+        </button>
+        <Target className="size-4 text-primary" strokeWidth={1.5} />
+        <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>
+      </div>
+
+      {/* Backdrop — tapping it closes the drawer, same as its own
+          Close button. Sits above FloatingAssistant's own fixed
+          button/panel (z-40/z-50) so the drawer always reads as the
+          topmost thing while it's open. */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-[45] bg-black/40 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Desktop rail — same behavior as before, just now explicitly
+          hidden below `lg` (the drawer takes over there instead of
+          this permanently squeezing `main`'s width). Width (and
+          everything renderSidebarBody hides/shows) is driven by
+          `effectiveCollapsed`, not the raw preference — hovering a
+          collapsed rail previews the expanded width via the same
+          transition the toggle button itself uses, and reverts the
+          instant the pointer leaves unless the toggle was actually
+          clicked meanwhile (raised directly by Adrian). */}
+      <aside
+        onMouseEnter={() => {
+          if (collapsed) setHoverExpanded(true);
+        }}
+        onMouseLeave={() => setHoverExpanded(false)}
+        className={cn(
+          "hidden lg:flex shrink-0 border-r border-border bg-card flex-col transition-[width] duration-150",
+          effectiveCollapsed ? "w-[52px]" : "w-[196px]",
+        )}
+      >
+        {renderSidebarBody(effectiveCollapsed)}
       </aside>
 
-      <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      {/* Mobile drawer — off-canvas by default (`fixed`, so it never
+          participates in the flex row / never takes width away from
+          `main`), slides in over the page instead. */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-[55] flex w-[240px] flex-col border-r border-border bg-card transition-transform duration-200 lg:hidden",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        {renderSidebarBody(false, true)}
+      </aside>
+
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden pt-12 lg:pt-0">
         {user && !user.email_verified && (
           <div className="flex items-center gap-2 border-b border-warn bg-warn/10 px-4 py-1.5 text-xs text-warn">
             <MailWarning className="size-3.5 shrink-0" />

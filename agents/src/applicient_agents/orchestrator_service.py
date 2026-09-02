@@ -192,7 +192,7 @@ async def send_message(
     async with _lock_for(conversation_id):
         async for evt in _drive_turn(
             session_factory, conversation_id=conversation_id, persona_id=persona_id, user_id=user_id,
-            thread_id=thread_id, stream_input={"messages": [("user", text)]},
+            thread_id=thread_id, stream_input={"messages": [("user", text)]}, user_message=text,
         ):
             yield evt
 
@@ -214,13 +214,36 @@ async def resume_message(
         async for evt in _drive_turn(
             session_factory, conversation_id=conversation_id, persona_id=persona_id, user_id=user_id,
             thread_id=thread_id, stream_input=Command(resume={"decisions": decisions}),
+            user_message=_describe_decisions(decisions),
         ):
             yield evt
 
 
+def _describe_decisions(decisions: list[dict]) -> str:
+    """A resume's `decisions` list isn't free text the way a plain
+    message is (`approve`/`reject` carry no message at all), so this
+    reconstructs a human-readable line for the same "message" RunEvent
+    `_drive_turn` writes for an ordinary turn — otherwise an interrupt
+    reply would keep being invisible in history the same way a plain
+    message used to be."""
+    parts = []
+    for d in decisions:
+        kind = d.get("type")
+        if kind == "respond":
+            parts.append(d.get("message", ""))
+        elif kind == "approve":
+            parts.append("Approved.")
+        elif kind == "reject":
+            msg = d.get("message")
+            parts.append(f"Rejected: {msg}" if msg else "Rejected.")
+        else:
+            parts.append(str(d))
+    return " ".join(p for p in parts if p) or "Continue."
+
+
 async def _drive_turn(
     session_factory: sessionmaker, *, conversation_id: uuid.UUID, persona_id: uuid.UUID,
-    user_id: uuid.UUID, thread_id: str, stream_input,
+    user_id: uuid.UUID, thread_id: str, stream_input, user_message: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     if _checkpointer is None:
         yield _error_event("orchestrator checkpointer not initialized — the API did not start up correctly")
@@ -276,6 +299,21 @@ async def _drive_turn(
         # card apart from an ordinary progress line.
         evt = emit("card", {"card_type": card_type, **data})
         progress_queue.put_nowait(evt)
+
+    # The user's own side of the turn was never persisted anywhere —
+    # only the agent's stage/card/interrupt events ever went through
+    # `emit()`. LangGraph's own checkpointer does remember it (that's
+    # how the agent has context across turns), but that state is
+    # invisible to `/conversations/{id}/events`, which only replays
+    # `RunEvent` rows. Reported by Adrian: saved chats only showed the
+    # AI's half after switching conversations or reloading — the human
+    # message had genuinely never been written down. Emitting it here,
+    # first thing, writes it to the same durable log the rest of the
+    # turn uses and streams it back live too, so the sender sees it
+    # exactly the same way a replayed history does (no separate
+    # client-side optimistic copy to keep in sync).
+    if user_message is not None:
+        yield emit("message", {"role": "user", "text": user_message})
 
     try:
         with session_factory() as db:
