@@ -25,7 +25,7 @@ export default function SignupPage() {
     try {
       await signup(email.trim(), password);
       toast.success("Account created — check your email to verify it.");
-      router.replace("/assistant");
+      router.replace("/console");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Signup failed");
     } finally {

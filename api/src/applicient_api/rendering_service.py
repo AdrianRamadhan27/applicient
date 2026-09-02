@@ -26,10 +26,15 @@ from sqlalchemy.orm import sessionmaker
 from applicient_api.cover_letter_engine import CoverLetterOutput
 from applicient_api.latex_rendering import RenderError, compile_tex, generate_cover_letter_tex, generate_tex
 from applicient_api.models.documents import Document
-from applicient_api.models.enums import DocumentType
-from applicient_api.models.profile import Persona, Profile
+from applicient_api.models.enums import DocumentType, EvidenceCategory
+from applicient_api.models.profile import EvidenceItem, Persona, Profile
 from applicient_api.object_storage import get_object, put_object
-from applicient_api.tailoring_engine import TailoringOutput, retrieve_full_evidence_bank
+from applicient_api.tailoring_engine import (
+    TailoredBullet,
+    TailoredSection,
+    TailoringOutput,
+    retrieve_full_evidence_bank,
+)
 
 
 def get_document_tex(
@@ -115,6 +120,62 @@ def get_rendered_pdf(
         if key is None:
             return None
         return get_object(key)
+
+
+def _build_base_cv_delta(evidence_items: list[EvidenceItem], profile: Profile) -> TailoringOutput:
+    """The untailored view of a persona's evidence bank — every real
+    entry, verbatim, with nothing selected, reworded, or omitted (that
+    selection is exactly what real tailoring — tailoring_service.py's
+    tailor_job_group — does; this is deliberately its opposite). Lets
+    the Composer show *something* real before a job group has ever
+    been created/tailored against (raised by Adrian), not a
+    replacement for actual tailoring. A bare `skill`-category item has
+    no bullet-worthy prose of its own (it's just a fact like "Python"),
+    so it only ever contributes to `skills_highlight`, never its own
+    section."""
+
+    sections = [
+        TailoredSection(evidence_id=item.id, bullets=[TailoredBullet(evidence_id=item.id, text=item.text)])
+        for item in evidence_items
+        if item.category != EvidenceCategory.SKILL.value
+    ]
+    skills_highlight: list[str] = []
+    for item in evidence_items:
+        for skill in item.skills or []:
+            if skill not in skills_highlight:
+                skills_highlight.append(skill)
+
+    parsed = profile.parsed_profile or {}
+    return TailoringOutput(
+        summary=parsed.get("summary") or "",
+        sections=sections,
+        skills_highlight=skills_highlight,
+        rationale="Untailored baseline — every evidence item shown as recorded, nothing selected or reworded.",
+    )
+
+
+def render_base_cv(
+    session_factory: sessionmaker, *, persona_id: uuid.UUID, user_id: uuid.UUID, template_id: str
+) -> bytes:
+    """Stateless — no Document row, no object-storage write, nothing
+    persisted or versioned. Recompiled fresh on every call so it
+    always reflects the evidence bank's current state; there's no job
+    group for it to belong to, so there's nothing sensible to persist
+    it against (see Document.job_group_id's own NOT NULL — a
+    deliberate design, not something to work around with a nullable
+    column for this one case)."""
+
+    with session_factory() as db:
+        persona = db.query(Persona).filter_by(id=persona_id, user_id=user_id).one_or_none()
+        if persona is None:
+            raise RenderError(f"persona {persona_id} not found")
+        profile = db.get(Profile, persona.profile_id)
+        header = profile.parsed_profile or {}
+        evidence_items = retrieve_full_evidence_bank(db, profile_id=profile.id)
+        delta = _build_base_cv_delta(evidence_items, profile)
+        tex = generate_tex(template_id, delta=delta, evidence_items=evidence_items, header=header)
+
+    return compile_tex(tex).pdf_bytes
 
 
 def render_document(

@@ -30,7 +30,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(email.trim(), password);
-      router.replace("/assistant");
+      router.replace("/console");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {

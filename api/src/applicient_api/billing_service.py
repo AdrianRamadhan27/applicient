@@ -218,7 +218,7 @@ async def start_checkout(db: Session, *, user: User, subscription: Subscription,
         session = await client.checkout_sessions.create(
             product_cart=[{"product_id": product_id, "quantity": 1}],
             customer={"customer_id": customer_id},
-            return_url=f"{_frontend_url()}/billing?dodo_return=1",
+            return_url=f"{_frontend_url()}/console/billing?dodo_return=1",
             metadata={"user_id": str(user.id), "subscription_id": str(subscription.id)},
         )
     except Exception as exc:

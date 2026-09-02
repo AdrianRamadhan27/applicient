@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 function relatedHref(n: Notification): string | null {
-  if (n.related_type === "application" && n.related_id) return `/pipeline?application_id=${n.related_id}`;
+  if (n.related_type === "application" && n.related_id) return `/console/pipeline?application_id=${n.related_id}`;
   return null;
 }
 

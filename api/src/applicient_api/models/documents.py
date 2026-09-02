@@ -75,6 +75,13 @@ class SkillGapItem(UUIDPKMixin, TimestampMixin, Base):
     evidence_item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("evidence_items.id", ondelete="SET NULL")
     )
+    # Phase 10 (v2 plan) — a generated learning plan for this specific
+    # gap: {resources: [{title, url, kind}], project_ideas: [{title,
+    # description}]}, matching skill_gap_syllabus_engine.py's
+    # SkillGapSyllabusOutput exactly. Null until generated; generating
+    # again simply overwrites (no history kept — this is a disposable
+    # study aid, not a fact about the candidate the way EvidenceItem is).
+    syllabus: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class Document(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
@@ -117,7 +124,9 @@ class Document(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     # the text, that's their call, not the gate's — stated plainly,
     # not silently assumed equivalent to AI-authored content.
     tex_overrides: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    template: Mapped[str] = mapped_column(String(120), nullable=False, default="ats-plain")
+    # Was "ats-plain" — see Persona.base_cv_template's own comment;
+    # same dead default, same fix.
+    template: Mapped[str] = mapped_column(String(120), nullable=False, default="jakes-resume-adrian")
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 

@@ -109,6 +109,18 @@ services:
       # (http://api:8000), it never needs the host-published port.
       # Kept published for host-side debugging (curl/SSH tunnel).
       - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      # Tectonic has no on-disk bundle bundled into the image — the
+      # FIRST compile after a fresh container start downloads its font/
+      # format data (hundreds of MB) from the network before it can
+      # render anything, easily slow enough to time out a request (or
+      # get killed by a container restart mid-download, which is
+      # exactly what a "TypeError: Failed to fetch" on the Composer's
+      # first-ever render after a redeploy looks like from the
+      # browser). Persisting the cache across restarts/rebuilds means
+      # only the very first render on a brand-new box ever pays that
+      # cost again.
+      - tectonic-cache:/root/.cache/Tectonic
     depends_on:
       postgres:
         condition: service_healthy
@@ -221,3 +233,4 @@ volumes:
   miniodata:
   caddydata:
   caddyconfig:
+  tectonic-cache:

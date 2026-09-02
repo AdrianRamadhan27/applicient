@@ -219,7 +219,7 @@ export default function LiveBrowserPage() {
           </span>
         </div>
         <Link
-          href={`/pipeline?application_id=${encodeURIComponent(params.applicationId)}`}
+          href={`/console/pipeline?application_id=${encodeURIComponent(params.applicationId)}`}
           className="text-xs text-primary hover:underline"
         >
           ← Back to Pipeline
@@ -296,7 +296,7 @@ export default function LiveBrowserPage() {
         <div className="shrink-0 border-t border-warn bg-warn/10 p-3 text-xs">
           The agent needs {pendingInterrupt.length} things from you at once — respond from the{" "}
           <Link
-            href={`/pipeline?application_id=${encodeURIComponent(params.applicationId)}`}
+            href={`/console/pipeline?application_id=${encodeURIComponent(params.applicationId)}`}
             className="text-primary hover:underline"
           >
             Pipeline panel

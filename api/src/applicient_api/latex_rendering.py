@@ -84,51 +84,77 @@ class RenderResult:
     log: str
 
 
-def _render_jakes_resume_adrian(
-    *, delta: TailoringOutput, evidence_by_id: dict[uuid.UUID, EvidenceItem], header: dict
+def _render_category_block(
+    title: str, *, delta: TailoringOutput, evidence_by_id: dict[uuid.UUID, EvidenceItem], categories: set[str]
 ) -> str:
-    """Fills renderers/latex_templates/jakes-resume-adrian/resume.tex's
-    macros from a TailoringOutput. Every non-skill evidence category
-    (experience/education/certification/project/achievement) is
-    rendered through the template's generic `\\resumeSubheading` +
-    bullet-list shape rather than the template's own more specific
-    `\\projectSubheading`/`\\certItem` macros — a stated simplification
-    for this first working version, not a claim of pixel-perfect
-    fidelity to the hand-authored original. EvidenceItem has no
-    location field, so the location slot is always left blank."""
+    """One `\\section{...}` block for every delta section whose cited
+    evidence item falls in `categories` — same generic
+    `\\resumeSubheading` + bullet-list shape for every category
+    (experience, education, achievement, certification, project) — a
+    stated simplification (not the template's own more specific
+    `\\projectSubheading`/`\\certItem` macros), but a real one: every
+    category is now actually driven by the tailoring delta rather than
+    only Experience being dynamic and the rest silently discarded.
+    EvidenceItem has no location field, so that slot is always blank.
+    Returns "" (no heading at all) when nothing in the delta matches —
+    an empty `\\section{}` with nothing under it looks broken, not
+    just sparse."""
 
-    template_path = TEMPLATES_DIR / "jakes-resume-adrian" / "resume.tex"
-    skeleton = template_path.read_text()
-
-    # The received template already has its own authored Education/
-    # Achievements/Certifications sections (real data, left untouched
-    # below) — routing every delta section into "Experience"
-    # regardless of the evidence item's real category would mislabel
-    # an education/achievement entry under an "Experience" heading, so
-    # only experience/project/other-categorized evidence lands here.
-    # Regenerating Education/Achievements/Certifications from the
-    # delta too is a real, stated gap for a later pass, not built here.
-    EXPERIENCE_LIKE_CATEGORIES = {"experience", "project", "other"}
-
-    sections_tex = []
+    entries = []
     for section in delta.sections:
         item = evidence_by_id.get(section.evidence_id)
-        if item is None or item.category not in EXPERIENCE_LIKE_CATEGORIES:
+        if item is None or item.category not in categories:
             continue
-        title = latex_escape(item.title or item.employer or "")
+        entry_title = latex_escape(item.title or item.employer or "")
         employer = latex_escape(item.employer or "")
         dates = latex_escape(_format_date_range(item.date_start, item.date_end))
         bullets = "\n".join(f"    \\item\\small{{{latex_escape(b.text)}}}" for b in section.bullets)
-        sections_tex.append(
+        entries.append(
             "  \\resumeSubheading\n"
-            f"    {{{title}}}{{{dates}}}\n"
+            f"    {{{entry_title}}}{{{dates}}}\n"
             f"    {{{employer}}}{{}}\n"
             "  \\resumeBulletList\n"
             f"{bullets}\n"
             "  \\resumeBulletListEnd\n"
         )
-    experience_block = (
-        "\\section{Experience}\n\\resumeSubHeadingList\n" + "\n".join(sections_tex) + "\n\\resumeSubHeadingListEnd\n"
+    if not entries:
+        return ""
+    return f"\\section{{{title}}}\n\\resumeSubHeadingList\n" + "\n".join(entries) + "\n\\resumeSubHeadingListEnd\n"
+
+
+def _render_jakes_resume_adrian(
+    *, delta: TailoringOutput, evidence_by_id: dict[uuid.UUID, EvidenceItem], header: dict
+) -> str:
+    """Fills renderers/latex_templates/jakes-resume-adrian/resume.tex's
+    macros from a TailoringOutput. Every evidence category the delta
+    can cite (experience, education, achievement, certification,
+    project — everything except skill, which has no bullet-worthy
+    prose of its own) gets its own dynamically-generated section now;
+    previously only Experience was — Education/Achievements/
+    Certifications/Projects were the *template's own* hand-authored
+    content (Adrian's real resume, unconditionally, for every user)
+    and anything the tailoring model selected from those categories
+    was silently dropped. Fixed here: the skeleton file itself carries
+    no real personal data any more (see its own header comment), and
+    every section below is populated from the actual evidence bank."""
+
+    template_path = TEMPLATES_DIR / "jakes-resume-adrian" / "resume.tex"
+    skeleton = template_path.read_text()
+
+    experience_block = _render_category_block(
+        "Experience", delta=delta, evidence_by_id=evidence_by_id, categories={"experience", "other"}
+    )
+    education_block = _render_category_block(
+        "Education", delta=delta, evidence_by_id=evidence_by_id, categories={"education"}
+    )
+    achievements_block = _render_category_block(
+        "Achievements", delta=delta, evidence_by_id=evidence_by_id, categories={"achievement"}
+    )
+    certifications_block = _render_category_block(
+        "Certifications \\& Licenses", delta=delta, evidence_by_id=evidence_by_id, categories={"certification"}
+    )
+    projects_block = _render_category_block(
+        "Projects", delta=delta, evidence_by_id=evidence_by_id, categories={"project"}
     )
 
     skills_block = ""
@@ -169,18 +195,19 @@ def _render_jakes_resume_adrian(
 
     summary_block = f"\\section{{Summary}}\n{latex_escape(delta.summary)}\n"
 
-    # The skeleton's own header/summary/experience/skills sections are
-    # replaced wholesale (everything between the fixed HEADER/SUMMARY/
-    # EXPERIENCE/SKILLS markers the received template already has as
-    # plain comments) rather than the education/achievements/
-    # certifications/projects sections below them, which stay as
-    # authored — this delta only ever regenerates the tailored parts,
-    # never invents unrelated CV sections.
+    # Every section between the skeleton's own banner markers is
+    # replaced wholesale — the skeleton carries no real content of its
+    # own any more (see its header comment), just the banner fences
+    # `_replace_between` splices against.
     doc = skeleton
     doc = _replace_between(doc, "%  HEADER", "%  SUMMARY", header_block)
     doc = _replace_between(doc, "%  SUMMARY", "%  EXPERIENCE", summary_block)
     doc = _replace_between(doc, "%  EXPERIENCE", "%  EDUCATION", experience_block)
     doc = _replace_between(doc, "%  SKILLS", "%  LANGUAGES", skills_block)
+    doc = _replace_between(doc, "%  EDUCATION", "%  ACHIEVEMENTS", education_block)
+    doc = _replace_between(doc, "%  ACHIEVEMENTS", "%  CERTIFICATIONS", achievements_block)
+    doc = _replace_between(doc, "%  CERTIFICATIONS", "%  PROJECTS", certifications_block)
+    doc = _replace_between(doc, "%  PROJECTS", "%  END", projects_block)
     return doc
 
 
@@ -202,8 +229,14 @@ def _replace_between(doc: str, start_marker: str, end_marker: str, replacement: 
 
 
 TEMPLATES = {
+    # The dict key/directory name (renderers/latex_templates/jakes-resume-adrian/)
+    # stays as-is — it's an internal id only, persisted on existing
+    # Document.template rows; renaming it would need a data migration
+    # for zero user-facing benefit. "name" below is the only thing a
+    # user ever sees (composer/page.tsx's template <Select> renders
+    # `t.name`, never `t.id`).
     "jakes-resume-adrian": {
-        "name": "Jake's Resume (Adrian)",
+        "name": "ATS 1",
         "description": "A clean, ATS-safe single-column LaTeX resume template.",
         "render": _render_jakes_resume_adrian,
     },
@@ -292,12 +325,28 @@ def compile_tex(tex_source: str) -> RenderResult:
     with tempfile.TemporaryDirectory() as tmp:
         tex_path = Path(tmp) / "document.tex"
         tex_path.write_text(tex_source)
-        proc = subprocess.run(
-            ["tectonic", "--outdir", tmp, str(tex_path)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        try:
+            proc = subprocess.run(
+                ["tectonic", "--outdir", tmp, str(tex_path)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            # Most likely a cold Tectonic bundle download (see
+            # docker-compose.yml's tectonic-cache volume comment) —
+            # previously an unhandled exception here bypassed every
+            # router's `except RenderError` and surfaced as a raw 500
+            # (or, if the container got killed mid-download by a
+            # restart, a connection reset the browser reports as
+            # "TypeError: Failed to fetch").
+            raise RenderError(
+                "PDF compilation timed out after 120s — if this is the first render since a fresh "
+                "deploy/restart, Tectonic may still be downloading its font/format bundle; try again "
+                "in a minute."
+            )
+        except FileNotFoundError:
+            raise RenderError("the tectonic binary is not installed/on PATH in this environment")
         if proc.returncode != 0:
             raise RenderError(f"tectonic compile failed:\n{proc.stderr[-4000:]}")
         pdf_path = Path(tmp) / "document.pdf"

@@ -56,6 +56,28 @@ from applicient_api.tier_resolution import TierResolutionError, resolve_tier
 _checkpointer: AsyncPostgresSaver | None = None
 _checkpointer_cm = None
 _CONVERSATION_LOCKS: dict[uuid.UUID, asyncio.Lock] = {}
+# Stop/cancel button — cooperative, same discipline as radar.py's own
+# `_CANCEL_EVENTS` (real `Task.cancel()` on the in-flight LangGraph
+# step, not a "stop after this checkpoint" flag some future await
+# happens to poll). Keyed by conversation_id, not agent_run_id — the
+# frontend only ever knows the former, and `_lock_for` already
+# guarantees at most one turn/run is live per conversation at a time,
+# so it's an unambiguous key.
+_CANCEL_EVENTS: dict[uuid.UUID, asyncio.Event] = {}
+
+
+def request_cancel(conversation_id: uuid.UUID) -> bool:
+    """True if a live turn was actually signaled to stop; False if none
+    was found (already finished, or the request raced past it) — the
+    caller falls back to marking the run cancelled directly in that
+    case, same two-branch discipline as routers/streaming.py's generic
+    /agent-runs/{id}/cancel."""
+
+    event = _CANCEL_EVENTS.get(conversation_id)
+    if event is None:
+        return False
+    event.set()
+    return True
 
 
 def _psycopg_url() -> str:
@@ -214,6 +236,9 @@ async def _drive_turn(
         db.commit()
         run_id = run.id
 
+    cancel_event = asyncio.Event()
+    _CANCEL_EVENTS[conversation_id] = cancel_event
+
     event_seq = 0
 
     def emit(event_type: str, data: dict) -> dict:
@@ -296,9 +321,32 @@ async def _drive_turn(
         agent_stream = agent.astream(stream_input, config=config)
         agent_task = asyncio.ensure_future(agent_stream.__anext__())
         queue_task = asyncio.ensure_future(progress_queue.get())
+        cancel_task = asyncio.ensure_future(cancel_event.wait())
         try:
             while True:
-                done, _pending = await asyncio.wait({agent_task, queue_task}, return_when=asyncio.FIRST_COMPLETED)
+                done, _pending = await asyncio.wait(
+                    {agent_task, queue_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if cancel_task in done:
+                    # agent_task's own cancellation (a real Task.cancel(),
+                    # not "stop at the next safe checkpoint") happens in
+                    # the `finally` below, same as any other exit from
+                    # this loop — nothing extra needed here beyond
+                    # recording the outcome and stopping.
+                    with session_factory() as db:
+                        cancelled_run = db.get(AgentRun, run_id)
+                        if cancelled_run is not None:
+                            cancelled_run.status = "cancelled"
+                            cancelled_run.finished_at = datetime.now(timezone.utc)
+                            db.commit()
+                        convo = db.get(OrchestratorConversation, conversation_id)
+                        if convo is not None:
+                            convo.pending_interrupt = None
+                            convo.last_active_at = datetime.now(timezone.utc)
+                            db.commit()
+                    reached_terminal_state = True
+                    yield emit("cancelled", {})
+                    return
                 if queue_task in done:
                     yield queue_task.result()
                     queue_task = asyncio.ensure_future(progress_queue.get())
@@ -352,6 +400,9 @@ async def _drive_turn(
             queue_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await queue_task
+            cancel_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_task
             if not agent_task.done():
                 agent_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -387,3 +438,9 @@ async def _drive_turn(
                         db.commit()
             except Exception:
                 pass
+        # This turn's own event, not a stale one from whatever turn
+        # runs next on this same conversation — `_lock_for` guarantees
+        # no other `_drive_turn` is using this key concurrently, but a
+        # leftover entry would still wrongly cancel a future turn the
+        # instant it starts.
+        _CANCEL_EVENTS.pop(conversation_id, None)

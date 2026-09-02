@@ -21,10 +21,12 @@ from applicient_api.routers import (
     applications,
     auth,
     billing,
+    calendar_events,
     company_candidates,
     cost,
     credentials,
     cv,
+    dashboard,
     email_messages,
     evidence,
     gmail,
@@ -145,6 +147,7 @@ app.include_router(jobs.router)
 app.include_router(job_groups.router)
 app.include_router(job_groups.persona_router)
 app.include_router(job_groups.documents_router)
+app.include_router(job_groups.base_cv_router)
 app.include_router(applications.router)
 app.include_router(pipeline_stages.router)
 app.include_router(credentials.router)
@@ -155,3 +158,5 @@ app.include_router(webhooks.router)
 app.include_router(orchestrator.router)
 app.include_router(admin.router)
 app.include_router(billing.router)
+app.include_router(calendar_events.router)
+app.include_router(dashboard.router)

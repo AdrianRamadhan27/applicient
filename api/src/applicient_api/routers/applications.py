@@ -17,11 +17,13 @@ from datetime import datetime, timezone
 import httpx
 import websockets
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from applicient_agents.application_service import (
     BROWSER_WORKER_URL,
+    request_cancel,
     resume_application_attempt,
     start_application_attempt,
 )
@@ -316,6 +318,48 @@ def resume(
             get_session_factory(), attempt_id=attempt_id, user_id=user_id, decisions=decisions
         )
     )
+
+
+@router.post("/{application_id}/attempts/{attempt_id}/cancel")
+def cancel_attempt(
+    application_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """Stop button — cooperative: a real Task.cancel() on whatever the
+    application-agent is doing right now (an LLM call or a live
+    browser-worker tool call) if a live run is still holding this
+    attempt (the common case, via application_service.request_cancel),
+    or a direct DB mark if not (the stream already disconnected on its
+    own — same two-branch discipline as streaming.py's generic
+    /agent-runs/{id}/cancel). Closing the browser-worker session itself
+    only happens on the live path; the fallback has no http client
+    left to do it with, same gap the existing disconnect-cleanup path
+    already has."""
+
+    attempt = _owned_attempt(db, application_id=application_id, attempt_id=attempt_id, user_id=user_id)
+    if attempt.status != "in_progress":
+        raise HTTPException(409, f"attempt is already {attempt.status}, nothing to cancel")
+
+    if not request_cancel(attempt_id):
+        attempt.status = "cancelled"
+        attempt.finished_at = datetime.now(timezone.utc)
+        if attempt.agent_run_id is not None:
+            run = db.get(AgentRun, attempt.agent_run_id)
+            if run is not None and run.status == "running":
+                run.status = "cancelled"
+                run.finished_at = datetime.now(timezone.utc)
+                next_seq = (db.query(func.max(RunEvent.seq)).filter_by(agent_run_id=run.id).scalar() or 0) + 1
+                db.add(
+                    RunEvent(
+                        user_id=user_id, agent_run_id=run.id, seq=next_seq,
+                        event_type="cancelled", data={"attempt_id": str(attempt_id)},
+                    )
+                )
+        db.commit()
+        db.refresh(attempt)
+    return {"status": attempt.status}
 
 
 def _owned_attempt(

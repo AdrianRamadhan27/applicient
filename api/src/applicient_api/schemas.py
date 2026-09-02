@@ -372,7 +372,7 @@ class PersonaOut(BaseModel):
 
 class PersonaCreate(BaseModel):
     name: str
-    base_cv_template: str = "ats-plain"
+    base_cv_template: str = "jakes-resume-adrian"
 
 
 class PersonaUpdate(BaseModel):
@@ -864,6 +864,25 @@ class CoverLetterRequest(BaseModel):
     length: str = "medium"  # short | medium | long
 
 
+class DashboardStageCount(BaseModel):
+    stage: str
+    display_name: str
+    count: int
+
+
+class DashboardDailyActivity(BaseModel):
+    date: str
+    jobs_discovered: int
+    applications_created: int
+
+
+class DashboardSummaryOut(BaseModel):
+    job_count: int
+    document_count: int
+    applications_by_stage: list[DashboardStageCount]
+    daily_activity: list[DashboardDailyActivity]
+
+
 class SkillGapItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -872,6 +891,7 @@ class SkillGapItemOut(BaseModel):
     skill_text: str
     status: str
     evidence_item_id: uuid.UUID | None
+    syllabus: dict | None = None
 
 
 class ClaimVerificationOut(BaseModel):
@@ -947,6 +967,47 @@ class ApplicationEventOut(BaseModel):
     event_type: str
     payload: dict
     occurred_at: datetime
+
+
+CALENDAR_EVENT_TYPES = ("interview", "assessment_deadline", "application_deadline", "custom")
+
+
+class CalendarEventOut(BaseModel):
+    """job_title/company_name mirror ApplicationOut's own denormalization
+    (empty-string default, filled in by the router from a join) — same
+    reasoning: a bare job_id/application_id is useless on a calendar
+    view without knowing what it's actually for."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    application_id: uuid.UUID | None
+    job_id: uuid.UUID | None
+    event_type: str
+    title: str
+    scheduled_at: datetime
+    notes: str | None
+    job_title: str = ""
+    company_name: str = ""
+
+
+class CalendarEventCreate(BaseModel):
+    application_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
+    event_type: str
+    title: str
+    scheduled_at: datetime
+    notes: str | None = None
+
+
+class CalendarEventUpdate(BaseModel):
+    event_type: str | None = None
+    title: str | None = None
+    scheduled_at: datetime | None = None
+    # Nullable and independently settable (unlike job_id, which the
+    # router always re-derives from this) — same reasoning as create.
+    application_id: uuid.UUID | None = None
+    notes: str | None = None
 
 
 class ApplicationAttemptOut(BaseModel):

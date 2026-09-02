@@ -609,7 +609,7 @@ export default function LandingPage() {
     (() => setLocalCurrency(detectCurrency()))();
   }, []);
 
-  const primaryHref = user ? "/assistant" : "/signup";
+  const primaryHref = user ? "/console" : "/signup";
   const primaryLabel = user ? "Go to app" : "Get started free";
 
   return (
@@ -669,7 +669,7 @@ export default function LandingPage() {
             <ThemeToggle />
             {user ? (
               <Button asChild size="sm">
-                <Link href="/assistant">Go to app</Link>
+                <Link href="/console">Go to app</Link>
               </Button>
             ) : (
               <>
@@ -801,7 +801,7 @@ export default function LandingPage() {
                     </span>
                   </div>
                   <Button asChild className="mt-auto">
-                    <Link href={user ? "/billing" : "/signup"}>{user ? "Manage plan" : "Get started"}</Link>
+                    <Link href={user ? "/console/billing" : "/signup"}>{user ? "Manage plan" : "Get started"}</Link>
                   </Button>
                 </div>
               );

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   api,
+  CALENDAR_EVENT_TYPE_LABEL,
   type ConversationCard,
   type EvidenceItem,
   type TailoredDocument,
@@ -49,7 +50,7 @@ export function JobsCard({ card }: { card: Extract<ConversationCard, { card_type
       {card.jobs.map((job) => (
         <Link
           key={job.job_id}
-          href={`/inbox?job_id=${encodeURIComponent(job.job_id)}`}
+          href={`/console/inbox?job_id=${encodeURIComponent(job.job_id)}`}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5 text-xs hover:border-primary transition-colors"
@@ -137,7 +138,7 @@ export function DocumentCard({ card }: { card: Extract<ConversationCard, { card_
           <Badge variant={card.verified ? "default" : "destructive"} className="text-[9px]">
             {card.verified ? "verified" : "not verified"}
           </Badge>
-          <Link href="/composer" target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">
+          <Link href="/console/composer" target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">
             Open in Composer ↗
           </Link>
         </div>
@@ -202,12 +203,12 @@ export function ApplicationCard({ card }: { card: Extract<ConversationCard, { ca
       <div className="flex items-center justify-between gap-2 px-1">
         <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Application</span>
         <div className="flex items-center gap-2 text-[10px]">
-          <Link href={`/pipeline?application_id=${encodeURIComponent(card.application_id)}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+          <Link href={`/console/pipeline?application_id=${encodeURIComponent(card.application_id)}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
             View in Pipeline ↗
           </Link>
           {card.session_id && card.attempt_id && (
             <Link
-              href={`/pipeline/live?application_id=${encodeURIComponent(card.application_id)}&attempt_id=${encodeURIComponent(card.attempt_id)}&session_id=${encodeURIComponent(card.session_id)}`}
+              href={`/console/pipeline/live?application_id=${encodeURIComponent(card.application_id)}&attempt_id=${encodeURIComponent(card.attempt_id)}&session_id=${encodeURIComponent(card.session_id)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary hover:underline"
@@ -231,6 +232,61 @@ export function ApplicationCard({ card }: { card: Extract<ConversationCard, { ca
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+export function DocumentsCard({ card }: { card: Extract<ConversationCard, { card_type: "documents" }> }) {
+  if (card.documents.length === 0) {
+    return (
+      <div className="max-w-[85%] rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
+        No CV documents yet.
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-[85%] rounded-md border border-border bg-card p-2 space-y-1.5">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground px-1">
+        {card.documents.length} CV document{card.documents.length === 1 ? "" : "s"}
+      </div>
+      {card.documents.map((d) => (
+        <Link
+          key={d.document_id}
+          href="/console/composer"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5 text-xs hover:border-primary transition-colors"
+        >
+          <Badge variant={d.verified ? "default" : "destructive"} className="shrink-0 text-[9px] font-mono">
+            {d.verified ? "verified" : "unverified"}
+          </Badge>
+          <div className="min-w-0 flex-1 truncate">{d.job_group_name}</div>
+          <div className="shrink-0 font-mono text-xs text-muted-foreground">v{d.version}</div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+export function CalendarEventCard({ card }: { card: Extract<ConversationCard, { card_type: "calendar_event" }> }) {
+  return (
+    <div className="max-w-[85%] w-full rounded-md border border-border bg-card p-2 space-y-1.5">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          {CALENDAR_EVENT_TYPE_LABEL[card.event_type]}
+        </span>
+        <Link href="/console/calendar" target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">
+          Open in Calendar ↗
+        </Link>
+      </div>
+      <div className="px-1 pb-0.5">
+        <div className="text-sm font-medium">{card.title}</div>
+        <div className="text-xs text-muted-foreground font-mono">
+          {new Date(card.scheduled_at).toLocaleString(undefined, {
+            weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+          })}
+        </div>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,8 @@ is exactly what LangGraph's checkpointer abstraction is for.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import uuid
@@ -48,6 +50,24 @@ BROWSER_WORKER_URL = os.environ.get("BROWSER_WORKER_URL", "http://localhost:8100
 _DAILY_APPLICATION_CAP = int(os.environ.get("DAILY_APPLICATION_CAP", "15"))
 
 _ACTIVE_ATTEMPTS: dict[uuid.UUID, dict] = {}
+# Stop button — same cooperative discipline as orchestrator_service.py's
+# own _CANCEL_EVENTS (a real Task.cancel() on the in-flight LLM/tool
+# call, not a "stop at the next safe point" flag). Keyed by attempt_id,
+# matching _ACTIVE_ATTEMPTS's own key — only one _drive_graph can ever
+# be live for a given attempt at a time.
+_CANCEL_EVENTS: dict[uuid.UUID, asyncio.Event] = {}
+
+
+def request_cancel(attempt_id: uuid.UUID) -> bool:
+    """True if a live run was actually signaled to stop; False if none
+    was found (already finished/paused on an interrupt, or the request
+    raced past it)."""
+
+    event = _CANCEL_EVENTS.get(attempt_id)
+    if event is None:
+        return False
+    event.set()
+    return True
 
 
 def _exc_message(exc: Exception) -> str:
@@ -369,6 +389,9 @@ async def _drive_graph(
         yield _error_event("attempt not found or already finished")
         return
 
+    cancel_event = asyncio.Event()
+    _CANCEL_EVENTS[attempt_id] = cancel_event
+
     def emit(event_type: str, data: dict) -> dict:
         # Every event this generator yields now reliably carries its
         # own attempt_id — "interrupt"/"done" always built it in
@@ -487,8 +510,39 @@ async def _drive_graph(
         # when the graph pauses on an interrupt or finishes is simply
         # never written — nothing left to pair it with in this stream.
         pending_tool_steps: dict[str, dict] = {}
+        agent_task = None
+        cancel_task = None
         try:
-            async for chunk in agent.astream(stream_input, config=config):
+            agent_stream = agent.astream(stream_input, config=config)
+            agent_task = asyncio.ensure_future(agent_stream.__anext__())
+            cancel_task = asyncio.ensure_future(cancel_event.wait())
+            while True:
+                done, _pending = await asyncio.wait({agent_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+                if cancel_task in done:
+                    # A cancelled run has no more use for its browser
+                    # either way — same close=True path a normal finish
+                    # takes. agent_task's own cancellation (a real
+                    # Task.cancel(), not "stop at the next safe point")
+                    # happens in the `finally` below.
+                    await persist_browser_session(http_client, close=True)
+                    with session_factory() as db:
+                        cancelled_attempt = db.get(ApplicationAttempt, attempt_id)
+                        if cancelled_attempt is not None:
+                            cancelled_attempt.status = "cancelled"
+                            cancelled_attempt.finished_at = datetime.now(timezone.utc)
+                        cancelled_run = db.get(AgentRun, state["run_id"])
+                        if cancelled_run is not None:
+                            cancelled_run.status = "cancelled"
+                            cancelled_run.finished_at = datetime.now(timezone.utc)
+                        db.commit()
+                    reached_terminal_state = True
+                    yield emit("cancelled", {"attempt_id": str(attempt_id)})
+                    return
+                try:
+                    chunk = agent_task.result()
+                except StopAsyncIteration:
+                    break
+
                 if "__interrupt__" in chunk:
                     interrupt_obj = chunk["__interrupt__"][0]
                     action_requests = interrupt_obj.value["action_requests"]
@@ -579,6 +633,8 @@ async def _drive_graph(
                                         )
                                     )
                                     db.commit()
+
+                agent_task = asyncio.ensure_future(agent_stream.__anext__())
             # Graph finished with no further interrupt — read back the
             # real outcome (Application.state) rather than guessing it
             # from which decision was last given; `application_transition`
@@ -622,6 +678,14 @@ async def _drive_graph(
             reached_terminal_state = True
             yield emit("error", {"message": error_message})
         finally:
+            if cancel_task is not None:
+                cancel_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await cancel_task
+            if agent_task is not None and not agent_task.done():
+                agent_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await agent_task
             if not reached_terminal_state:
                 try:
                     with session_factory() as db:
@@ -639,3 +703,8 @@ async def _drive_graph(
                     pass
             if not keep_active_state:
                 _ACTIVE_ATTEMPTS.pop(attempt_id, None)
+            # This run's own event, not a stale one from a later resume
+            # of the same attempt — that call registers its own fresh
+            # cancel_event, so a leftover entry here would do nothing
+            # except leak.
+            _CANCEL_EVENTS.pop(attempt_id, None)

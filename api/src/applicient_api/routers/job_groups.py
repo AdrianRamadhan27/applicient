@@ -39,12 +39,14 @@ from applicient_api.rendering_service import (
     clear_document_tex_override,
     get_document_tex,
     get_rendered_pdf,
+    render_base_cv,
     render_document,
     save_document_tex_override,
 )
 from applicient_api.skill_gap_service import (
     SkillGapError,
     complete_skill_gap_item,
+    generate_syllabus,
     reopen_skill_gap_item,
     sync_skill_gap_items,
 )
@@ -55,12 +57,37 @@ from applicient_api.tier_resolution import TierResolutionError, active_model_pro
 router = APIRouter(prefix="/job-groups", tags=["job-groups"])
 persona_router = APIRouter(prefix="/personas/{persona_id}/job-groups", tags=["job-groups"])
 documents_router = APIRouter(prefix="/documents", tags=["documents"])
+base_cv_router = APIRouter(prefix="/personas/{persona_id}/base-cv", tags=["documents"])
 
 
 @documents_router.get("/templates")
 def list_templates(doc_type: str = "cv"):
     registry = COVER_LETTER_TEMPLATES if doc_type == "cover_letter" else TEMPLATES
     return [{"id": tid, "name": t["name"], "description": t["description"]} for tid, t in registry.items()]
+
+
+@base_cv_router.post("")
+def render_base_cv_route(
+    persona_id: uuid.UUID,
+    template_id: str,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """An untailored baseline CV straight from the persona's evidence
+    bank, so the Composer shows something real before any job group
+    exists to tailor against (raised by Adrian). Stateless by design —
+    see render_base_cv's own docstring for why this is never persisted
+    as a Document."""
+
+    if db.query(Persona).filter_by(id=persona_id, user_id=user_id).one_or_none() is None:
+        raise HTTPException(404, "persona not found")
+    try:
+        pdf_bytes = render_base_cv(
+            get_session_factory(), persona_id=persona_id, user_id=user_id, template_id=template_id
+        )
+    except RenderError as exc:
+        raise HTTPException(422, str(exc))
+    return Response(content=pdf_bytes, media_type="application/pdf")
 
 
 @documents_router.get("/{document_id}", response_model=schemas.DocumentOut)
@@ -362,6 +389,33 @@ def reopen_skill_gap(
         return reopen_skill_gap_item(db, group=group, item_id=item_id)
     except SkillGapError as exc:
         raise HTTPException(404, str(exc))
+
+
+@router.post(
+    "/{group_id}/skill-gap/{item_id}/generate-syllabus",
+    response_model=schemas.SkillGapItemOut,
+    dependencies=[Depends(rate_limit("skill-gap-syllabus", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+)
+def generate_skill_gap_syllabus(
+    group_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """Phase 10 (v2 plan) — a real LLM call (rate-limited/cap-gated
+    like tailor/cover-letter/answer-pack above), but a single-shot one
+    with no verify/regenerate loop, so a plain request/response is
+    enough — no SSE stage stream needed the way those three have."""
+
+    group = _owned_group(db, group_id, user_id)
+    try:
+        return generate_syllabus(
+            db, group=group, item_id=item_id, user_id=user_id, session_factory=get_session_factory()
+        )
+    except SkillGapError as exc:
+        raise HTTPException(404, str(exc))
+    except TierResolutionError as exc:
+        raise HTTPException(422, f"model routing not configured: {exc}")
 
 
 @router.get("/{group_id}/documents", response_model=list[schemas.DocumentOut])

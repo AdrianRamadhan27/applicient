@@ -32,7 +32,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ChatLog, type LogItem } from "@/components/chat-log";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, ChevronUp, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, Settings, Square } from "lucide-react";
 
 // Detail panel width — draggable, persisted per-browser (first use of
 // localStorage in this file; persona-provider.tsx's selectedPersonaId
@@ -87,12 +87,12 @@ export default function PipelinePage() {
 
   function openApplication(id: string) {
     setSelectedId(id);
-    router.replace(`/pipeline?application_id=${encodeURIComponent(id)}`, { scroll: false });
+    router.replace(`/console/pipeline?application_id=${encodeURIComponent(id)}`, { scroll: false });
   }
 
   function closeApplication() {
     setSelectedId(null);
-    router.replace("/pipeline", { scroll: false });
+    router.replace("/console/pipeline", { scroll: false });
   }
 
   const [stages, setStages] = React.useState<PipelineStage[]>([]);
@@ -473,6 +473,14 @@ function ApplicationDetailPanel({
   const [decisionDrafts, setDecisionDrafts] = React.useState<Record<number, InterruptDecision>>({});
   const [respondMessage, setRespondMessage] = React.useState("");
   const [running, setRunning] = React.useState(false);
+  // Whichever attempt the live stream is currently attributing its own
+  // events to — set from the FIRST event that carries one (every event
+  // does, per application_service.py's own `emit`), not just once a
+  // browser session opens (liveBrowser's own signal is much later than
+  // "there's now a real attempt_id to cancel"). Needed for the Stop
+  // button, which cancels a specific attempt, not just "whatever's running".
+  const [currentAttemptId, setCurrentAttemptId] = React.useState<string | null>(null);
+  const [cancelling, setCancelling] = React.useState(false);
 
   // F6.7's review-before-submit: the live field-by-field snapshot for
   // whichever session a pending submit_application interrupt names —
@@ -616,6 +624,7 @@ function ApplicationDetailPanel({
       };
     }
     if (evt.type === "done") return { kind: "system", text: "✓ run finished" };
+    if (evt.type === "cancelled") return { kind: "system", text: "⏹ stopped" };
     return { kind: "error", text: evt.message };
   }
 
@@ -648,6 +657,7 @@ function ApplicationDetailPanel({
 
   async function consume(gen: AsyncGenerator<ApplicationStreamEvent>) {
     for await (const evt of gen) {
+      if ("attempt_id" in evt && evt.attempt_id) setCurrentAttemptId(evt.attempt_id);
       appendLog(toLogItem(evt));
       if (evt.type === "stage" && evt.stage === "browser" && evt.status === "session_opened" && evt.session_id && evt.attempt_id) {
         setLiveBrowser({ attemptId: evt.attempt_id, sessionId: evt.session_id });
@@ -664,12 +674,31 @@ function ApplicationDetailPanel({
         await load();
         onChanged();
         return;
+      } else if (evt.type === "cancelled") {
+        setPendingInterrupt(null);
+        setRunning(false);
+        setCancelling(false);
+        await load();
+        onChanged();
+        return;
       } else if (evt.type === "error") {
         toast.error(evt.message);
         setRunning(false);
+        setCancelling(false);
         await load();
         return;
       }
+    }
+  }
+
+  async function handleCancelRun() {
+    if (!currentAttemptId) return;
+    setCancelling(true);
+    try {
+      await api.cancelApplicationAttempt(applicationId, currentAttemptId);
+    } catch (e) {
+      toast.error(String(e));
+      setCancelling(false);
     }
   }
 
@@ -733,6 +762,7 @@ function ApplicationDetailPanel({
     setLog([]);
     setRunning(true);
     setLiveBrowser(null);
+    setCurrentAttemptId(null);
     await consume(api.streamApply(applicationId));
   }
 
@@ -740,6 +770,7 @@ function ApplicationDetailPanel({
     if (!pendingInterrupt) return;
     setRunning(true);
     const attemptId = pendingInterrupt.attemptId;
+    setCurrentAttemptId(attemptId);
     setPendingInterrupt(null);
     setDecisionDrafts({});
     await consume(api.streamResumeApplication(applicationId, attemptId, decisions));
@@ -869,16 +900,23 @@ function ApplicationDetailPanel({
         </div>
 
         <div className="flex gap-2 flex-wrap">
-          <Button size="sm" onClick={handleRunAgent} disabled={running || !!pendingInterrupt}>
-            {running ? "Running…" : pendingInterrupt ? "Awaiting your input above" : "Run agent"}
-          </Button>
+          {running ? (
+            <Button size="sm" variant="destructive" onClick={handleCancelRun} disabled={cancelling || !currentAttemptId}>
+              <Square className="size-3 fill-current" />
+              {cancelling ? "Stopping…" : "Stop"}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleRunAgent} disabled={!!pendingInterrupt}>
+              {pendingInterrupt ? "Awaiting your input above" : "Run agent"}
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={handleMarkApplied}>
             Mark applied
           </Button>
           {liveBrowser && (running || !!pendingInterrupt) && (
             <Button size="sm" variant="outline" asChild>
               <a
-                href={`/pipeline/live?application_id=${encodeURIComponent(applicationId)}&attempt_id=${encodeURIComponent(
+                href={`/console/pipeline/live?application_id=${encodeURIComponent(applicationId)}&attempt_id=${encodeURIComponent(
                   liveBrowser.attemptId,
                 )}&session_id=${encodeURIComponent(liveBrowser.sessionId)}`}
                 target="_blank"

@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/lib/auth";
 import { PersonaProvider } from "@/components/persona-provider";
+import { ConversationProvider } from "@/lib/conversation-provider";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -71,8 +72,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthProvider>
             <PersonaProvider>
-              <AppShell>{children}</AppShell>
-              <Toaster />
+              <ConversationProvider>
+                <AppShell>{children}</AppShell>
+                <Toaster />
+              </ConversationProvider>
             </PersonaProvider>
           </AuthProvider>
         </ThemeProvider>

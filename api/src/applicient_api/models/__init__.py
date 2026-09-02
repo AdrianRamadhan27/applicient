@@ -5,6 +5,7 @@ from applicient_api.db import Base  # noqa: F401
 from applicient_api.models import (  # noqa: F401
     agents,
     billing,
+    calendar,
     credentials,
     discovery,
     documents,

@@ -67,21 +67,31 @@ Default guided sequence — a working plan, not a script:
    came back verified; a document that failed verification after 2 attempts is a real blocker to \
    surface plainly, not something to silently retry a third time (the underlying service hard-caps \
    at 2).
-6. Call create_application_for_job for each job you're actually applying to, then \
-   run_application_agent. The moment that tool returns anything other than a clean finish, stop — \
-   tell the human plainly where to go (the Pipeline page, or its Live Browser view for a login/ \
-   captcha handoff) to resolve it themselves. You do not, and cannot, resolve that pause yourself. \
-   Use check_application_attempt_status on a later turn if asked how it's going — never re-run \
-   run_application_agent just to check.
+6. Call create_application_for_job for each job you're actually applying to — pass document_id \
+   (from list_cv_documents/tailoring-agent's own result) whenever a specific tailored CV should be \
+   what gets used, rather than leaving it to fall back on whatever the job group last produced. \
+   Then run_application_agent. The moment that tool returns anything other than a clean finish, \
+   stop — tell the human plainly where to go (the Pipeline page, or its Live Browser view for a \
+   login/captcha handoff) to resolve it themselves. You do not, and cannot, resolve that pause \
+   yourself. Use check_application_attempt_status on a later turn if asked how it's going — never \
+   re-run run_application_agent just to check. If an application already exists and the human just \
+   wants to attach or swap which CV it uses, call attach_cv_to_application directly instead of \
+   create_application_for_job.
 
 Rules that apply throughout, not just at one step:
 - You are always allowed to skip, reorder, or revisit a step whose real state already covers it — \
   check before redoing work (e.g. preferences already set, a saved search already active).
 - For a plain "what do I have" question — saved searches, what's in the Job Inbox, where \
-  applications stand in the Pipeline, or how much of this month's usage cap is left — answer \
-  directly with list_saved_searches, list_job_inbox, list_pipeline, or get_usage_status. These are \
-  read-only lookups, not part of the guided sequence above; use them any time, in any order, \
-  without asking permission first.
+  applications stand in the Pipeline, how much of this month's usage cap is left, what's on the \
+  calendar, or which job groups/CVs exist — answer directly with list_saved_searches, \
+  list_job_inbox, list_pipeline, get_usage_status, list_calendar_events, list_job_groups, or \
+  list_cv_documents. These are read-only lookups, not part of the guided sequence above; use them \
+  any time, in any order, without asking permission first.
+- If the human asks to schedule something (an interview, a deadline, a reminder), see/show/view a \
+  CV, or change a CV's LaTeX directly (remove a section, reword something, adjust formatting), use \
+  create_calendar_event, show_cv, or edit_cv_latex (get the real document_id from \
+  list_cv_documents first) rather than describing how they'd do it themselves or claiming you \
+  can't show it — show_cv renders a real preview inline in this chat.
 - Call ask_user at most once per response, and only for a genuinely blocking, ambiguous decision, \
   or to confirm before a real-cost step (tailoring, running the application agent) actually starts. \
   Ordinary clarifying questions are just your normal reply — wait for the human's next message, \
@@ -137,8 +147,11 @@ def build_orchestrator_agent(
         model=model,
         tools=_subset(
             "get_preferences", "update_preferences",
-            "create_application_for_job", "run_application_agent", "check_application_attempt_status",
+            "create_application_for_job", "attach_cv_to_application",
+            "run_application_agent", "check_application_attempt_status",
             "list_saved_searches", "list_job_inbox", "list_pipeline", "get_usage_status",
+            "list_calendar_events", "create_calendar_event",
+            "list_job_groups", "list_cv_documents", "show_cv", "edit_cv_latex",
             "ask_user",
         ),
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,

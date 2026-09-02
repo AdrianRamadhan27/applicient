@@ -229,12 +229,18 @@ export type ClaimVerification = {
 
 export type CvTemplate = { id: string; name: string; description: string };
 
+// Phase 10 (v2 plan) — mirrors skill_gap_syllabus_engine.SkillGapSyllabusOutput.
+export type SyllabusResource = { title: string; url: string; kind: string };
+export type SyllabusProjectIdea = { title: string; description: string };
+export type SkillGapSyllabus = { resources: SyllabusResource[]; project_ideas: SyllabusProjectIdea[] };
+
 export type SkillGapItem = {
   id: string;
   job_group_id: string;
   skill_text: string;
   status: "pending" | "done";
   evidence_item_id: string | null;
+  syllabus: SkillGapSyllabus | null;
 };
 
 export type TailorProgressEvent =
@@ -765,6 +771,30 @@ export type ApplicationEvent = {
   occurred_at: string;
 };
 
+// Phase 9 (v2 plan) — Calendar. Mirrors schemas.CALENDAR_EVENT_TYPES.
+export const CALENDAR_EVENT_TYPES = ["interview", "assessment_deadline", "application_deadline", "custom"] as const;
+
+export type CalendarEventType = (typeof CALENDAR_EVENT_TYPES)[number];
+
+export const CALENDAR_EVENT_TYPE_LABEL: Record<CalendarEventType, string> = {
+  interview: "Interview",
+  assessment_deadline: "Assessment deadline",
+  application_deadline: "Application deadline",
+  custom: "Custom",
+};
+
+export type CalendarEvent = {
+  id: string;
+  application_id: string | null;
+  job_id: string | null;
+  event_type: CalendarEventType;
+  title: string;
+  scheduled_at: string;
+  notes: string | null;
+  job_title: string;
+  company_name: string;
+};
+
 export type ApplicationAttempt = {
   id: string;
   application_id: string;
@@ -802,6 +832,7 @@ export type ApplicationStreamEvent =
   // common case is a one-item array.
   | { type: "interrupt"; attempt_id: string; requests: InterruptRequest[] }
   | { type: "done"; attempt_id: string }
+  | { type: "cancelled"; attempt_id: string }
   | { type: "error"; message: string };
 
 export function toApplicationStreamEvent(
@@ -870,12 +901,24 @@ export type ConversationCard =
       verified: boolean;
       job_group_id: string | null;
     }
-  | { card_type: "application"; application_id: string; attempt_id: string | null; session_id: string | null };
+  | { card_type: "application"; application_id: string; attempt_id: string | null; session_id: string | null }
+  | {
+      card_type: "calendar_event";
+      calendar_event_id: string;
+      title: string;
+      event_type: CalendarEventType;
+      scheduled_at: string;
+    }
+  | {
+      card_type: "documents";
+      documents: { document_id: string; job_group_name: string; version: number; verified: boolean }[];
+    };
 
 export type ConversationStreamEvent =
   | { type: "stage"; stage: string; status: string; message: string }
   | { type: "interrupt"; requests: InterruptRequest[] }
   | { type: "done" }
+  | { type: "cancelled" }
   | { type: "error"; message: string }
   | ({ type: "card" } & ConversationCard);
 
@@ -927,6 +970,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   return res.json();
 }
+
+// Phase 14 (v2 plan) — the /console dashboard home's stats.
+export type DashboardStageCount = { stage: string; display_name: string; count: number };
+export type DashboardDailyActivity = { date: string; jobs_discovered: number; applications_created: number };
+export type DashboardSummary = {
+  job_count: number;
+  document_count: number;
+  applications_by_stage: DashboardStageCount[];
+  daily_activity: DashboardDailyActivity[];
+};
 
 export const api = {
   signup: (email: string, password: string) =>
@@ -1203,6 +1256,23 @@ export const api = {
   ) =>
     request<SavedSearch>(`/saved-searches/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSavedSearch: (id: string) => request<void>(`/saved-searches/${id}`, { method: "DELETE" }),
+
+  listCalendarEvents: () => request<CalendarEvent[]>("/calendar-events"),
+  createCalendarEvent: (body: {
+    application_id?: string | null;
+    job_id?: string | null;
+    event_type: CalendarEventType;
+    title: string;
+    scheduled_at: string;
+    notes?: string | null;
+  }) => request<CalendarEvent>("/calendar-events", { method: "POST", body: JSON.stringify(body) }),
+  updateCalendarEvent: (
+    id: string,
+    body: Partial<Pick<CalendarEvent, "event_type" | "title" | "scheduled_at" | "notes">> & {
+      application_id?: string | null;
+    },
+  ) => request<CalendarEvent>(`/calendar-events/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteCalendarEvent: (id: string) => request<void>(`/calendar-events/${id}`, { method: "DELETE" }),
   listSavedSearchRuns: (id: string, limit = 5) =>
     request<AgentRunSummary[]>(`/saved-searches/${id}/runs?limit=${limit}`),
   listSavedSearchJobs: (id: string, limit = 50) =>
@@ -1282,6 +1352,8 @@ export const api = {
     request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/complete`, { method: "POST" }),
   reopenSkillGapItem: (groupId: string, itemId: string) =>
     request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/reopen`, { method: "POST" }),
+  generateSkillGapSyllabus: (groupId: string, itemId: string) =>
+    request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/generate-syllabus`, { method: "POST" }),
   listTemplates: (docType: "cv" | "cover_letter" = "cv") =>
     request<CvTemplate[]>(`/documents/templates?doc_type=${docType}`),
   listDocumentVerifications: (documentId: string) =>
@@ -1293,6 +1365,19 @@ export const api = {
   async renderDocument(documentId: string, templateId: string): Promise<Blob> {
     const res = await fetch(
       `${API_BASE_URL}/documents/${documentId}/render?template_id=${encodeURIComponent(templateId)}`,
+      { method: "POST", headers: authHeader() },
+    );
+    if (!res.ok) throw new Error(`render failed: ${res.status}: ${await res.text()}`);
+    return res.blob();
+  },
+
+  /** An untailored CV straight from the persona's evidence bank — no
+   * job group required. Stateless: nothing is persisted server-side,
+   * so this always recompiles fresh and there's no `getRendered`
+   * counterpart to restore from. */
+  async renderBaseCv(personaId: string, templateId: string): Promise<Blob> {
+    const res = await fetch(
+      `${API_BASE_URL}/personas/${personaId}/base-cv?template_id=${encodeURIComponent(templateId)}`,
       { method: "POST", headers: authHeader() },
     );
     if (!res.ok) throw new Error(`render failed: ${res.status}: ${await res.text()}`);
@@ -1484,6 +1569,7 @@ export const api = {
       if (event === "stage") yield { type: "stage", ...payload };
       else if (event === "interrupt") yield { type: "interrupt", ...payload };
       else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "cancelled") yield { type: "cancelled", ...payload };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
   },
@@ -1503,9 +1589,17 @@ export const api = {
       if (event === "stage") yield { type: "stage", ...payload };
       else if (event === "interrupt") yield { type: "interrupt", ...payload };
       else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "cancelled") yield { type: "cancelled", ...payload };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
   },
+  /** Stop button — see application_service.request_cancel for what
+   * actually happens server-side. Fire-and-forget from the caller's
+   * point of view: the in-flight streamApply/streamResumeApplication
+   * generator (if one is still being read) is what surfaces the
+   * resulting "cancelled" event, not this call's own response. */
+  cancelApplicationAttempt: (applicationId: string, attemptId: string) =>
+    request<{ status: string }>(`/applications/${applicationId}/attempts/${attemptId}/cancel`, { method: "POST" }),
 
   /** One-shot fetch of an attempt's full persisted log — for viewing a
    * *finished* attempt's history (any earlier attempt_number, not just
@@ -1648,6 +1742,7 @@ export const api = {
       if (event === "stage") yield { type: "stage", ...payload };
       else if (event === "interrupt") yield { type: "interrupt", ...payload };
       else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "cancelled") yield { type: "cancelled", ...payload };
       else if (event === "error") yield { type: "error", message: payload.message };
       else if (event === "card") yield { type: "card", ...payload };
     }
@@ -1669,10 +1764,18 @@ export const api = {
       if (event === "stage") yield { type: "stage", ...payload };
       else if (event === "interrupt") yield { type: "interrupt", ...payload };
       else if (event === "done") yield { type: "done", ...payload };
+      else if (event === "cancelled") yield { type: "cancelled", ...payload };
       else if (event === "error") yield { type: "error", message: payload.message };
       else if (event === "card") yield { type: "card", ...payload };
     }
   },
+
+  /** Stop button — see orchestrator_service.request_cancel for what
+   * actually happens server-side. Fire-and-forget: the in-flight
+   * streamOrchestratorMessage/Resume generator (if one is still being
+   * read) is what surfaces the resulting "cancelled" event. */
+  cancelOrchestratorRun: (conversationId: string) =>
+    request<Conversation>(`/orchestrator/conversations/${conversationId}/cancel`, { method: "POST" }),
 
   /** Full replay — a conversation's whole event history is small
    * (turns x tens of events, not radar's thousands), so unlike the
@@ -1703,6 +1806,8 @@ export const api = {
   unsuspendUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/unsuspend`, { method: "POST" }),
   promoteUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/promote`, { method: "POST" }),
   demoteUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/demote`, { method: "POST" }),
+
+  getDashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
 
   listBillingPlans: () => request<Plan[]>("/billing/plans"),
   getMySubscription: () => request<Subscription>("/billing/subscription"),

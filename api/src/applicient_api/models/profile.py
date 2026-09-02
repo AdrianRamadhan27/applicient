@@ -90,7 +90,13 @@ class Persona(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
         UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    base_cv_template: Mapped[str] = mapped_column(String(120), nullable=False, default="ats-plain")
+    # Was "ats-plain" — a template id that was never actually
+    # implemented (latex_rendering.TEMPLATES only ever had
+    # "jakes-resume-adrian"/"ATS 1"), silently unrenderable via this
+    # default until a user explicitly picked a real template in
+    # Composer at least once. Fixed to point at a template that
+    # actually exists; see migration for the backfill on existing rows.
+    base_cv_template: Mapped[str] = mapped_column(String(120), nullable=False, default="jakes-resume-adrian")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # M2 §1 — mirrors Profile.revision: bumped whenever this persona's
     # Preference changes, so FitScore/PrefilterResult can stamp what

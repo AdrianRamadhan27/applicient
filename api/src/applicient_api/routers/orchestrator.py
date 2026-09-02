@@ -7,14 +7,17 @@ two streaming endpoints (thin route: ownership check, then hand off to
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
 from applicient_agents.orchestrator_service import (
     archive_conversation as _archive_conversation,
     create_conversation as _create_conversation,
+    request_cancel,
     resume_message,
     send_message,
 )
@@ -124,6 +127,39 @@ def post_resume(
     return EventSourceResponse(
         resume_message(get_session_factory(), conversation_id=conversation_id, user_id=user_id, decisions=decisions)
     )
+
+
+@router.post("/conversations/{conversation_id}/cancel", response_model=schemas.ConversationOut)
+def cancel_conversation_turn(
+    conversation_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    """Stop button — cooperative: a real Task.cancel() on the in-flight
+    LLM call if a live generator is still holding this conversation's
+    turn (the common case, via orchestrator_service.request_cancel),
+    or a direct DB mark if not (the stream already disconnected on its
+    own — same two-branch discipline as streaming.py's generic
+    /agent-runs/{id}/cancel)."""
+
+    convo = _owned_conversation(db, conversation_id, user_id)
+    run = (
+        db.query(AgentRun)
+        .filter_by(conversation_id=conversation_id, user_id=user_id, status="running")
+        .order_by(AgentRun.started_at.desc())
+        .first()
+    )
+    if run is None:
+        raise HTTPException(409, "nothing running on this conversation to cancel")
+
+    if not request_cancel(conversation_id):
+        run.status = "cancelled"
+        run.finished_at = datetime.now(timezone.utc)
+        convo.pending_interrupt = None
+        convo.last_active_at = datetime.now(timezone.utc)
+        next_seq = (db.query(func.max(RunEvent.seq)).filter_by(agent_run_id=run.id).scalar() or 0) + 1
+        db.add(RunEvent(user_id=user_id, agent_run_id=run.id, seq=next_seq, event_type="cancelled", data={}))
+        db.commit()
+        db.refresh(convo)
+    return convo
 
 
 @router.get("/conversations/{conversation_id}/events", response_model=schemas.ConversationEventsOut)

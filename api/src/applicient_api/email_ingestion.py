@@ -35,12 +35,15 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
+from dateutil import parser as date_parser
+from dateutil import tz as date_tz
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
 
 from applicient_api import gmail_service, notification_service, pipeline_service, pipeline_stage_service
 from applicient_api.gmail_service import GMAIL_API_ROOT
 from applicient_api.llm_retry import invoke_structured_with_retry
+from applicient_api.models.calendar import CalendarEvent
 from applicient_api.models.discovery import Job
 from applicient_api.models.email import EmailMessage
 from applicient_api.models.enums import ApplicationState, EmailClassification, EventActor, LedgerSource
@@ -74,6 +77,16 @@ _NOTIFY_CLASSIFICATIONS: dict[str, str] = {
     EmailClassification.INTERVIEW_INVITE.value: "Interview invite",
     EmailClassification.ASSESSMENT_INVITE.value: "Assessment invite",
     EmailClassification.OFFER.value: "Offer",
+}
+# Phase 9 (v2 plan) — which of the two extraction-eligible, date-bearing
+# classifications gets a CalendarEvent, and what type it gets. Offer
+# isn't included: offers don't carry a "show up at this time" date the
+# way an interview/assessment does (extraction has no offer-specific
+# deadline field). scheduling_request is deliberately excluded too — it
+# precedes a real invite, not the event itself.
+_CALENDAR_EVENT_TYPE: dict[str, str] = {
+    EmailClassification.INTERVIEW_INVITE.value: "interview",
+    EmailClassification.ASSESSMENT_INVITE.value: "assessment_deadline",
 }
 
 
@@ -260,6 +273,30 @@ def _extract(session: Session, session_factory: sessionmaker, *, user_id: uuid.U
     return result
 
 
+def _parse_calendar_datetime(extraction: EmailExtractionOutput, *, received_at: datetime) -> datetime | None:
+    """Best-effort — the LLM extraction gives free-text date/time
+    strings, not guaranteed ISO. Returns None (so no CalendarEvent
+    gets created) rather than guessing when nothing parseable came
+    back; `default=received_at` fills in whatever date/time component
+    the text didn't specify (e.g. just "Tuesday at 2pm") from when the
+    email itself arrived, not from whatever day this code happens to
+    run on."""
+
+    raw = extraction.date or extraction.deadline
+    if not raw:
+        return None
+    if extraction.time:
+        raw = f"{raw} {extraction.time}"
+    try:
+        parsed = date_parser.parse(raw, fuzzy=True, default=received_at)
+    except (ValueError, OverflowError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        tzinfo = date_tz.gettz(extraction.timezone) if extraction.timezone else None
+        parsed = parsed.replace(tzinfo=tzinfo or timezone.utc)
+    return parsed
+
+
 async def _process_message(
     session: Session, session_factory: sessionmaker, *, user_id: uuid.UUID, email_msg: EmailMessage, body: str,
     valid_stage_keys: set[str],
@@ -292,6 +329,20 @@ async def _process_message(
     if classification_result.classification in _EXTRACTION_CLASSIFICATIONS:
         extraction = await to_thread(_extract, session, session_factory, user_id=user_id, subject=subject, body=body)
         email_msg.extracted_data = extraction.model_dump(exclude_none=True)
+
+        calendar_event_type = _CALENDAR_EVENT_TYPE.get(classification_result.classification)
+        if calendar_event_type:
+            scheduled_at = _parse_calendar_datetime(extraction, received_at=email_msg.received_at)
+            if scheduled_at:
+                job = session.get(Job, app.job_id)
+                job_label = f"{job.title} at {job.company_name_raw}" if job else "your application"
+                event_label = "Interview" if calendar_event_type == "interview" else "Assessment deadline"
+                session.add(CalendarEvent(
+                    user_id=user_id, application_id=app.id, job_id=app.job_id,
+                    event_type=calendar_event_type, title=f"{event_label}: {job_label}",
+                    scheduled_at=scheduled_at,
+                    notes=f"Auto-detected from email: {subject}" if subject else "Auto-detected from email",
+                ))
 
     new_state = _CLASSIFICATION_TO_STATE.get(classification_result.classification)
     if new_state and new_state not in valid_stage_keys:

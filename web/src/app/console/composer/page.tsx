@@ -44,7 +44,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, Download, Sparkles, Check, Loader2, Pencil, RotateCcw, X, Copy, Send } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Download,
+  Sparkles,
+  Check,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  X,
+  Copy,
+  Send,
+  GraduationCap,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  FileText,
+} from "lucide-react";
 
 const VERDICT_VARIANT: Record<ClaimVerdict, "default" | "secondary" | "destructive"> = {
   supported: "default",
@@ -262,8 +279,128 @@ const COVER_LETTER_LENGTHS: { value: CoverLetterLength; label: string }[] = [
   { value: "long", label: "Long (~400-450 words)" },
 ];
 
+/** Shown before any job group has been created/selected — an
+ * untailored CV straight from Profile Studio's evidence bank, so
+ * there's something real to look at/export immediately rather than
+ * an empty "select a job group" screen (raised by Adrian). Fully
+ * self-contained/stateless on the server side (api.renderBaseCv never
+ * persists anything), so this component's own state is deliberately
+ * separate from the rest of ComposerPage's tailored-per-group state
+ * machine rather than woven into it. */
+function BaseCvPanel({ personaId }: { personaId: string }) {
+  const [templates, setTemplates] = React.useState<CvTemplate[]>([]);
+  const [templateId, setTemplateId] = React.useState("");
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = React.useState<Blob | null>(null);
+  const [rendering, setRendering] = React.useState(false);
+
+  const render = React.useCallback(
+    async (tplId: string) => {
+      if (!tplId) return;
+      setRendering(true);
+      try {
+        const blob = await api.renderBaseCv(personaId, tplId);
+        setPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
+        setPreviewBlob(blob);
+      } catch (e) {
+        toast.error(String(e));
+      } finally {
+        setRendering(false);
+      }
+    },
+    [personaId],
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (() =>
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      }))();
+    (() => setPreviewBlob(null))();
+    (async () => {
+      try {
+        const tpls = await api.listTemplates();
+        if (cancelled) return;
+        setTemplates(tpls);
+        const first = tpls[0]?.id ?? "";
+        setTemplateId(first);
+        if (first) await render(first);
+      } catch (e) {
+        toast.error(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personaId]);
+
+  function handleExport() {
+    if (!previewBlob) return;
+    const url = URL.createObjectURL(previewBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cv-base.pdf";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Base CV</h2>
+        <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+          An untailored CV straight from your Profile Studio evidence bank — every entry, as recorded, nothing
+          selected or reworded for a specific role yet. Create a job group above and generate a tailored CV once
+          you have specific jobs to target.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Select
+          value={templateId}
+          onValueChange={(v) => {
+            setTemplateId(v);
+            void render(v);
+          }}
+        >
+          <SelectTrigger className="w-56 h-8 text-xs">
+            <SelectValue placeholder="Template" />
+          </SelectTrigger>
+          <SelectContent>
+            {templates.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button size="sm" variant="secondary" onClick={() => render(templateId)} disabled={rendering || !templateId}>
+          {rendering ? "Rendering…" : "Refresh"}
+        </Button>
+        <Button size="sm" onClick={handleExport} disabled={!previewBlob}>
+          <Download className="size-4" />
+          Export
+        </Button>
+      </div>
+      <div className="border border-border rounded-md overflow-hidden bg-muted/30 max-w-2xl" style={{ height: 600 }}>
+        {previewUrl ? (
+          <iframe src={previewUrl} className="w-full h-full" title="Base CV preview" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground font-mono">
+            {rendering ? "Rendering…" : "No evidence yet — add some in Profile Studio"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CoverLetterPanel({ groupId }: { groupId: string }) {
-  const [enabled, setEnabled] = React.useState(false);
   const [docs, setDocs] = React.useState<TailoredDocument[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [verifications, setVerifications] = React.useState<ClaimVerification[]>([]);
@@ -287,7 +424,6 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
   const latestAttempt = verifications.reduce((max, v) => Math.max(max, v.attempt_number), 0);
 
   React.useEffect(() => {
-    if (!enabled) return;
     (async () => {
       try {
         const [d, tpls] = await Promise.all([
@@ -302,7 +438,7 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
         toast.error(String(e));
       }
     })();
-  }, [enabled, groupId]);
+  }, [groupId]);
 
   React.useEffect(() => {
     (async () => {
@@ -442,14 +578,8 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
   }
 
   return (
-    <div className="border-t border-border pt-4">
-      <label className="flex items-center gap-2 text-sm cursor-pointer">
-        <Checkbox checked={enabled} onCheckedChange={(v) => setEnabled(Boolean(v))} />
-        Include a cover letter (optional, generated on request)
-      </label>
-
-      {enabled && (
-        <div className="mt-3 space-y-3">
+    <div className="pt-2">
+      <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Select value={tone} onValueChange={(v) => setTone(v as CoverLetterTone)}>
               <SelectTrigger className="w-44 h-8 text-xs">
@@ -614,7 +744,6 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }
@@ -626,7 +755,6 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
 // "ready-to-copy" means copy-paste into a web form, not a PDF.
 
 function AnswerPackPanel({ groupId }: { groupId: string }) {
-  const [enabled, setEnabled] = React.useState(false);
   const [docs, setDocs] = React.useState<TailoredDocument[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [verifications, setVerifications] = React.useState<ClaimVerification[]>([]);
@@ -639,7 +767,6 @@ function AnswerPackPanel({ groupId }: { groupId: string }) {
   const latestAttempt = verifications.reduce((max, v) => Math.max(max, v.attempt_number), 0);
 
   React.useEffect(() => {
-    if (!enabled) return;
     (async () => {
       try {
         const d = await api.listGroupDocuments(groupId, "answer_pack");
@@ -649,7 +776,7 @@ function AnswerPackPanel({ groupId }: { groupId: string }) {
         toast.error(String(e));
       }
     })();
-  }, [enabled, groupId]);
+  }, [groupId]);
 
   React.useEffect(() => {
     (async () => {
@@ -709,14 +836,8 @@ function AnswerPackPanel({ groupId }: { groupId: string }) {
   }
 
   return (
-    <div className="border-t border-border pt-4">
-      <label className="flex items-center gap-2 text-sm cursor-pointer">
-        <Checkbox checked={enabled} onCheckedChange={(v) => setEnabled(Boolean(v))} />
-        Answer Pack (optional — paste real screening questions, get evidence-grounded answers)
-      </label>
-
-      {enabled && (
-        <div className="mt-3 space-y-3">
+    <div className="pt-2">
+      <div className="space-y-3">
           <div>
             <Label className="text-xs">Screening questions (one per line, from the real application)</Label>
             <textarea
@@ -798,7 +919,6 @@ function AnswerPackPanel({ groupId }: { groupId: string }) {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }
@@ -823,6 +943,8 @@ export default function ComposerPage() {
   const [verifications, setVerifications] = React.useState<ClaimVerification[]>([]);
   const [showOlderAttempts, setShowOlderAttempts] = React.useState(false);
   const [skillGap, setSkillGap] = React.useState<SkillGapItem[]>([]);
+  const [generatingSyllabusId, setGeneratingSyllabusId] = React.useState<string | null>(null);
+  const [expandedSyllabusId, setExpandedSyllabusId] = React.useState<string | null>(null);
   const [templates, setTemplates] = React.useState<CvTemplate[]>([]);
   const [templateId, setTemplateId] = React.useState<string>("");
 
@@ -832,12 +954,6 @@ export default function ComposerPage() {
   const [rendering, setRendering] = React.useState(false);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = React.useState<Blob | null>(null);
-
-  const [editingTex, setEditingTex] = React.useState(false);
-  const [texValue, setTexValue] = React.useState("");
-  const [texIsEdited, setTexIsEdited] = React.useState(false);
-  const [loadingTex, setLoadingTex] = React.useState(false);
-  const [savingTex, setSavingTex] = React.useState(false);
 
   const [editDelta, setEditDelta] = React.useState<TailoringDelta | null>(null);
   const [savingDelta, setSavingDelta] = React.useState(false);
@@ -908,7 +1024,6 @@ export default function ComposerPage() {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(null);
       setPreviewBlob(null);
-      setEditingTex(false);
       if (!selectedGroupId) {
         setDocuments([]);
         setSelectedDocId(null);
@@ -923,7 +1038,6 @@ export default function ComposerPage() {
   React.useEffect(() => {
     (async () => {
       setShowOlderAttempts(false);
-      setEditingTex(false);
       if (!selectedDocId) {
         setVerifications([]);
         setEditDelta(null);
@@ -1022,7 +1136,7 @@ export default function ComposerPage() {
         job_group_id: selectedGroup.id,
         ...(selectedDoc ? { primary_document_id: selectedDoc.id } : {}),
       });
-      router.push(`/pipeline?application_id=${application.id}`);
+      router.push(`/console/pipeline?application_id=${application.id}`);
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -1048,6 +1162,10 @@ export default function ComposerPage() {
               ? "Tailored CV generated and verified"
               : "Tailored CV generated — some claims could not be verified, export is blocked",
           );
+          // Preview starts automatically — the user only needs to
+          // press Preview themselves after an edit, not after every
+          // fresh generation (raised by Adrian).
+          await renderPreviewFor(event.result);
         }
       }
     } catch (e) {
@@ -1093,12 +1211,18 @@ export default function ComposerPage() {
     return updated;
   }
 
-  async function handleRenderPreview() {
-    if (!selectedDoc || !templateId) return;
+  /** Shared by the manual Preview button and the auto-render right
+   * after a tailored CV finishes generating — takes the document
+   * explicitly rather than reading `selectedDoc` so the just-generated
+   * doc renders immediately without waiting on a state update/re-render
+   * to land first (calling this straight after `setSelectedDocId` in
+   * the same tick would otherwise still see the PREVIOUS `selectedDoc`
+   * from this render's closure). */
+  async function renderPreviewFor(doc: TailoredDocument) {
+    if (!templateId) return;
     setRendering(true);
     try {
-      await persistDeltaIfDirty();
-      const blob = await api.renderDocument(selectedDoc.id, templateId);
+      const blob = await api.renderDocument(doc.id, templateId);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
@@ -1110,6 +1234,19 @@ export default function ComposerPage() {
     }
   }
 
+  async function handleRenderPreview() {
+    if (!selectedDoc || !templateId) return;
+    setRendering(true);
+    try {
+      await persistDeltaIfDirty();
+    } catch (e) {
+      toast.error(String(e));
+      setRendering(false);
+      return;
+    }
+    await renderPreviewFor(selectedDoc);
+  }
+
   function handleExport() {
     if (!previewBlob || !selectedDoc) return;
     const url = URL.createObjectURL(previewBlob);
@@ -1118,54 +1255,6 @@ export default function ComposerPage() {
     a.download = `cv-${selectedGroup?.name ?? "tailored"}-v${selectedDoc.version}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
-  }
-
-  async function handleOpenTexEditor() {
-    if (!selectedDoc || !templateId) return;
-    setLoadingTex(true);
-    setEditingTex(true);
-    try {
-      const { tex, is_edited } = await api.getDocumentTex(selectedDoc.id, templateId);
-      setTexValue(tex);
-      setTexIsEdited(is_edited);
-    } catch (e) {
-      toast.error(String(e));
-      setEditingTex(false);
-    } finally {
-      setLoadingTex(false);
-    }
-  }
-
-  async function handleSaveTex() {
-    if (!selectedDoc || !templateId) return;
-    setSavingTex(true);
-    try {
-      await api.saveDocumentTex(selectedDoc.id, templateId, texValue);
-      setTexIsEdited(true);
-      toast.success("Saved — this hand-edited version won't be overwritten by regenerating");
-      await handleRenderPreview();
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setSavingTex(false);
-    }
-  }
-
-  async function handleResetTex() {
-    if (!selectedDoc || !templateId) return;
-    setSavingTex(true);
-    try {
-      await api.clearDocumentTex(selectedDoc.id, templateId);
-      const { tex } = await api.getDocumentTex(selectedDoc.id, templateId);
-      setTexValue(tex);
-      setTexIsEdited(false);
-      toast.success("Reset to the AI-generated draft");
-      await handleRenderPreview();
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setSavingTex(false);
-    }
   }
 
   async function handleSaveDelta() {
@@ -1202,6 +1291,20 @@ export default function ComposerPage() {
     }
   }
 
+  async function handleGenerateSyllabus(item: SkillGapItem) {
+    if (!selectedGroup) return;
+    setGeneratingSyllabusId(item.id);
+    try {
+      const updated = await api.generateSkillGapSyllabus(selectedGroup.id, item.id);
+      setSkillGap((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setExpandedSyllabusId(updated.id);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setGeneratingSyllabusId(null);
+    }
+  }
+
   const busy = tailoring || reverifying;
   const shownVerifications = verifications.filter(
     (v) => showOlderAttempts || v.attempt_number === latestAttempt,
@@ -1224,6 +1327,16 @@ export default function ComposerPage() {
         <div className="flex-1 flex overflow-hidden">
           {/* Job groups sidebar */}
           <div className="w-64 shrink-0 border-r border-border overflow-y-auto p-3 space-y-2">
+            <button
+              onClick={() => setSelectedGroupId(null)}
+              className={`flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-sm text-left ${
+                !selectedGroupId ? "bg-muted font-medium" : "hover:bg-muted/50 text-muted-foreground"
+              }`}
+            >
+              <FileText className="size-3.5 shrink-0" />
+              Base CV
+            </button>
+            <Separator />
             <div className="flex items-center justify-between px-1">
               <span className="text-xs font-semibold text-muted-foreground uppercase">Job groups</span>
               <Button size="icon" variant="ghost" className="size-6" onClick={() => setNewGroupOpen(true)}>
@@ -1264,9 +1377,13 @@ export default function ComposerPage() {
 
           {/* Main panel */}
           {!selectedGroup ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground font-mono">
-              Select a job group
-            </div>
+            selectedPersonaId ? (
+              <BaseCvPanel personaId={selectedPersonaId} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground font-mono">
+                Select a job group
+              </div>
+            )
           ) : (
             <div className="flex-1 overflow-y-auto p-5 space-y-6">
               <div>
@@ -1315,22 +1432,109 @@ export default function ComposerPage() {
 
               <Separator />
 
+              {/* CV / Cover Letter / Answer Pack as real tabs, not one
+                  long scroll — raised by Adrian: a lengthy CV
+                  verification report pushed Cover Letter out of reach
+                  below it. Each document type keeps its own generate
+                  + preview flow, just switched between instead of
+                  stacked. */}
+              <Tabs defaultValue="cv">
+                <TabsList>
+                  <TabsTrigger value="cv">CV</TabsTrigger>
+                  <TabsTrigger value="cover-letter">Cover Letter</TabsTrigger>
+                  <TabsTrigger value="answer-pack">Answer Pack</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="cv" className="space-y-6">
               {/* Skill-gap checklist */}
               {skillGap.length > 0 && (
                 <div>
                   <h3 className="text-sm font-semibold mb-2">Skill gap for this group</h3>
                   <div className="space-y-1.5">
-                    {skillGap.map((item) => (
-                      <label key={item.id} className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={item.status === "done"}
-                          onCheckedChange={() => handleToggleSkillGap(item)}
-                        />
-                        <span className={item.status === "done" ? "line-through text-muted-foreground" : ""}>
-                          {item.skill_text}
-                        </span>
-                      </label>
-                    ))}
+                    {skillGap.map((item) => {
+                      const expanded = expandedSyllabusId === item.id;
+                      const generating = generatingSyllabusId === item.id;
+                      return (
+                        <div key={item.id}>
+                          <div className="flex items-center gap-2 text-sm">
+                            <label className="flex items-center gap-2 flex-1 min-w-0">
+                              <Checkbox
+                                checked={item.status === "done"}
+                                onCheckedChange={() => handleToggleSkillGap(item)}
+                              />
+                              <span className={item.status === "done" ? "line-through text-muted-foreground" : ""}>
+                                {item.skill_text}
+                              </span>
+                            </label>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[11px] text-muted-foreground shrink-0"
+                              disabled={generating}
+                              onClick={() =>
+                                item.syllabus
+                                  ? setExpandedSyllabusId(expanded ? null : item.id)
+                                  : handleGenerateSyllabus(item)
+                              }
+                            >
+                              {generating ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : item.syllabus ? (
+                                expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
+                              ) : (
+                                <GraduationCap className="size-3" />
+                              )}
+                              {generating ? "Generating…" : item.syllabus ? "Learning plan" : "Generate learning plan"}
+                            </Button>
+                          </div>
+
+                          {expanded && item.syllabus && (
+                            <div className="ml-6 mt-1.5 mb-2 rounded-md border border-border bg-muted/30 p-2.5 space-y-2 text-xs">
+                              <div>
+                                <div className="font-semibold text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+                                  Resources
+                                </div>
+                                <ul className="space-y-1">
+                                  {item.syllabus.resources.map((r, i) => (
+                                    <li key={i}>
+                                      <a
+                                        href={r.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                      >
+                                        {r.title}
+                                        <ExternalLink className="size-2.5" />
+                                      </a>
+                                      <span className="text-muted-foreground"> · {r.kind}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <div className="font-semibold text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+                                  Project ideas
+                                </div>
+                                <ul className="space-y-1 list-disc pl-4">
+                                  {item.syllabus.project_ideas.map((p, i) => (
+                                    <li key={i}>
+                                      <span className="font-medium">{p.title}</span> — {p.description}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <button
+                                className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                                disabled={generating}
+                                onClick={() => handleGenerateSyllabus(item)}
+                              >
+                                Regenerate
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Checking a skill off adds it to your evidence bank as self-attested, so future CVs can
@@ -1488,16 +1692,6 @@ export default function ComposerPage() {
                       <Button size="sm" variant="secondary" onClick={handleRenderPreview} disabled={rendering}>
                         {rendering ? "Rendering…" : "Preview"}
                       </Button>
-                      {!editingTex ? (
-                        <Button size="sm" variant="ghost" onClick={handleOpenTexEditor} disabled={!templateId}>
-                          <Pencil className="size-4" />
-                          Edit LaTeX
-                        </Button>
-                      ) : (
-                        <Button size="sm" variant="ghost" onClick={() => setEditingTex(false)}>
-                          Close editor
-                        </Button>
-                      )}
                       <Button
                         size="sm"
                         onClick={handleExport}
@@ -1508,57 +1702,36 @@ export default function ComposerPage() {
                         Export
                       </Button>
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      Want to change the LaTeX directly — remove a section, reword something, adjust formatting?
+                      Ask the Assistant in chat (it can list your CVs and edit one&apos;s LaTeX per your instruction).
+                    </p>
 
-                    {editingTex ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-muted-foreground">
-                            The AI-generated CV is a draft — edit the LaTeX source directly if you don&apos;t like
-                            something.{" "}
-                            {texIsEdited && <span className="font-medium text-foreground">Hand-edited.</span>}
-                          </p>
-                          {texIsEdited && (
-                            <Button size="sm" variant="ghost" onClick={handleResetTex} disabled={savingTex}>
-                              <RotateCcw className="size-3.5" />
-                              Reset to AI draft
-                            </Button>
-                          )}
+                    <div
+                      className="border border-border rounded-md overflow-hidden bg-muted/30"
+                      style={{ height: 600 }}
+                    >
+                      {previewUrl ? (
+                        <iframe src={previewUrl} className="w-full h-full" title="CV preview" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground font-mono">
+                          Choose a template and click Preview
                         </div>
-                        {loadingTex ? (
-                          <div className="text-xs text-muted-foreground font-mono">Loading…</div>
-                        ) : (
-                          <textarea
-                            value={texValue}
-                            onChange={(e) => setTexValue(e.target.value)}
-                            className="w-full font-mono text-xs border border-border rounded-md p-2 bg-background"
-                            style={{ height: 560 }}
-                            spellCheck={false}
-                          />
-                        )}
-                        <Button size="sm" onClick={handleSaveTex} disabled={savingTex || loadingTex}>
-                          {savingTex ? "Saving…" : "Save & preview"}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div
-                        className="border border-border rounded-md overflow-hidden bg-muted/30"
-                        style={{ height: 600 }}
-                      >
-                        {previewUrl ? (
-                          <iframe src={previewUrl} className="w-full h-full" title="CV preview" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground font-mono">
-                            Choose a template and click Preview
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
-              <CoverLetterPanel groupId={selectedGroup.id} />
-              <AnswerPackPanel groupId={selectedGroup.id} />
+                </TabsContent>
+
+                <TabsContent value="cover-letter">
+                  <CoverLetterPanel groupId={selectedGroup.id} />
+                </TabsContent>
+                <TabsContent value="answer-pack">
+                  <AnswerPackPanel groupId={selectedGroup.id} />
+                </TabsContent>
+              </Tabs>
             </div>
           )}
         </div>

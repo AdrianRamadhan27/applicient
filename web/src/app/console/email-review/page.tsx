@@ -84,7 +84,7 @@ function ReviewRow({
       {appDetail ? (
         <div className="text-xs border-t border-border pt-2 flex items-center justify-between gap-3">
           <div>
-            <Link href={`/pipeline?application_id=${appDetail.id}`} className="underline hover:text-foreground">
+            <Link href={`/console/pipeline?application_id=${appDetail.id}`} className="underline hover:text-foreground">
               {appDetail.job_title} — {appDetail.company_name}
             </Link>
             {proposal ? (

@@ -36,7 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import { Layers, Plus, Search, Send, Sparkles, Trash2, X } from "lucide-react";
 
 // Skills come straight from the model's own free-form output, not a
 // controlled vocabulary — sometimes that's a real short skill name,
@@ -169,7 +169,7 @@ function JobDetailDrawer({
       // existing row if this job already has one), so this is safe to
       // click again on a job you've already added — it just reopens it.
       const application: Application = await api.createApplication({ job_id: jobId, persona_id: personaId });
-      router.push(`/pipeline?application_id=${application.id}`);
+      router.push(`/console/pipeline?application_id=${application.id}`);
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -765,6 +765,12 @@ export default function InboxPage() {
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [deleting, setDeleting] = React.useState(false);
   const [addJobOpen, setAddJobOpen] = React.useState(false);
+  const [addingToPipeline, setAddingToPipeline] = React.useState(false);
+  const [groupDialogOpen, setGroupDialogOpen] = React.useState(false);
+  const [jobGroupsForBulk, setJobGroupsForBulk] = React.useState<JobGroup[]>([]);
+  const [bulkTargetGroupId, setBulkTargetGroupId] = React.useState("");
+  const [bulkNewGroupName, setBulkNewGroupName] = React.useState("");
+  const [addingToGroupBulk, setAddingToGroupBulk] = React.useState(false);
 
   const [recFilter, setRecFilter] = React.useState<Set<Recommendation | "unscored">>(new Set());
   const [sourceFilter, setSourceFilter] = React.useState<string>("");
@@ -842,12 +848,12 @@ export default function InboxPage() {
 
   function openJobDetail(jobId: string) {
     setSelectedJobId(jobId);
-    router.replace(`/inbox?job_id=${encodeURIComponent(jobId)}`, { scroll: false });
+    router.replace(`/console/inbox?job_id=${encodeURIComponent(jobId)}`, { scroll: false });
   }
 
   function closeJobDetail() {
     setSelectedJobId(null);
-    router.replace("/inbox", { scroll: false });
+    router.replace("/console/inbox", { scroll: false });
   }
 
   function submitSearch() {
@@ -896,6 +902,76 @@ export default function InboxPage() {
       toast.error(String(e));
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleBulkAddToPipeline() {
+    if (selectedIds.size === 0 || !personaId) return;
+    setAddingToPipeline(true);
+    // create_application is idempotent server-side (same as the
+    // single-job path in JobDetailDrawer) — safe to loop over jobs
+    // that already have an Application, it just leaves them as-is.
+    // Individual failures are reported but don't stop the rest.
+    let succeeded = 0;
+    for (const jobId of selectedIds) {
+      try {
+        await api.createApplication({ job_id: jobId, persona_id: personaId });
+        succeeded++;
+      } catch (e) {
+        toast.error(String(e));
+      }
+    }
+    setAddingToPipeline(false);
+    setSelectedIds(new Set());
+    if (succeeded > 0) toast.success(`Added ${succeeded} job${succeeded === 1 ? "" : "s"} to Pipeline`);
+  }
+
+  function openGroupDialog() {
+    if (!personaId) return;
+    setBulkTargetGroupId("");
+    setBulkNewGroupName("");
+    setGroupDialogOpen(true);
+    (async () => {
+      try {
+        setJobGroupsForBulk(await api.listJobGroups(personaId));
+      } catch (e) {
+        toast.error(String(e));
+      }
+    })();
+  }
+
+  async function handleBulkAddToGroup() {
+    if (!personaId || selectedIds.size === 0) return;
+    setAddingToGroupBulk(true);
+    try {
+      if (bulkTargetGroupId) {
+        let succeeded = 0;
+        for (const jobId of selectedIds) {
+          try {
+            await api.addJobGroupMember(bulkTargetGroupId, jobId);
+            succeeded++;
+          } catch (e) {
+            toast.error(String(e));
+          }
+        }
+        if (succeeded > 0) toast.success(`Added ${succeeded} job${succeeded === 1 ? "" : "s"} to the group`);
+      } else {
+        if (!bulkNewGroupName.trim()) {
+          toast.error("Enter a name for the new group");
+          return;
+        }
+        const group = await api.createJobGroup(personaId, {
+          name: bulkNewGroupName.trim(),
+          job_ids: Array.from(selectedIds),
+        });
+        toast.success(`Created "${group.name}" with ${selectedIds.size} job${selectedIds.size === 1 ? "" : "s"}`);
+      }
+      setSelectedIds(new Set());
+      setGroupDialogOpen(false);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setAddingToGroupBulk(false);
     }
   }
 
@@ -966,16 +1042,36 @@ export default function InboxPage() {
                 </span>
               </div>
               {selectedIds.size > 0 && (
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  disabled={deleting}
-                  onClick={handleDeleteSelected}
-                  className="h-7 text-xs gap-1.5"
-                >
-                  <Trash2 className="size-3.5" />
-                  {deleting ? "Deleting…" : `Delete ${selectedIds.size}`}
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    disabled={addingToPipeline}
+                    onClick={handleBulkAddToPipeline}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    <Send className="size-3.5" />
+                    {addingToPipeline ? "Adding…" : `Add ${selectedIds.size} to Pipeline`}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={openGroupDialog}
+                    className="h-7 text-xs gap-1.5 border-ok text-ok hover:bg-ok-bg hover:text-ok"
+                  >
+                    <Layers className="size-3.5" />
+                    Add {selectedIds.size} to job group
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={deleting}
+                    onClick={handleDeleteSelected}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    <Trash2 className="size-3.5" />
+                    {deleting ? "Deleting…" : `Delete ${selectedIds.size}`}
+                  </Button>
+                </>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1214,6 +1310,64 @@ export default function InboxPage() {
           setSelectedJobId(job.id);
         }}
       />
+
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Add {selectedIds.size} job{selectedIds.size === 1 ? "" : "s"} to a job group
+            </DialogTitle>
+            <DialogDescription>
+              Job groups are what Composer tailors one CV against — pick an existing one or create a new one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {jobGroupsForBulk.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Existing group</Label>
+                <Select
+                  value={bulkTargetGroupId}
+                  onValueChange={(v) => {
+                    setBulkTargetGroupId(v);
+                    setBulkNewGroupName("");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a group" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {jobGroupsForBulk.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name} ({g.job_ids.length} job{g.job_ids.length === 1 ? "" : "s"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label>{jobGroupsForBulk.length > 0 ? "Or create a new group" : "New group name"}</Label>
+              <Input
+                value={bulkNewGroupName}
+                onChange={(e) => {
+                  setBulkNewGroupName(e.target.value);
+                  setBulkTargetGroupId("");
+                }}
+                placeholder="e.g. Backend roles"
+                onKeyDown={(e) => e.key === "Enter" && handleBulkAddToGroup()}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleBulkAddToGroup}
+              disabled={addingToGroupBulk || (!bulkTargetGroupId && !bulkNewGroupName.trim())}
+            >
+              {addingToGroupBulk ? "Adding…" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

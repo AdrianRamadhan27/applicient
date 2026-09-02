@@ -13,11 +13,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from applicient_api.embedding_service import embed_evidence_items
+from applicient_api.models.discovery import Job
 from applicient_api.models.documents import JobGroup, JobGroupMember, SkillGapItem
 from applicient_api.models.enums import EvidenceCategory
 from applicient_api.models.profile import EvidenceItem, Persona
 from applicient_api.models.scoring import FitScore
-from applicient_api.tier_resolution import TierResolutionError, resolve_embedding_tier
+from applicient_api.skill_gap_syllabus_engine import run_syllabus_generation
+from applicient_api.tier_resolution import TierResolutionError, resolve_embedding_tier, resolve_tier
 
 
 class SkillGapError(Exception):
@@ -144,6 +146,42 @@ def reopen_skill_gap_item(db: Session, *, group: JobGroup, item_id: uuid.UUID) -
 
     item.status = "pending"
     item.evidence_item_id = None
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def generate_syllabus(
+    db: Session,
+    *,
+    group: JobGroup,
+    item_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_factory: sessionmaker,
+    agent_run_id: uuid.UUID | None = None,
+) -> SkillGapItem:
+    """Phase 10 (v2 plan) — a short reference-links + project-ideas
+    plan for one gap, generated fresh each call (overwrites any prior
+    syllabus rather than versioning it — see the model's own comment
+    for why). `job_context` grounds the recommendation in the actual
+    roles this skill was flagged against, not just the bare skill name
+    in isolation."""
+
+    item = db.query(SkillGapItem).filter_by(id=item_id, job_group_id=group.id).one_or_none()
+    if item is None:
+        raise SkillGapError(f"skill gap item {item_id} not found in group {group.id}")
+
+    member_job_ids = [m.job_id for m in db.query(JobGroupMember).filter_by(job_group_id=group.id).all()]
+    jobs = db.query(Job).filter(Job.id.in_(member_job_ids)).all() if member_job_ids else []
+    job_context = "\n".join(f"- {j.title} at {j.company_name_raw}" for j in jobs) or "(no job context available)"
+
+    model = resolve_tier(
+        db, user_id=user_id, tier="balanced", stage="skill-gap-syllabus",
+        agent_run_id=agent_run_id, session_factory=session_factory,
+    )
+    output = run_syllabus_generation(model, skill_text=item.skill_text, job_context=job_context)
+
+    item.syllabus = output.model_dump(mode="json")
     db.commit()
     db.refresh(item)
     return item

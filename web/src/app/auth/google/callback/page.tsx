@@ -29,7 +29,7 @@ export default function GoogleCallbackPage() {
     (async () => {
       try {
         await loginWithToken(token);
-        router.replace("/assistant");
+        router.replace("/console");
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }

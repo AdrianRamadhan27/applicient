@@ -1,3 +1,21 @@
+% ──────────────────────────────────────────────────────────────────
+%  THIS IS A LIVE TEMPLATE, NOT A SAMPLE CV.
+%
+%  api/src/applicient_api/latex_rendering.py's `_render_jakes_resume_adrian`
+%  reads this file at render time and splices real content into every
+%  banner-fenced section below (`_replace_between`) — every section is
+%  replaced unconditionally on every render, so nothing between a pair
+%  of banners here is ever actually shown to a user. It stays empty
+%  deliberately: this file used to carry one real person's real resume
+%  content (name, employers, degrees, certifications) as "placeholder"
+%  data for the Education/Achievements/Certifications/Projects
+%  sections specifically, which the renderer did NOT regenerate at the
+%  time — meaning every user's rendered CV silently included a
+%  stranger's real personal history. Fixed: every section listed below
+%  is now dynamically rendered from the actual signed-in user's own
+%  evidence bank. Do not fill this file back in with real data.
+% ──────────────────────────────────────────────────────────────────
+
 \documentclass[letterpaper,10pt]{article}
 
 \usepackage{latexsym}
@@ -34,7 +52,6 @@ hyperref}
 \raggedright
 \setlength{\tabcolsep}{0in}
 
-% Section formatting — colored rule
 % Section formatting — colored rule
 \definecolor{accentblue}{RGB}{30, 90, 180}
 \titleformat{\section}
@@ -84,119 +101,22 @@ hyperref}
 % ──────────────────────────────────────────────
 %  HEADER
 % ──────────────────────────────────────────────
-\begin{center}
-  {\LARGE\bfseries Raden Mohamad Adrian Ramadhan Hendar Wibawa} \\[4pt]
-  \large
-  \textbf{AI Engineer \& Data Scientist} \\[4pt]
-  \small
-  South Tangerang, Indonesia \quad$|$\quad
-  +62 896 3662 0144 \quad$|$\quad
-  \cvlink{mailto:ramadhanadrian2710@gmail.com}{ramadhanadrian2710@gmail.com} \\[2pt]
-  \cvlink{https://www.linkedin.com/in/adrian-voiz}{linkedin.com/in/adrian-voiz} \quad$|$\quad
-  \cvlink{https://adrianramadhan27.github.io/}{adrianramadhan27.github.io}
-\end{center}
 
 % ──────────────────────────────────────────────
 %  SUMMARY
 % ──────────────────────────────────────────────
-\section{Summary}
-AI Engineer and Data Scientist with hands-on experience building and deploying production-grade AI systems. Currently developing a full-stack AI-powered story generation app for children — integrating LLMs, image generation, TTS, and video models on GCP. Specialized in Natural Language Processing, Large Language Models, and generative AI, with a strong academic foundation from the University of Indonesia and a track record of delivering impactful, cost-efficient solutions.
 
 % ──────────────────────────────────────────────
 %  EXPERIENCE
 % ──────────────────────────────────────────────
-\section{Experience}
-\resumeSubHeadingList
-
-  \resumeSubheading
-    {Associate AI Engineer}{Feb 2026 -- Present}
-    {PT. Straitpoint Teknologi Indonesia}{South Jakarta, Indonesia}
-  \resumeBulletList
-    \item\small{Developed the AI service for \textbf{Taletic}, an AI-powered story generation app for children, integrating image generation (Nano Banana, Grok Imagine, Flux), LLM/VLM pipelines (Gemini, Grok, Qwen), TTS (ElevenLabs, Grok TTS, Qwen TTS), and video/parallax generation (Veo, OmniFlash, DepthFlow).}
-    \item\small{Designed a generation logic leveraging reusable assets, reducing AI inference costs by \textbf{90\%}.}
-    \item\small{Managed deployment and cloud infrastructure on \textbf{GCP}.}
-    \item\small{Fully developed a \textbf{CMS} for managing AI-generated content and reusable assets.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {Teaching Assistant}{Aug 2022 -- Jun 2026}
-    {Faculty of Computer Science, Universitas Indonesia}{Depok, Indonesia}
-  \resumeBulletList
-    \item\small{Assisted courses: Discrete Mathematics, Calculus, Statistics \& Probability, Computer Networks, Databases, Human Computer Interaction, Design \& Analysis of Algorithms, and AI \& Data Science.}
-    \item\small{Responsible for creating assignment questions, grading, and delivering supplementary lectures.}
-    \item\small{Coordinator of assistants for Calculus \& Databases — led and managed other teaching assistants.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {Assistant for Master's \& Doctoral Study Program}{Oct 2024 -- Jun 2026}
-    {Faculty of Computer Science, Universitas Indonesia}{Depok, Indonesia}
-  \resumeBulletList
-    \item\small{Assisted the Study Program Coordinator as part of the Fast-Track Assistantship obligation.}
-    \item\small{Coordinated and participated in organizing committees of study program events, including DILAN.}
-    \item\small{Assisted in the revision and improvement of curriculum documents, academic guidelines, and administrative materials.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {Machine Learning Cohort}{Sep 2024 -- Dec 2024}
-    {Bangkit Academy led by Google, Tokopedia, Gojek, \& Traveloka}{Remote}
-  \resumeBulletList
-    \item\small{Part of Bangkit Academy 2024 Batch 2 (Kampus Merdeka); completed ML Expert track via Dicoding \& Coursera alongside soft-skills instructor-led training.}
-    \item\small{\textbf{Capstone Project:} Collaborated with 6 students from different universities to build a mobile tourism app integrating AI for destination recommendations.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {Hacker Front-End Mentee}{Aug 2024 -- Oct 2024}
-    {Digistar Club by Telkom Indonesia}{Remote}
-  \resumeBulletList
-    \item\small{Completed Digistar Class 2024, a digital career development program by Telkom; mentored by a Senior Front-End Developer on React.js and personal branding.}
-    \item\small{\textbf{Capstone Project:} Sole Front-End Developer in a team of 5; delivered a custom analytics dashboard for OCA Interaction, a Telkom digital product.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {AI Researcher Intern}{Feb 2024 -- Jul 2024}
-    {PT Bank Rakyat Indonesia (Persero) Tbk}{Central Jakarta, Indonesia}
-  \resumeBulletList
-    \item\small{Assisted in R\&D for AI-based solutions including document extraction AI, embedding-based indexing, and large language models.}
-    \item\small{\textbf{Capstone Research:} Built a Letter Generator using generative AI; compared GPT, Mistral, and LLaMA-2, studying the effects of prompt engineering and model temperature on formal letter generation quality.}
-  \resumeBulletListEnd
-
-\resumeSubHeadingListEnd
 
 % ──────────────────────────────────────────────
 %  EDUCATION
 % ──────────────────────────────────────────────
-\section{Education}
-\resumeSubHeadingList
-
-  \resumeSubheading
-    {University of Indonesia}{Depok, Indonesia}
-    {Master's Degree, Computer Science \textemdash\ GPA: 3.7/4.0}{2024 -- Jun 2026}
-  \resumeBulletList
-    \item\small{Activities \& Organizations: IR-NLP Lab, Tutoring Foreign Students}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {University of Indonesia}{Depok, Indonesia}
-    {Bachelor's Degree, Computer Science \textemdash\ GPA: 3.87/4.0}{2021 -- 2025}
-  \resumeBulletList
-    \item\small{Activities \& Organizations: BEM Fasilkom, Pemira, COMPFEST}
-  \resumeBulletListEnd
-
-\resumeSubHeadingListEnd
 
 % ──────────────────────────────────────────────
 %  SKILLS
 % ──────────────────────────────────────────────
-\section{Skills}
-\resumeSubHeadingList
-  \resumeItem{\textbf{Machine Learning:} PyTorch, TensorFlow, Streamlit}
-  \resumeItem{\textbf{Data Science:} Matplotlib, Tableau}
-  \resumeItem{\textbf{Back-end Development:} FastAPI, Django, Laravel}
-  \resumeItem{\textbf{Front-end Development:} React, Vue, Next.js}
-  \resumeItem{\textbf{Mobile Development:} Flutter, Flame}
-  \resumeItem{\textbf{Cloud Computing:} AWS, GCP}
-  \resumeItem{\textbf{Databases:} PostgreSQL, MySQL}
-\resumeSubHeadingListEnd
 
 % ──────────────────────────────────────────────
 %  LANGUAGES
@@ -205,60 +125,17 @@ AI Engineer and Data Scientist with hands-on experience building and deploying p
 % ──────────────────────────────────────────────
 %  ACHIEVEMENTS
 % ──────────────────────────────────────────────
-\section{Achievements}
-\resumeSubHeadingList
-  \resumeItem{\textbf{Earned Fast-Track Assistantship Scholarship}, University of Indonesia — enabling completion of a Master's degree in Computer Science within 1 year through a fully funded assistantship program.}
-  \resumeItem{\textbf{2nd Place — Industrial Business Plan Competition 2024}, Diponegoro University: pitched a platform providing AI tools and certification services for teachers (team of 3).}
-\resumeSubHeadingListEnd
 
 % ──────────────────────────────────────────────
 %  CERTIFICATIONS
 % ──────────────────────────────────────────────
-\section{Certifications \& Licenses}
-\resumeSubHeadingList
-  \certItem{DeepLearning.AI}{Machine Learning Specialization}
-  \certItem{DeepLearning.AI}{TensorFlow Developer Specialization}
-  \certItem{IBM}{Code Generation and Optimization using IBM Granite}
-  \certItem{Dicoding}{Applied Machine Learning}
-\resumeSubHeadingListEnd
 
 % ──────────────────────────────────────────────
 %  PROJECTS
 % ──────────────────────────────────────────────
-\section{Projects}
-\resumeSubHeadingList
 
-  \resumeSubheading
-    {SuaraHati}{Jul 2025 -- Aug 2025}
-    {AI Therapy Journal Web App}{Next.js}
-  \resumeBulletList
-    \item\small{Capstone project for the IBM Code Generation Course; built a therapy journal website where users write entries and receive AI-powered analysis of their emotional state.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {FuTour}{Oct 2024 -- Dec 2024}
-    {AI Tourism Mobile App \textemdash\ Bangkit Academy Capstone}{TensorFlow, Flutter}
-  \resumeBulletList
-    \item\small{Collaborated with 6 cohorts from various universities to build a mobile tourism app using AI for destination discovery and recommendations.}
-    \item\small{Developed a TensorFlow image classification model to detect the genre of a tourism spot; training data was scraped from Unsplash.}
-  \resumeBulletListEnd
-
-
-  \resumeSubheading
-    {BRIBRAIN Letter Generator}{Mar 2024 -- Jul 2024}
-    {LLM Fine-Tuning Research \textemdash\ BRI Capstone}{LLaMA-2, Mistral, LoRA, Unsloth}
-  \resumeBulletList
-    \item\small{Fine-tuned LLaMA-2-7B and Mistral-7B using LoRA (via Unsloth) on a synthesized dataset of formal letter inputs/outputs generated with ChatGPT, Gemini, and Copilot.}
-    \item\small{Benchmarked fine-tuned open-source models against the existing GPT-3.5-based system across prompt engineering strategies and temperature settings.}
-  \resumeBulletListEnd
-
-  \resumeSubheading
-    {Talacare A1}{Feb 2024 -- Jun 2024}
-    {Mobile Game for Children with Thalassemia \textemdash\ UI Software Engineering Course}{Flutter, Flame}
-  \resumeBulletList
-    \item\small{Collaborated with 6 students to develop a 2D mobile adventure game for preschool children with Thalassemia, featuring 3 educational minigames, a medicine reminder, and player data export via email.}
-  \resumeBulletListEnd
-
-\resumeSubHeadingListEnd
+% ──────────────────────────────────────────────
+%  END
+% ──────────────────────────────────────────────
 
 \end{document}

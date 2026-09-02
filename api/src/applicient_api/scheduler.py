@@ -168,7 +168,7 @@ async def run_scheduled_search(saved_search_id: uuid.UUID, user_id: uuid.UUID) -
 
     if user is None:
         return
-    radar_url = f"{os.environ.get('FRONTEND_URL') or 'http://localhost:3000'}/radar"
+    radar_url = f"{os.environ.get('FRONTEND_URL') or 'http://localhost:3000'}/console/radar"
     try:
         await email_service.send_scheduled_run_summary_email(
             to=user.email,

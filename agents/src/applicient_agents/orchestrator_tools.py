@@ -30,7 +30,9 @@ import asyncio
 import json
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timezone
 
+from dateutil import parser as date_parser
 from fastapi import HTTPException
 from langchain_core.tools import tool
 from sqlalchemy.orm import sessionmaker
@@ -45,18 +47,25 @@ from applicient_api.claim_verification_service import (
     run_verification_attempt,
 )
 from applicient_api.cover_letter_service import generate_cover_letter
+from applicient_api.cv_latex_edit_engine import run_latex_edit
+from applicient_api.latex_rendering import RenderError, compile_tex
 from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.billing import Plan, Subscription
+from applicient_api.models.calendar import CalendarEvent
 from applicient_api.models.discovery import Job, SavedSearch, Source
+from applicient_api.models.documents import Document, JobGroup, JobGroupMember
+from applicient_api.models.enums import DocumentType
 from applicient_api.models.pipeline import Application, ApplicationAttempt, PipelineStage
 from applicient_api.models.profile import Persona, Preference, Profile
 from applicient_api.models.scoring import FitScore
 from applicient_api.radar import run_radar_search
+from applicient_api.rendering_service import get_document_tex, render_document, save_document_tex_override
 from applicient_api.routers.applications import create_application as _create_application_route
+from applicient_api.routers.applications import update_application as _update_application_route
 from applicient_api.routers.company_candidates import discover_company_candidates as _discover_candidates_route
 from applicient_api.routers.job_groups import create_job_group as _create_job_group_route
 from applicient_api.tailoring_service import TailoringError, tailor_job_group
-from applicient_api.tier_resolution import TierResolutionError
+from applicient_api.tier_resolution import TierResolutionError, resolve_tier
 
 # Same rank order the Job Inbox itself uses (routers/jobs.py) — "best
 # matched" means these two recommendations, strongest first.
@@ -469,12 +478,23 @@ def build_orchestrator_tools(
         return f"cover letter generated, document_id={document.id}, status: {status}"
 
     @tool
-    def create_application_for_job(job_id: str, job_group_id: str | None = None) -> str:
+    def create_application_for_job(
+        job_id: str, job_group_id: str | None = None, document_id: str | None = None
+    ) -> str:
         """Create a tracked Application for one job — required before
         run_application_agent can run. Idempotent: calling this again
         for a job that already has an Application just returns the
-        existing one. Pass job_group_id if this job's tailored
-        documents should be attached."""
+        existing one (and still applies document_id below if given,
+        so this is also the right call to attach/change which CV an
+        already-existing application uses). Pass job_group_id if this
+        job's tailored documents should be attached via that group.
+        Pass document_id (a real document_id from list_cv_documents)
+        to explicitly attach one specific tailored CV/cover letter for
+        run_application_agent to actually use — without it, the
+        application-agent falls back to whatever this job's job group
+        produced, or the persona's originally-uploaded CV as a last
+        resort, which may not be the version the human actually wants
+        used on a live run."""
 
         job_uuid = _try_uuid(job_id)
         if job_uuid is None:
@@ -484,11 +504,56 @@ def build_orchestrator_tools(
             group_uuid = _try_uuid(job_group_id)
             if group_uuid is None:
                 return f"error: '{job_group_id}' is not a valid job_group_id"
+        doc_uuid = None
+        if document_id:
+            doc_uuid = _try_uuid(document_id)
+            if doc_uuid is None:
+                return f"error: '{document_id}' is not a valid document_id"
 
         with session_factory() as db:
-            body = schemas.ApplicationCreate(job_id=job_uuid, persona_id=persona_id, job_group_id=group_uuid)
+            body = schemas.ApplicationCreate(
+                job_id=job_uuid, persona_id=persona_id, job_group_id=group_uuid, primary_document_id=doc_uuid
+            )
             out = _create_application_route(body, db=db, user_id=user_id)
-        return f"application_id={out.id}, state={out.state}"
+            # create_application is idempotent (returns the existing
+            # row untouched for a job that already has one) — without
+            # this, a document_id passed on a later call would be
+            # silently dropped instead of actually attaching/changing it.
+            if doc_uuid is not None and out.primary_document_id != doc_uuid:
+                out = _update_application_route(
+                    out.id, schemas.ApplicationUpdate(primary_document_id=doc_uuid), db=db, user_id=user_id
+                )
+        attached = f", primary_document_id={out.primary_document_id}" if out.primary_document_id else ""
+        return f"application_id={out.id}, state={out.state}{attached}"
+
+    @tool
+    def attach_cv_to_application(application_id: str, document_id: str) -> str:
+        """Attach (or change) which tailored CV/cover letter document
+        an already-existing Application will use for a live
+        application-agent run — use this when the human refers to an
+        application already in the Pipeline (from list_pipeline) by
+        name rather than by job_id, so you don't need to re-derive
+        job_id just to fix which document is attached. Get a real
+        document_id from list_cv_documents first."""
+
+        app_uuid = _try_uuid(application_id)
+        if app_uuid is None:
+            return f"error: '{application_id}' is not a valid application_id"
+        doc_uuid = _try_uuid(document_id)
+        if doc_uuid is None:
+            return f"error: '{document_id}' is not a valid document_id"
+
+        with session_factory() as db:
+            application = db.query(Application).filter_by(id=app_uuid, user_id=user_id).one_or_none()
+            if application is None:
+                return f"error: application {application_id} not found"
+            document = db.query(Document).filter_by(id=doc_uuid, user_id=user_id).one_or_none()
+            if document is None:
+                return f"error: document {document_id} not found"
+            out = _update_application_route(
+                app_uuid, schemas.ApplicationUpdate(primary_document_id=doc_uuid), db=db, user_id=user_id
+            )
+        return f"application_id={out.id} now uses primary_document_id={out.primary_document_id}"
 
     @tool
     async def run_application_agent(application_id: str) -> str:
@@ -740,6 +805,257 @@ def build_orchestrator_tools(
             )
 
     @tool
+    def list_calendar_events(limit: int = 20) -> str:
+        """List this account's upcoming Calendar events (interviews,
+        assessment deadlines, application deadlines, custom reminders)
+        soonest first — includes both manually added events and the
+        ones auto-detected from interview/assessment emails. Check
+        this before create_calendar_event if the human's intent might
+        already be covered by an existing entry. Not persona-scoped —
+        the Calendar covers every persona on this account."""
+
+        with session_factory() as db:
+            events = (
+                db.query(CalendarEvent)
+                .filter(CalendarEvent.user_id == user_id, CalendarEvent.scheduled_at >= datetime.now(timezone.utc))
+                .order_by(CalendarEvent.scheduled_at)
+                .limit(limit)
+                .all()
+            )
+            if not events:
+                return "no upcoming calendar events"
+            job_ids = {e.job_id for e in events if e.job_id}
+            jobs = {j.id: j for j in db.query(Job).filter(Job.id.in_(job_ids)).all()} if job_ids else {}
+            lines = []
+            for e in events:
+                job = jobs.get(e.job_id)
+                job_desc = f" | {job.title} at {job.company_name_raw}" if job else ""
+                lines.append(
+                    f"- calendar_event_id={e.id} | {e.event_type} | {e.title} | "
+                    f"{e.scheduled_at.isoformat()}{job_desc}"
+                )
+            return "\n".join(lines)
+
+    @tool
+    def create_calendar_event(
+        title: str, event_type: str, scheduled_at: str, application_id: str | None = None, notes: str | None = None
+    ) -> str:
+        """Add an event to the human's Calendar — an interview, an
+        assessment deadline, an application deadline, or anything else
+        worth not missing. event_type must be exactly one of:
+        interview, assessment_deadline, application_deadline, custom.
+        scheduled_at must be an ISO 8601 datetime (e.g.
+        "2026-09-10T14:00:00+07:00") — include a timezone offset if
+        the human stated or implied one, otherwise this is interpreted
+        as UTC; never guess a date/time that wasn't actually given.
+        Pass application_id (from list_pipeline) to link this event to
+        a specific tracked application, if relevant — optional."""
+
+        if event_type not in schemas.CALENDAR_EVENT_TYPES:
+            return f"error: event_type must be one of {', '.join(schemas.CALENDAR_EVENT_TYPES)}"
+        try:
+            when = date_parser.isoparse(scheduled_at)
+        except (ValueError, OverflowError):
+            return f"error: '{scheduled_at}' is not a valid ISO 8601 datetime"
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+
+        with session_factory() as db:
+            app_uuid = None
+            job_id = None
+            if application_id:
+                app_uuid = _try_uuid(application_id)
+                if app_uuid is None:
+                    return f"error: '{application_id}' is not a valid application_id"
+                app = db.query(Application).filter_by(id=app_uuid, user_id=user_id).one_or_none()
+                if app is None:
+                    return f"error: application {application_id} not found"
+                job_id = app.job_id
+
+            event = CalendarEvent(
+                user_id=user_id, application_id=app_uuid, job_id=job_id,
+                event_type=event_type, title=title, scheduled_at=when, notes=notes,
+            )
+            db.add(event)
+            db.commit()
+            db.refresh(event)
+
+        emit_card("calendar_event", {
+            "calendar_event_id": str(event.id), "title": event.title, "event_type": event.event_type,
+            "scheduled_at": event.scheduled_at.isoformat(),
+        })
+        return f"calendar_event_id={event.id}, scheduled {event.scheduled_at.isoformat()}"
+
+    @tool
+    def list_job_groups() -> str:
+        """List this persona's job groups — name, member job count and
+        titles, and whether a CV has been generated for it yet. Unlike
+        list_cv_documents (which only shows groups that already have a
+        CV), this shows every group, including ones with no document
+        generated yet — use this for "what job groups do I have" and
+        list_cv_documents for "what CVs do I have"."""
+
+        with session_factory() as db:
+            groups = db.query(JobGroup).filter_by(persona_id=persona_id, user_id=user_id).all()
+            if not groups:
+                return "no job groups exist yet for this persona — create one via create_job_group"
+
+            group_ids = [g.id for g in groups]
+            members = db.query(JobGroupMember).filter(JobGroupMember.job_group_id.in_(group_ids)).all()
+            jobs_by_id = {j.id: j for j in db.query(Job).filter(Job.id.in_({m.job_id for m in members})).all()}
+            members_by_group: dict[uuid.UUID, list[str]] = {}
+            for m in members:
+                job = jobs_by_id.get(m.job_id)
+                if job is not None:
+                    members_by_group.setdefault(m.job_group_id, []).append(f"{job.title} at {job.company_name_raw}")
+            has_document = {
+                d.job_group_id
+                for d in db.query(Document.job_group_id).filter_by(user_id=user_id, doc_type=DocumentType.CV.value).all()
+            }
+
+            lines = []
+            for g in groups:
+                job_list = members_by_group.get(g.id, [])
+                lines.append(
+                    f"- job_group_id={g.id} | {g.name} | {len(job_list)} job(s): "
+                    f"{', '.join(job_list) or '(none assigned yet)'} | "
+                    f"{'CV generated' if g.id in has_document else 'no CV yet'}"
+                )
+            return "\n".join(lines)
+
+    @tool
+    def list_cv_documents() -> str:
+        """List this persona's CV documents — the tailored version
+        generated for each job group, most recent first — so you know
+        which document_id to pass to edit_cv_latex. Call this before
+        edit_cv_latex if the human refers to "my CV"/"the resume" by
+        description rather than giving you a document_id directly."""
+
+        with session_factory() as db:
+            docs = (
+                db.query(Document)
+                .filter_by(user_id=user_id, persona_id=persona_id, doc_type=DocumentType.CV.value)
+                .order_by(Document.created_at.desc())
+                .all()
+            )
+            if not docs:
+                return "no CV documents exist yet for this persona — generate one first via tailor_cv"
+
+            group_ids = {d.job_group_id for d in docs}
+            groups = {g.id: g.name for g in db.query(JobGroup).filter(JobGroup.id.in_(group_ids)).all()}
+
+            lines = [
+                f"- document_id={d.id} | job group: {groups.get(d.job_group_id, 'unknown')} | v{d.version} | "
+                f"{'verified' if d.verified else 'unverified'} | "
+                f"template={d.template or 'not yet rendered'}"
+                for d in docs
+            ]
+            emit_card("documents", {
+                "documents": [
+                    {
+                        "document_id": str(d.id), "job_group_name": groups.get(d.job_group_id, "unknown"),
+                        "version": d.version, "verified": d.verified,
+                    }
+                    for d in docs
+                ],
+            })
+            return "\n".join(lines)
+
+    @tool
+    def show_cv(document_id: str) -> str:
+        """Show a CV's real rendered preview inline in this chat —
+        use this whenever the human asks to see/show/view a CV.
+        Read-only: doesn't change anything, unlike edit_cv_latex (for
+        making changes) or list_cv_documents (metadata only, no
+        preview). Use list_cv_documents first to get a real
+        document_id."""
+
+        doc_uuid = _try_uuid(document_id)
+        if doc_uuid is None:
+            return f"error: '{document_id}' is not a valid document_id"
+
+        with session_factory() as db:
+            document = db.query(Document).filter_by(id=doc_uuid, user_id=user_id).one_or_none()
+            if document is None:
+                return f"error: document {document_id} not found"
+            template_id = document.template or "jakes-resume-adrian"
+            verified, version, job_group_id = document.verified, document.version, document.job_group_id
+
+        emit_card("document", {
+            "document_id": document_id, "doc_type": "cv", "template": template_id,
+            "verified": verified, "job_group_id": str(job_group_id),
+        })
+        return f"showing CV preview for document_id={document_id} (v{version}, {'verified' if verified else 'unverified'})"
+
+    @tool
+    def edit_cv_latex(document_id: str, instruction: str) -> str:
+        """Edit a CV's rendered LaTeX per a plain-English instruction
+        — e.g. "remove the Bangkit Academy entry", "shorten the
+        summary to 2 sentences", "reorder Projects before Education".
+        This is the Composer's replacement for manual LaTeX editing —
+        the human describes what they want changed, you make the
+        edit. Use list_cv_documents first to get a real document_id.
+        The edit is compiled and confirmed to actually produce a PDF
+        before anything is saved — if it fails to compile, nothing is
+        saved and you'll see the compiler error in the result, so you
+        can retry with a fix rather than leaving the CV broken."""
+
+        doc_uuid = _try_uuid(document_id)
+        if doc_uuid is None:
+            return f"error: '{document_id}' is not a valid document_id"
+
+        # Every CV document renders through this one template today
+        # (latex_rendering.TEMPLATES has a single entry) — not hardcoded
+        # product law, just nothing else to choose between yet.
+        template_id = "jakes-resume-adrian"
+
+        with session_factory() as db:
+            document = db.query(Document).filter_by(id=doc_uuid, user_id=user_id).one_or_none()
+            if document is None:
+                return f"error: document {document_id} not found"
+
+            try:
+                current_tex, _is_edited = get_document_tex(
+                    session_factory, document_id=doc_uuid, user_id=user_id, template_id=template_id
+                )
+            except RenderError as exc:
+                return f"error: {exc}"
+
+            try:
+                model = resolve_tier(
+                    db, user_id=user_id, tier="deep", stage="cv-latex-edit",
+                    agent_run_id=agent_run_id, session_factory=session_factory,
+                )
+            except TierResolutionError as exc:
+                return f"error: model routing not configured: {exc}"
+
+            edited_tex = run_latex_edit(model, current_tex=current_tex, instruction=instruction)
+
+            try:
+                compile_tex(edited_tex)
+            except RenderError as exc:
+                return f"error: the edited LaTeX did not compile — nothing was saved. Compiler said:\n{exc}"
+
+            save_document_tex_override(
+                session_factory, document_id=doc_uuid, user_id=user_id, template_id=template_id, tex=edited_tex
+            )
+            # Re-render immediately (via the real persistence path, not
+            # just the validation compile above) so the Composer's
+            # preview reflects this edit without the human needing to
+            # press Preview themselves — same "don't make them
+            # re-click" discipline as tailor_cv's auto-preview.
+            try:
+                render_document(session_factory, document_id=doc_uuid, user_id=user_id, template_id=template_id)
+            except RenderError:
+                pass  # already confirmed compilable above; a storage hiccup here shouldn't fail the whole edit
+
+        emit_card("document", {
+            "document_id": document_id, "doc_type": "cv", "template": template_id,
+            "verified": document.verified, "job_group_id": str(document.job_group_id),
+        })
+        return f"CV LaTeX updated for document_id={document_id} — compiled successfully and saved."
+
+    @tool
     async def ask_user(question: str) -> str:
         """Ask the human a specific question when you're genuinely
         blocked — an ambiguous choice only they can make, or
@@ -763,11 +1079,18 @@ def build_orchestrator_tools(
         tailor_cv,
         generate_cover_letter_tool,
         create_application_for_job,
+        attach_cv_to_application,
         run_application_agent,
         check_application_attempt_status,
         list_saved_searches,
         list_job_inbox,
         list_pipeline,
         get_usage_status,
+        list_calendar_events,
+        create_calendar_event,
+        list_job_groups,
+        list_cv_documents,
+        show_cv,
+        edit_cv_latex,
         ask_user,
     ]

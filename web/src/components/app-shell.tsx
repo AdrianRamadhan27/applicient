@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Target, Settings, LogOut, MailWarning, PanelLeft } from "lucide-react";
+import { Target, Settings, LogOut, MailWarning, PanelLeft, ChevronUp } from "lucide-react";
 import { TierIcon, tierColor } from "@/lib/plan-tiers";
 import { toast } from "sonner";
 import { NAV_ITEMS } from "@/lib/nav";
@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { usePersona } from "@/components/persona-provider";
+import { FloatingAssistant } from "@/components/floating-assistant";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,6 +29,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const SECTIONS = ["Work", "System", "Admin"] as const;
 
@@ -160,9 +169,9 @@ function ManagePersonasDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 const NO_CHROME_ROUTES = ["/", "/login", "/signup", "/auth/google/callback", "/privacy", "/terms"];
 const AUTH_ENTRY_ROUTES = ["/login", "/signup"];
 // Where an authenticated user gets sent instead of an auth-entry page
-// or a forbidden admin route — nav.ts's own comment already calls this
-// "the primary entry point that drives the other four."
-const AUTHENTICATED_HOME = "/assistant";
+// or a forbidden admin route — Phase 14 (v2 plan): the new /console
+// dashboard, not a specific feature page.
+const AUTHENTICATED_HOME = "/console";
 
 // SaaS pivot — a signed-in non-admin who navigates straight to an
 // admin-only URL (rather than clicking a hidden nav item) gets
@@ -296,8 +305,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           collapsed ? "w-[52px]" : "w-[196px]",
         )}
       >
+        {/* Signed-in only by construction (this whole <aside> is never
+            reached before the `!user` early-return above), so this
+            always goes to the app's real home now — previously "/"
+            sent an already-authenticated user out to the marketing
+            landing page (raised by Adrian). */}
         <Link
-          href="/"
+          href="/console"
           className={cn(
             "h-12 flex items-center gap-2 border-b border-border hover:bg-secondary/40",
             collapsed ? "justify-center px-0" : "px-4",
@@ -307,13 +321,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {!collapsed && <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>}
         </Link>
 
-        <button
-          onClick={toggleCollapsed}
-          className="h-6 flex items-center justify-center border-b border-border text-muted-foreground hover:text-foreground hover:bg-secondary/40"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <PanelLeft className="size-3.5" />
-        </button>
+        <div className="h-6 flex items-center border-b border-border">
+          <button
+            onClick={toggleCollapsed}
+            className="flex-1 h-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <PanelLeft className="size-3.5" />
+          </button>
+          <div className="flex-1 h-full flex items-center justify-center border-l border-border hover:bg-secondary/40">
+            <ThemeToggle className="size-3.5" />
+          </div>
+        </div>
 
         {!collapsed && (
           <div className="px-3 py-2.5 border-b border-border flex flex-col gap-1.5">
@@ -400,34 +419,57 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div
-          className={cn(
-            "mt-auto border-t border-border py-2.5 flex items-center gap-2",
-            collapsed ? "flex-col px-0" : "justify-between px-4",
-          )}
-        >
-          {!collapsed && (
-            <span className="min-w-0 flex items-center gap-1.5 truncate text-[11px] font-mono text-muted-foreground" title={user.email}>
-              <TierIcon planName={planName} />
-              <span className="truncate" style={{ color: tierColor(planName) }}>
-                {user.email}
-              </span>
-            </span>
-          )}
-          <div className={cn("flex items-center gap-2.5 shrink-0", collapsed && "flex-col")}>
-            {collapsed && <TierIcon planName={planName} showTitle={user.email} />}
-            <ThemeToggle className="size-3.5" />
-            <button
-              onClick={() => {
-                logout();
-                router.replace("/login");
-              }}
-              className="text-muted-foreground hover:text-foreground"
-              title="Log out"
-            >
-              <LogOut className="size-3.5" />
-            </button>
-          </div>
+        <div className={cn("mt-auto border-t border-border", collapsed ? "px-0" : "px-2 py-1")}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  "w-full flex items-center gap-2 py-2 hover:bg-secondary/40",
+                  collapsed ? "justify-center px-0" : "px-2",
+                )}
+                title={collapsed ? user.email : undefined}
+              >
+                <TierIcon planName={planName} showTitle={collapsed ? user.email : undefined} />
+                {!collapsed && (
+                  <>
+                    <span
+                      className="min-w-0 flex-1 truncate text-left text-[11px] font-mono"
+                      style={{ color: tierColor(planName) }}
+                    >
+                      {user.email}
+                    </span>
+                    <ChevronUp className="size-3.5 shrink-0 text-muted-foreground" />
+                  </>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-56">
+              <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => {
+                  // A hard navigation, not router.replace — logging out
+                  // synchronously clears `user`, which re-fires this
+                  // component's own auth-guard effect below (still
+                  // reading the OLD pathname, since usePathname() hasn't
+                  // caught up to a router.replace that hasn't resolved
+                  // yet) — that guard's own router.replace("/login") was
+                  // winning the race, landing here instead of "/"
+                  // (raised by Adrian). Assigning location.href starts
+                  // a real page unload immediately, so nothing in this
+                  // about-to-be-destroyed React tree gets a chance to
+                  // fire a competing navigation.
+                  logout();
+                  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- deliberate hard navigation, see comment above
+                  window.location.href = "/";
+                }}
+              >
+                <LogOut className="size-3.5" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </aside>
 
@@ -449,6 +491,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <ManagePersonasDialog open={manageOpen} onOpenChange={setManageOpen} />
+      <FloatingAssistant />
     </div>
   );
 }

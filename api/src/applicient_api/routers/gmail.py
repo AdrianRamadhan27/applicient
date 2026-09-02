@@ -68,7 +68,7 @@ async def callback(code: str, state: str, db: Session = Depends(get_db)):
     db.commit()
 
     frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    return RedirectResponse(f"{frontend_url}/credentials?gmail=connected")
+    return RedirectResponse(f"{frontend_url}/console/credentials?gmail=connected")
 
 
 @router.get("/connections", response_model=list[schemas.GmailConnectionOut])

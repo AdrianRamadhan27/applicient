@@ -1299,7 +1299,7 @@ export default function RadarPage() {
                                   {sc.recommendation ?? sc.decision}
                                 </Badge>
                                 <Link
-                                  href={`/inbox?job_id=${encodeURIComponent(sc.jobId)}`}
+                                  href={`/console/inbox?job_id=${encodeURIComponent(sc.jobId)}`}
                                   className="truncate flex-1 hover:underline"
                                 >
                                   {sc.title}
@@ -1385,7 +1385,7 @@ export default function RadarPage() {
                         <div key={job.id} className="flex items-start gap-2 text-xs border-b border-border last:border-b-0 pb-2 last:pb-0">
                           <div className="flex-1 min-w-0">
                             <Link
-                              href={`/inbox?job_id=${encodeURIComponent(job.id)}`}
+                              href={`/console/inbox?job_id=${encodeURIComponent(job.id)}`}
                               className="font-medium hover:underline"
                             >
                               {job.title}
