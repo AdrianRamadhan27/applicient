@@ -20,12 +20,12 @@
  * secondary, collapsed-by-default record of the session, not the main
  * UI.
  *
- * FGD/LGD's multi-speaker reply is rendered as separate labeled
- * blocks (see AgentReplyText below) but is still synthesized and
- * played back as ONE audio stream covering every speaker's lines, not
- * a separate clip per speaker with a distinct voice — a disclosed
- * simplification, not the full per-speaker-voice build the plan
- * describes as a possible follow-up.
+ * FGD/LGD's multi-speaker reply (Moderator + exactly one Discussant,
+ * per Adrian) is split into one transcript bubble per speaker (see
+ * splitAgentReply below) and synthesized with a distinct voice per
+ * role server-side (interview_service.py's own per-segment TTS) —
+ * still stored/replayed as ONE combined clip for the whole turn,
+ * though, so the ▶ replay button lives on only the last bubble.
  */
 
 import * as React from "react";
@@ -50,15 +50,54 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Mic, MicOff, Trash2, Video, VideoOff, Volume2 } from "lucide-react";
+import { Loader2, Mic, MicOff, Trash2, Video, VideoOff, Volume2 } from "lucide-react";
 
 const SENIORITY_OPTIONS = ["intern", "junior", "mid", "senior", "lead", "staff", "principal"];
 
 type TranscriptItem =
   | { kind: "user"; text: string }
-  | { kind: "agent"; text: string; audioFilename?: string };
+  | { kind: "agent"; text: string; speaker: string | null; audioFilename?: string };
 
-type Phase = "list" | "new" | "session" | "results" | "loading";
+// Mirrors interview_service.py's own _split_speaker_segments exactly
+// (same "Speaker: text" line format, same continuation-line handling)
+// so the transcript's bubbles line up 1:1 with what was actually
+// synthesized/spoken per segment — plain interview mode is always a
+// single, unlabeled segment.
+const SPEAKER_LINE_RE = /^([^:]{1,40}):\s(.*)$/;
+
+function splitAgentReply(
+  text: string,
+  practiceType: InterviewPracticeType,
+): { speaker: string | null; text: string }[] {
+  if (practiceType === "interview") return [{ speaker: null, text }];
+  const segments: { speaker: string | null; text: string }[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = SPEAKER_LINE_RE.exec(line);
+    if (m) {
+      segments.push({ speaker: m[1].trim(), text: m[2].trim() });
+    } else if (segments.length > 0) {
+      segments[segments.length - 1].text += ` ${line}`;
+    } else {
+      segments.push({ speaker: null, text: line });
+    }
+  }
+  return segments.length > 0 ? segments : [{ speaker: null, text }];
+}
+
+// "starting" — the opening turn is being generated (the model reads
+// the role/persona context, which can genuinely take a while) — shown
+// INSTEAD of the full camera+visualizer UI until it's actually ready
+// to talk (raised directly by Adrian). Reached both right after
+// creating a session and when reopening one whose opening turn never
+// finished (no persisted "done" event yet) — see openSession, which
+// re-derives this from real server state every time, so it shows
+// correctly even after navigating away and back, not just within one
+// browser tab's own memory.
+// "ending" — scoring/feedback is running, whether from the human
+// clicking "End session" or the agent's own end_interview tool.
+type Phase = "list" | "new" | "starting" | "session" | "ending" | "results" | "loading";
 
 function getAudioContextCtor(): typeof AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -85,7 +124,15 @@ const VISUALIZER_LABEL: Record<VisualizerState, string> = {
   speaking: "Speaking…",
 };
 
-function AudioVisualizer({ state, analyser }: { state: VisualizerState; analyser: AnalyserNode | null }) {
+function AudioVisualizer({
+  state,
+  analyser,
+  size = 240,
+}: {
+  state: VisualizerState;
+  analyser: AnalyserNode | null;
+  size?: number;
+}) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
   React.useEffect(() => {
@@ -93,7 +140,6 @@ function AudioVisualizer({ state, analyser }: { state: VisualizerState; analyser
     const ctx2d = canvas?.getContext("2d");
     if (!canvas || !ctx2d) return;
 
-    const size = 240;
     const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
     canvas.width = size * dpr;
     canvas.height = size * dpr;
@@ -139,69 +185,47 @@ function AudioVisualizer({ state, analyser }: { state: VisualizerState; analyser
     };
     draw();
     return () => cancelAnimationFrame(rafId);
-  }, [state, analyser]);
+  }, [state, analyser, size]);
 
-  return <canvas ref={canvasRef} style={{ width: 240, height: 240 }} className="mx-auto" />;
+  return <canvas ref={canvasRef} style={{ width: size, height: size }} className="mx-auto" />;
 }
 
 function buildTranscriptFromEvents(
   events: { type: InterviewTurnEvent["type"]; data: Record<string, unknown> }[],
+  practiceType: InterviewPracticeType,
 ): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const e of events) {
     if (e.type === "message" && e.data.role === "user") {
       items.push({ kind: "user", text: String(e.data.text ?? "") });
     } else if (e.type === "done") {
-      items.push({
-        kind: "agent",
-        text: String(e.data.reply_text ?? ""),
-        audioFilename: e.data.audio_filename ? String(e.data.audio_filename) : undefined,
+      const replyText = String(e.data.reply_text ?? "");
+      const audioFilename = e.data.audio_filename ? String(e.data.audio_filename) : undefined;
+      // One bubble per speaker segment (Moderator / Discussant get
+      // their own bubbles, per Adrian) — the replay link only needs to
+      // live on one of them since it's a single combined clip for the
+      // whole turn, so it's attached to the last segment.
+      const segments = splitAgentReply(replyText, practiceType);
+      segments.forEach((seg, i) => {
+        items.push({
+          kind: "agent",
+          text: seg.text,
+          speaker: seg.speaker,
+          audioFilename: i === segments.length - 1 ? audioFilename : undefined,
+        });
       });
     }
   }
   return items;
 }
 
-function AgentReplyText({ text, practiceType }: { text: string; practiceType: InterviewPracticeType }) {
-  if (practiceType === "interview") {
-    return <div className="whitespace-pre-wrap">{text}</div>;
-  }
-  // FGD/LGD's system prompt formats every turn as "Speaker: text"
-  // lines (the agent plays the moderator + every simulated
-  // participant) — split and labeled here for legibility.
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  return (
-    <div className="space-y-1.5">
-      {lines.map((line, i) => {
-        const m = /^([^:]{1,40}):\s(.*)$/.exec(line);
-        if (!m) return (
-          <div key={i} className="whitespace-pre-wrap">
-            {line}
-          </div>
-        );
-        return (
-          <div key={i} className="whitespace-pre-wrap">
-            <span className="font-semibold text-primary">{m[1]}: </span>
-            {m[2]}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function TranscriptView({
   items,
-  practiceType,
   running,
   stageMessage,
   onReplay,
 }: {
   items: TranscriptItem[];
-  practiceType: InterviewPracticeType;
   running: boolean;
   stageMessage: string | null;
   onReplay: (filename: string) => void;
@@ -225,7 +249,12 @@ function TranscriptView({
           >
             {item.kind === "agent" ? (
               <>
-                <AgentReplyText text={item.text} practiceType={practiceType} />
+                {item.speaker && (
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                    {item.speaker}
+                  </div>
+                )}
+                <div className="whitespace-pre-wrap">{item.text}</div>
                 {item.audioFilename && (
                   <button
                     type="button"
@@ -262,7 +291,18 @@ function TranscriptView({
 // than derived from anything.
 const VAD_SPEECH_RMS = 0.02;
 const VAD_SILENCE_RMS = 0.012;
-const VAD_SILENCE_HOLD_MS = 900;
+// How long of real silence before an utterance is considered finished
+// and submitted. The loop below (see startVadLoop) already resets
+// this countdown the instant it hears ANY renewed sound above
+// VAD_SILENCE_RMS — so a person pausing mid-thought and then
+// continuing never gets cut off, as long as the pause itself is
+// shorter than this. 900ms (this value before Adrian's own report of
+// getting interrupted mid-pause) was simply too tight for how people
+// actually pause while composing an answer, especially under mock-
+// interview nerves — a real spoken pause is very often 1-2s. Raised
+// to a more forgiving 1.6s; still short enough that the interviewer
+// doesn't feel sluggish to respond once you're actually done talking.
+const VAD_SILENCE_HOLD_MS = 1600;
 const VAD_MIN_UTTERANCE_MS = 300;
 
 export default function InterviewPracticePage() {
@@ -280,6 +320,17 @@ export default function InterviewPracticePage() {
   const [running, setRunning] = React.useState(false);
   const [stageMessage, setStageMessage] = React.useState<string | null>(null);
   const [audioUrl, setAudioUrl] = React.useState<string | null>(null);
+  // Whether this TURN (not this segment) has started playing audio
+  // yet — gates whether handleAudioStreamStart resets the gapless-
+  // scheduling cursor: FGD/LGD synthesizes several speaker segments
+  // per turn, each getting its own audio_start, and only the FIRST
+  // one should reset the schedule — later ones need to queue up
+  // right after whatever's already scheduled, not restart at "now".
+  const turnHasAudioRef = React.useRef(false);
+  // Which of the two FGD/LGD voices is CURRENTLY playing — null in
+  // plain interview mode (only one visualizer exists there) and
+  // between turns.
+  const [currentSpeakerRole, setCurrentSpeakerRole] = React.useState<"moderator" | "discusser" | null>(null);
   const activeSessionIdRef = React.useRef<string | null>(null);
   const runningRef = React.useRef(false);
   React.useEffect(() => {
@@ -396,27 +447,72 @@ export default function InterviewPracticePage() {
   async function consumeTurn(sessionId: string, gen: AsyncGenerator<InterviewTurnEvent>) {
     setRunning(true);
     setStageMessage(null);
+    turnHasAudioRef.current = false;
+    setCurrentSpeakerRole(null);
     try {
       for await (const evt of gen) {
         if (evt.type === "stage") {
           setStageMessage(evt.message);
+          // The interviewer's own end_interview tool (or the human's
+          // "End session" button) both funnel through the same
+          // "scoring" stage — show the dedicated loading screen for
+          // it either way, not just the inline transcript-log dots.
+          if (evt.stage === "scoring") setPhase("ending");
         } else if (evt.type === "message") {
           setTranscript((prev) => [...prev, { kind: "user", text: evt.text }]);
         } else if (evt.type === "audio_start") {
-          handleAudioStreamStart(evt.sample_rate, evt.channels);
+          // The opening turn's reply is fully generated and about to
+          // become audible right here — flip off the "starting" loading
+          // screen at this exact moment, not after the whole turn (incl.
+          // streaming playback) finishes, or the user hears the agent
+          // talking underneath a loading screen that hasn't caught up yet.
+          setPhase((p) => (p === "starting" ? "session" : p));
+          handleAudioStreamStart(evt.sample_rate, evt.channels, evt.role);
         } else if (evt.type === "audio_chunk") {
           playPcmChunk(evt.data);
         } else if (evt.type === "audio_end") {
-          handleAudioStreamEnd();
+          // Per-SPEAKER-SEGMENT marker only (FGD/LGD has several per
+          // turn) — the visualizer/isPlaying transition happens once
+          // for the whole TURN, on "done" below, not per segment.
         } else if (evt.type === "done") {
           // No loadAudio() here — this turn's reply already played
           // live via the PCM stream above as it arrived. audio_filename
           // is kept only so the ▶ replay button can fetch it again
-          // later (results screen, or reopening this session).
+          // later (results screen, or reopening this session). One
+          // bubble per speaker segment (Moderator/Discussant each get
+          // their own, per Adrian) — the replay link goes on the last
+          // one since it's a single combined clip for the whole turn.
+          const segments = splitAgentReply(evt.reply_text, activePracticeType);
           setTranscript((prev) => [
             ...prev,
-            { kind: "agent", text: evt.reply_text, audioFilename: evt.audio_filename ?? undefined },
+            ...segments.map((seg, i) => ({
+              kind: "agent" as const,
+              text: seg.text,
+              speaker: seg.speaker,
+              audioFilename: i === segments.length - 1 ? (evt.audio_filename ?? undefined) : undefined,
+            })),
           ]);
+          settleAudioAfterTurn();
+        } else if (evt.type === "session_ended") {
+          // The agent's own end_interview tool decided to end the
+          // session — same result shape endInterviewSession's own
+          // manual REST call returns, merged into the session state
+          // already held (role_title/company_name/etc. aren't part of
+          // this event, only what actually changed).
+          stopAllMedia();
+          setSession((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: evt.status as InterviewSession["status"],
+                  overall_score: evt.overall_score,
+                  feedback: evt.feedback,
+                  ended_at: evt.ended_at,
+                }
+              : prev,
+          );
+          setPhase("results");
+          void refreshList();
         } else if (evt.type === "error") {
           toast.error(evt.message);
         }
@@ -426,6 +522,12 @@ export default function InterviewPracticePage() {
     } finally {
       setRunning(false);
       setStageMessage(null);
+      // Safety net: if scoring was attempted (phase flipped to
+      // "ending" above) but failed before a session_ended event ever
+      // arrived (_end_session_after_turn's own error path), don't
+      // strand the user on a permanent loading screen — the "error"
+      // toast above already explains why.
+      setPhase((p) => (p === "ending" ? "session" : p));
     }
   }
 
@@ -440,18 +542,28 @@ export default function InterviewPracticePage() {
       setSession(s);
       setActivePracticeType(s.practice_type);
       const { events } = await api.getInterviewSessionEvents(sessionId);
-      const items = buildTranscriptFromEvents(events);
+      const items = buildTranscriptFromEvents(events, s.practice_type);
       setTranscript(items);
       if (s.status !== "in_progress") {
         setPhase("results");
         return;
       }
-      setPhase("session");
       if (items.length === 0) {
-        // Created via the Assistant's start_interview_practice tool —
-        // that's a synchronous tool call, it can't stream the opening
-        // turn itself, so it only created the row. Start it now.
+        // No completed opening turn yet — either created via the
+        // Assistant's start_interview_practice tool (a synchronous
+        // tool call, it can't stream the opening turn itself, so it
+        // only created the row) or a previous attempt was abandoned
+        // mid-generation (the tab closed/navigated away — the turn
+        // does NOT keep running server-side once nothing's reading its
+        // stream, a real, disclosed simplification). Either way this
+        // is exactly the "still thinking" state — show the loading
+        // screen and (re)start it now, never the full camera UI before
+        // there's an actual question to react to.
+        setPhase("starting");
         await consumeTurn(sessionId, api.startInterviewSession(sessionId));
+        setPhase((p) => (p === "starting" ? "session" : p));
+      } else {
+        setPhase("session");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load this session");
@@ -528,12 +640,17 @@ export default function InterviewPracticePage() {
       });
       setTranscript([]);
       setAudioUrl(null);
-      setPhase("session");
+      // Loading screen, not the full camera/visualizer UI, until the
+      // opening turn actually finishes — reading the role and profile
+      // context genuinely takes a while (raised directly by Adrian).
+      setPhase("starting");
       router.replace(`/console/interview-practice?session_id=${sessionId}`, { scroll: false });
       await consumeTurn(sessionId, events);
       setSession(await api.getInterviewSession(sessionId));
+      setPhase((p) => (p === "starting" ? "session" : p));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start session");
+      setPhase("new");
     } finally {
       setCreating(false);
     }
@@ -541,7 +658,11 @@ export default function InterviewPracticePage() {
 
   async function handleEndSession() {
     if (!activeSessionId) return;
+    if (!window.confirm("End this practice session now? You'll get your score and feedback right after.")) {
+      return;
+    }
     stopAllMedia();
+    setPhase("ending");
     try {
       const updated = await api.endInterviewSession(activeSessionId);
       setSession(updated);
@@ -549,6 +670,7 @@ export default function InterviewPracticePage() {
       await refreshList();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to end session");
+      setPhase("session");
     }
   }
 
@@ -918,16 +1040,39 @@ export default function InterviewPracticePage() {
     return { ctx, analyser };
   }
 
-  function handleAudioStreamStart(sampleRate: number, channels: number) {
+  function handleAudioStreamStart(sampleRate: number, channels: number, role: "moderator" | "discusser") {
     const graph = ensurePcmGraph();
     if (!graph) return;
     pcmFormatRef.current = { sampleRate, channels };
-    pcmNextStartRef.current = graph.ctx.currentTime;
+    // Leftover bytes never carry across a SEGMENT boundary (each is
+    // its own independent synthesis stream), but the gapless-
+    // scheduling cursor DOES carry across segments within the same
+    // turn — only reset it for the first segment.
     pcmLeftoverRef.current = new Uint8Array(0);
+    // The moment THIS segment will actually start playing on the
+    // AudioContext's own clock: "now" for a turn's first segment
+    // (pcmNextStartRef gets reset to now, below); for every later
+    // segment, wherever the previous segment's gapless scheduling left
+    // off (pcmNextStartRef already holds exactly that — playPcmChunk
+    // only ever advances it forward as it schedules chunks). NOT "now"
+    // in either case for THIS event's own arrival time — audio_start
+    // fires as soon as the server begins streaming a segment, which,
+    // since synthesis+network delivery is faster than real playback,
+    // can arrive well before the previous segment has actually
+    // finished sounding. Flipping the visualizer/role on event arrival
+    // (the original bug here) showed the next speaker while the
+    // previous one's voice was still audibly playing.
+    const segmentStartAt = turnHasAudioRef.current ? pcmNextStartRef.current : graph.ctx.currentTime;
+    if (!turnHasAudioRef.current) {
+      pcmNextStartRef.current = graph.ctx.currentTime;
+      turnHasAudioRef.current = true;
+    }
     setIsPlaying(true);
     setPcmAutoplayBlocked(false);
     setPcmAnalyserState(graph.analyser);
     graph.ctx.resume().catch(() => {});
+    const roleDelayMs = Math.max(0, (segmentStartAt - graph.ctx.currentTime) * 1000);
+    window.setTimeout(() => setCurrentSpeakerRole(role), roleDelayMs);
     // Same autoplay-policy gap the <audio> element's own .play() call
     // can hit — a freshly-created context sometimes stays suspended
     // until a "fresh enough" user gesture resumes it, in which case
@@ -980,10 +1125,19 @@ export default function InterviewPracticePage() {
     pcmNextStartRef.current = startAt + audioBuffer.duration;
   }
 
-  function handleAudioStreamEnd() {
+  // Called once per TURN (on the "done" event), not per segment —
+  // waits for whatever's still scheduled to actually finish playing
+  // before clearing the "speaking" visual state, so FGD/LGD's several
+  // back-to-back segments don't flicker the visualizer off between
+  // them.
+  function settleAudioAfterTurn() {
     const ctx = pcmCtxRef.current;
-    const remainingMs = ctx ? Math.max(0, (pcmNextStartRef.current - ctx.currentTime) * 1000) : 0;
-    window.setTimeout(() => setIsPlaying(false), remainingMs + 50);
+    const remainingMs =
+      ctx && turnHasAudioRef.current ? Math.max(0, (pcmNextStartRef.current - ctx.currentTime) * 1000) : 0;
+    window.setTimeout(() => {
+      setIsPlaying(false);
+      setCurrentSpeakerRole(null);
+    }, remainingMs + 50);
   }
 
   function handleResumePcmAudio() {
@@ -999,13 +1153,30 @@ export default function InterviewPracticePage() {
     };
   }, []);
 
-  const visualizerState: VisualizerState = isPlaying ? "speaking" : running ? "thinking" : micOn ? "listening" : "idle";
-  const visualizerAnalyser =
-    visualizerState === "speaking"
-      ? (pcmAnalyserState ?? replayAnalyserState)
-      : visualizerState === "listening"
-        ? micAnalyserState
-        : null;
+  // Plain interview mode: one visualizer, carrying the whole turn-
+  // level state (listening/thinking/speaking). FGD/LGD (below):
+  // TWO visualizers — raised directly by Adrian, a group discussion
+  // needs its moderator and its other participant(s) to visibly be
+  // different "speakers", not one indicator standing in for both.
+  // The moderator panel still carries the turn-level listening/
+  // thinking states (it's the "host" of the session); the discusser
+  // panel only ever lights up for its own "speaking" moments.
+  const isFgdLgd = activePracticeType === "fgd" || activePracticeType === "lgd";
+  const visualizerState: VisualizerState =
+    isPlaying && (!isFgdLgd || currentSpeakerRole === "moderator")
+      ? "speaking"
+      : running
+        ? "thinking"
+        : micOn
+          ? "listening"
+          : "idle";
+  const discusserVisualizerState: VisualizerState = isPlaying && currentSpeakerRole === "discusser" ? "speaking" : "idle";
+
+  function visualizerAnalyserFor(state: VisualizerState): AnalyserNode | null {
+    if (state === "speaking") return pcmAnalyserState ?? replayAnalyserState;
+    if (state === "listening") return micAnalyserState;
+    return null;
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -1041,6 +1212,27 @@ export default function InterviewPracticePage() {
 
       <div className="flex-1 overflow-y-auto p-5">
         {phase === "loading" && <div className="text-sm text-muted-foreground font-mono">loading…</div>}
+
+        {phase === "starting" && (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            <div className="text-sm font-medium">Setting up your session…</div>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              The interviewer is reading the role and your profile to prepare its first question — this can take a
+              moment, especially for a longer job description.
+            </p>
+          </div>
+        )}
+
+        {phase === "ending" && (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            <div className="text-sm font-medium">Scoring your session…</div>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              Reading back the full transcript and preparing your feedback.
+            </p>
+          </div>
+        )}
 
         {phase === "list" && (
           <div className="flex flex-col gap-4 max-w-2xl">
@@ -1249,13 +1441,41 @@ export default function InterviewPracticePage() {
                 />
               </div>
 
-              {/* The audio visualizer — color + shape reflect listening/thinking/speaking */}
-              <div className="rounded-md border border-border bg-card flex flex-col items-center justify-center gap-3 p-4 min-h-[240px]">
-                <AudioVisualizer state={visualizerState} analyser={visualizerAnalyser} />
-                <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  {VISUALIZER_LABEL[visualizerState]}
-                </span>
-              </div>
+              {/* The audio visualizer — color + shape reflect listening/thinking/speaking.
+                  FGD/LGD gets two: the moderator (carries the overall
+                  turn state) and the other discussion participant(s)
+                  (only ever lights up for its own speaking moments) —
+                  raised directly by Adrian, a group discussion needs
+                  visibly distinct speakers, not one shared indicator. */}
+              {isFgdLgd ? (
+                <div className="rounded-md border border-border bg-card grid grid-cols-2 gap-2 p-4 min-h-[240px]">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <AudioVisualizer state={visualizerState} analyser={visualizerAnalyserFor(visualizerState)} size={140} />
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                      {VISUALIZER_LABEL[visualizerState]}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">Moderator</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <AudioVisualizer
+                      state={discusserVisualizerState}
+                      analyser={visualizerAnalyserFor(discusserVisualizerState)}
+                      size={140}
+                    />
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                      {VISUALIZER_LABEL[discusserVisualizerState]}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">Discussant</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-md border border-border bg-card flex flex-col items-center justify-center gap-3 p-4 min-h-[240px]">
+                  <AudioVisualizer state={visualizerState} analyser={visualizerAnalyserFor(visualizerState)} />
+                  <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    {VISUALIZER_LABEL[visualizerState]}
+                  </span>
+                </div>
+              )}
             </div>
 
             {autoplayBlocked && (
@@ -1307,7 +1527,6 @@ export default function InterviewPracticePage() {
               <div className="mt-2">
                 <TranscriptView
                   items={transcript}
-                  practiceType={activePracticeType}
                   running={running}
                   stageMessage={stageMessage}
                   onReplay={handleReplay}
@@ -1374,7 +1593,6 @@ export default function InterviewPracticePage() {
                 <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Transcript</div>
                 <TranscriptView
                   items={transcript}
-                  practiceType={activePracticeType}
                   running={false}
                   stageMessage={null}
                   onReplay={handleReplay}

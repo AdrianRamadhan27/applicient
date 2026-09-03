@@ -282,7 +282,7 @@ export default function ModelsPage() {
   }, [connections, catalogs]);
 
   const [audioSettings, setAudioSettings] = React.useState<AudioSettings | null>(null);
-  const [audioDraft, setAudioDraft] = React.useState({ transcribe: "", speech: "", voice: "" });
+  const [audioDraft, setAudioDraft] = React.useState({ transcribe: "", speech: "", voice: "", voiceSecondary: "" });
   const [savingAudio, setSavingAudio] = React.useState(false);
 
   React.useEffect(() => {
@@ -307,6 +307,7 @@ export default function ModelsPage() {
         transcribe: audioSettings.transcribe_catalog_entry_id ?? "",
         speech: audioSettings.speech_catalog_entry_id ?? "",
         voice: audioSettings.speech_voice ?? "",
+        voiceSecondary: audioSettings.speech_voice_secondary ?? "",
       }))();
   }, [audioSettings]);
 
@@ -317,7 +318,17 @@ export default function ModelsPage() {
 
   function handleSpeechModelChange(entryId: string) {
     const entry = audioOptions.speech.find((o) => o.entry.id === entryId)?.entry;
-    setAudioDraft((d) => ({ ...d, speech: entryId, voice: entry?.voices?.[0] ?? "" }));
+    const voices = entry?.voices ?? [];
+    // Default the secondary (FGD/LGD "discusser") voice to a
+    // DIFFERENT entry than the primary one whenever the model lists
+    // more than one — two people using the same voice isn't a real
+    // group discussion.
+    setAudioDraft((d) => ({
+      ...d,
+      speech: entryId,
+      voice: voices[0] ?? "",
+      voiceSecondary: voices[1] ?? voices[0] ?? "",
+    }));
   }
 
   async function handleSaveAudioSettings() {
@@ -327,6 +338,7 @@ export default function ModelsPage() {
         transcribe_catalog_entry_id: audioDraft.transcribe || null,
         speech_catalog_entry_id: audioDraft.speech || null,
         speech_voice: audioDraft.voice || null,
+        speech_voice_secondary: audioDraft.voiceSecondary || null,
       });
       setAudioSettings(saved);
       toast.success("Audio settings saved");
@@ -871,7 +883,7 @@ export default function ModelsPage() {
                         <optgroup key={connectionId} label={group.label}>
                           {group.options.map(({ entry }) => (
                             <option key={entry.id} value={entry.id}>
-                              {entry.model_id}
+                              {entry.model_id} · {catalogPrice(entry)}
                             </option>
                           ))}
                         </optgroup>
@@ -881,30 +893,41 @@ export default function ModelsPage() {
                 );
               })}
 
-              <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-center">
-                <span className="w-32 shrink-0 font-mono text-xs font-medium">Voice</span>
-                {selectedSpeechEntry?.voices?.length ? (
-                  <select
-                    value={audioDraft.voice}
-                    onChange={(event) => setAudioDraft((d) => ({ ...d, voice: event.target.value }))}
-                    className="h-8 min-w-0 flex-1 border border-input bg-background px-2 font-mono text-xs"
-                  >
-                    {selectedSpeechEntry.voices.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    value={audioDraft.voice}
-                    onChange={(e) => setAudioDraft((d) => ({ ...d, voice: e.target.value }))}
-                    placeholder={selectedSpeechEntry ? "e.g. alloy — this model has no listed voices" : "pick a speech model first"}
-                    disabled={!selectedSpeechEntry}
-                    className="h-8 flex-1 font-mono text-xs"
-                  />
-                )}
-              </div>
+              {(
+                [
+                  { field: "voice" as const, label: "Moderator / interviewer voice" },
+                  { field: "voiceSecondary" as const, label: "FGD/LGD discusser voice" },
+                ]
+              ).map(({ field, label }) => (
+                <div key={field} className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-center">
+                  <span className="w-32 shrink-0 font-mono text-xs font-medium">{label}</span>
+                  {selectedSpeechEntry?.voices?.length ? (
+                    <select
+                      value={audioDraft[field]}
+                      onChange={(event) => setAudioDraft((d) => ({ ...d, [field]: event.target.value }))}
+                      className="h-8 min-w-0 flex-1 border border-input bg-background px-2 font-mono text-xs"
+                    >
+                      {selectedSpeechEntry.voices.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      value={audioDraft[field]}
+                      onChange={(e) => setAudioDraft((d) => ({ ...d, [field]: e.target.value }))}
+                      placeholder={selectedSpeechEntry ? "e.g. alloy — this model has no listed voices" : "pick a speech model first"}
+                      disabled={!selectedSpeechEntry}
+                      className="h-8 flex-1 font-mono text-xs"
+                    />
+                  )}
+                </div>
+              ))}
+              <p className="px-3 pb-2 text-[10px] text-muted-foreground">
+                The discusser voice is only used for FGD/LGD practice — every simulated participant who isn&apos;t the
+                moderator speaks in this voice, so a group discussion sounds like more than one person.
+              </p>
 
               <div className="flex justify-end border-t border-border bg-secondary px-3 py-2">
                 <Button size="sm" onClick={handleSaveAudioSettings} disabled={savingAudio}>

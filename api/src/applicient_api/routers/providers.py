@@ -187,6 +187,7 @@ def update_audio_settings(
     settings.transcribe_catalog_entry_id = body.transcribe_catalog_entry_id
     settings.speech_catalog_entry_id = body.speech_catalog_entry_id
     settings.speech_voice = body.speech_voice
+    settings.speech_voice_secondary = body.speech_voice_secondary
     settings.user_id = user_id
     db.commit()
     db.refresh(settings)

@@ -56,6 +56,13 @@ _PROVIDER_PREFERENCE = ("openrouter", "openai")
 _DEFAULT_TRANSCRIBE_MODEL = {"openrouter": "openai/whisper-1", "openai": "whisper-1"}
 _DEFAULT_SPEECH_MODEL = {"openrouter": "deepgram/aura-2", "openai": "tts-1"}
 _DEFAULT_VOICE = {"openrouter": "aura-2-luna-en", "openai": "alloy"}
+# FGD/LGD's "everyone who isn't the moderator" voice — a deliberately
+# different-sounding real voice from _DEFAULT_VOICE above (checked
+# against each provider's own real voice list: both are confirmed
+# real ids, not guessed), so a deployment that hasn't configured Audio
+# Settings at all still gets two audibly distinct voices out of the
+# box rather than one person reading every part.
+_DEFAULT_SECONDARY_VOICE = {"openrouter": "aura-2-apollo-en", "openai": "onyx"}
 
 
 class InterviewMediaError(Exception):
@@ -120,18 +127,32 @@ def _resolve_transcribe_target(db: Session) -> tuple[ProviderConnection, str]:
     return conn, _DEFAULT_TRANSCRIBE_MODEL.get(conn.provider, _DEFAULT_TRANSCRIBE_MODEL["openrouter"])
 
 
-def _resolve_speech_target(db: Session) -> tuple[ProviderConnection, str, str | None]:
+def _resolve_speech_target(db: Session, *, secondary: bool = False) -> tuple[ProviderConnection, str, str | None]:
+    """`secondary=True` resolves the FGD/LGD "everyone but the
+    moderator" voice instead of the primary moderator/interviewer
+    one — same model/provider either way (Audio Settings only ever
+    configures one speech model), just a different voice string."""
+
     settings = db.query(AudioSettings).first()
     if settings is not None and settings.speech_catalog_entry_id is not None:
         entry = db.get(ModelCatalogEntry, settings.speech_catalog_entry_id)
         if entry is not None:
             conn = db.get(ProviderConnection, entry.provider_connection_id)
             if conn is not None:
-                voice = settings.speech_voice or (entry.voices[0] if entry.voices else None)
+                configured = settings.speech_voice_secondary if secondary else settings.speech_voice
+                # Falls back to the CATALOG's own second listed voice
+                # (not the first, when picking the secondary one and a
+                # second option exists) rather than reusing the exact
+                # same voice as the primary — still better than one
+                # voice for the whole discussion even with zero admin
+                # configuration.
+                fallback_index = 1 if secondary and entry.voices and len(entry.voices) > 1 else 0
+                voice = configured or (entry.voices[fallback_index] if entry.voices else None)
                 return conn, entry.model_id, voice
     conn = _resolve_connection(db)
     model = _DEFAULT_SPEECH_MODEL.get(conn.provider, _DEFAULT_SPEECH_MODEL["openrouter"])
-    voice = _DEFAULT_VOICE.get(conn.provider, _DEFAULT_VOICE["openrouter"])
+    defaults = _DEFAULT_SECONDARY_VOICE if secondary else _DEFAULT_VOICE
+    voice = defaults.get(conn.provider, defaults["openrouter"])
     return conn, model, voice
 
 
@@ -141,6 +162,15 @@ class TranscriptionResult(NamedTuple):
     cost_known: bool
     provider: str
     model_id: str
+
+
+async def _post_transcription(client: httpx.AsyncClient, *, url, api_key, model, response_format, filename, audio_bytes, content_type):
+    return await client.post(
+        url,
+        headers={"Authorization": f"Bearer {api_key}"},
+        data={"model": model, "response_format": response_format},
+        files={"file": (filename, audio_bytes, content_type or "audio/webm")},
+    )
 
 
 async def transcribe(db: Session, *, audio_bytes: bytes, filename: str, content_type: str) -> TranscriptionResult:
@@ -155,7 +185,17 @@ async def transcribe(db: Session, *, audio_bytes: bytes, filename: str, content_
     doesn't add that field — a real `duration` in seconds, priced
     against the catalog's own `price_per_minute` (ModelCatalogEntry's
     own docstring has the live-verified reasoning for why that unit is
-    trustworthy here)."""
+    trustworthy here).
+
+    NOT every STT model actually supports verbose_json, though — hit
+    live: an admin-selected model (microsoft/mai-transcribe-1.5, via
+    Audio Settings) 400s outright with "does not support
+    response_format \"verbose_json\". Use \"json\" instead." Rather
+    than let a whole turn's transcription fail over a cost-tracking
+    nicety, that specific failure retries once with the plain default
+    format — the transcript itself is unaffected either way, only the
+    cost degrades to cost_known=False for models that don't support
+    the richer one."""
 
     conn, model = _resolve_transcribe_target(db)
     api_key = decrypt_api_key(conn.api_key_encrypted)
@@ -163,12 +203,15 @@ async def transcribe(db: Session, *, audio_bytes: bytes, filename: str, content_
 
     async with httpx.AsyncClient(timeout=60) as client:
         try:
-            resp = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                data={"model": model, "response_format": "verbose_json"},
-                files={"file": (filename, audio_bytes, content_type or "audio/webm")},
+            resp = await _post_transcription(
+                client, url=url, api_key=api_key, model=model, response_format="verbose_json",
+                filename=filename, audio_bytes=audio_bytes, content_type=content_type,
             )
+            if resp.status_code == 400 and "response_format" in resp.text:
+                resp = await _post_transcription(
+                    client, url=url, api_key=api_key, model=model, response_format="json",
+                    filename=filename, audio_bytes=audio_bytes, content_type=content_type,
+                )
         except httpx.RequestError as exc:
             raise InterviewMediaError(f"could not reach {conn.provider} for transcription: {exc}") from exc
 
@@ -192,8 +235,6 @@ async def transcribe(db: Session, *, audio_bytes: bytes, filename: str, content_
             cost_usd, cost_known = 0.0, False
 
     return TranscriptionResult(text=text, cost_usd=cost_usd, cost_known=cost_known, provider=conn.provider, model_id=model)
-
-    return text, cost_usd, cost_known
 
 
 def estimate_speech_cost(
@@ -274,28 +315,34 @@ class SpeechStream(NamedTuple):
     chunks: AsyncGenerator[bytes, None]
 
 
-async def synthesize_stream(db: Session, *, text: str, voice: str | None = None) -> SpeechStream:
-    """Text -> speech for one agent turn, streamed. Returns a
-    SpeechStream rather than one block of bytes — the caller
-    (interview_service.py's own _synthesize_stream_and_store) forwards
-    each chunk to the client as it arrives instead of waiting for the
-    whole clip, then wraps everything collected into a WAV file for
-    storage once the stream ends. `provider`/`model_id`/
-    `provider_connection_id` ride along so the caller can price the
-    call afterward (estimate_speech_cost, once the real character
-    count sent is known) without a second DB round-trip to re-resolve
-    which connection/model this turn actually used. The httpx client/
+async def synthesize_stream(
+    db: Session, *, text: str, voice: str | None = None, secondary: bool = False
+) -> SpeechStream:
+    """Text -> speech for one agent turn (or one FGD/LGD speaker's own
+    segment — interview_service.py's own _synthesize_stream_and_store
+    now synthesizes each speaker's lines separately, `secondary=True`
+    for anyone who isn't the moderator, so a group discussion actually
+    sounds like more than one person). Returns a SpeechStream rather
+    than one block of bytes — the caller forwards each chunk to the
+    client as it arrives instead of waiting for the whole clip, then
+    wraps everything collected into a WAV file for storage once the
+    stream ends. `provider`/`model_id`/`provider_connection_id` ride
+    along so the caller can price the call afterward
+    (estimate_speech_cost, once the real character count sent is
+    known) without a second DB round-trip to re-resolve which
+    connection/model this turn actually used. The httpx client/
     response are kept open for the chunk iterator's whole lifetime
     (closed in its own `finally`, not here) since this function
     returns before the caller has consumed a single chunk."""
 
-    conn, model, default_voice = _resolve_speech_target(db)
+    conn, model, default_voice = _resolve_speech_target(db, secondary=secondary)
     api_key = decrypt_api_key(conn.api_key_encrypted)
     # An explicit `voice` argument (none of this module's own callers
     # pass one today) still wins over both the admin's configured
     # default and the hardcoded fallback — same override precedence
     # this function already had before Audio Settings existed.
-    resolved_voice = voice or default_voice or _DEFAULT_VOICE.get(conn.provider, _DEFAULT_VOICE["openrouter"])
+    defaults = _DEFAULT_SECONDARY_VOICE if secondary else _DEFAULT_VOICE
+    resolved_voice = voice or default_voice or defaults.get(conn.provider, defaults["openrouter"])
     url = f"{_base_url(conn)}/audio/speech"
     body = {"model": model, "input": text, "voice": resolved_voice, "response_format": "pcm"}
 

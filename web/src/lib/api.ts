@@ -172,7 +172,13 @@ export type ModelCatalogEntry = {
 export type AudioSettings = {
   transcribe_catalog_entry_id: string | null;
   speech_catalog_entry_id: string | null;
+  // "Moderator / interviewer" voice — the single voice for plain
+  // 1-on-1 interview mode, and the moderator's own lines in FGD/LGD.
   speech_voice: string | null;
+  // FGD/LGD's "everyone but the moderator" voice — a real group
+  // discussion needs at least two distinct voices to not sound like
+  // one person reading every part.
+  speech_voice_secondary: string | null;
 };
 
 export type Profile = {
@@ -882,22 +888,34 @@ export type InterviewTurnEvent =
   | { type: "message"; role: "user"; text: string }
   // Real-time TTS streaming (raised directly by Adrian — hearing the
   // reply as it's generated instead of waiting out the whole clip).
-  // audio_start carries the format every audio_chunk that follows is
-  // in (16-bit signed PCM, little-endian, interleaved by channel —
-  // interview_media.py always requests this from the provider);
-  // audio_chunk's `data` is one chunk, base64-encoded; audio_end
-  // marks the stream finished and carries the filename the full clip
-  // was stored under (for the ▶ replay button later — the live
-  // playback itself never waits for this).
-  | { type: "audio_start"; sample_rate: number; channels: number }
+  // One audio_start/audio_chunk*/audio_end cycle per SPEAKER SEGMENT
+  // — plain interview mode is always exactly one cycle (role is
+  // always "moderator" then); FGD/LGD is one cycle per "Speaker:
+  // text" line, `role` telling the frontend which of the two
+  // visualizers to light up and which voice this segment used.
+  // audio_start's sample_rate/channels describe every audio_chunk
+  // that follows it, until the next audio_start (16-bit signed PCM,
+  // little-endian, interleaved by channel — interview_media.py always
+  // requests this from the provider); audio_chunk's `data` is one
+  // chunk, base64-encoded. The turn's one combined replay clip's
+  // filename only ever arrives on the "done" event below, not here.
+  | { type: "audio_start"; sample_rate: number; channels: number; speaker: string | null; role: "moderator" | "discusser" }
   | { type: "audio_chunk"; data: string }
-  | { type: "audio_end"; audio_filename: string }
+  | { type: "audio_end" }
   // audio_filename is null when speech synthesis failed for this turn
   // entirely (e.g. a very long FGD/LGD reply past the provider's own
   // TTS input-size limit, or a stream that dropped mid-way) — the
   // reply text is always real either way, so the turn still succeeds
   // text-only rather than erroring out.
   | { type: "done"; reply_text: string; audio_filename: string | null }
+  // The interviewer/moderator's own end_interview tool decided to end
+  // the session (raised directly by Adrian: the agent can end things
+  // itself, not just the human clicking "End session") — arrives
+  // right after this turn's own "done" event, once its closing remark
+  // has already been queued to play. Same fields interview_service.py's
+  // end_interview_session (the shared scoring path both this and the
+  // manual endInterviewSession call go through) produces.
+  | { type: "session_ended"; status: string; overall_score: number | null; feedback: InterviewFeedback | null; ended_at: string | null }
   | { type: "error"; message: string };
 
 function toInterviewTurnEvent(eventType: string, data: Record<string, unknown>): InterviewTurnEvent {

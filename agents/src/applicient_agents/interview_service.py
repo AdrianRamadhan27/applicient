@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import uuid
 from asyncio import to_thread
 from collections.abc import AsyncGenerator
@@ -163,7 +164,8 @@ async def _run_agent_turn(
             return
         web_search = _supports_web_search(db)
 
-    tools = build_interview_tools(model=model, supports_web_search=web_search)
+    end_signal: dict = {}
+    tools = build_interview_tools(model=model, supports_web_search=web_search, end_signal=end_signal)
     checkpointer = get_checkpointer()
     if checkpointer is None:
         yield emit("error", {"message": "interview-practice checkpointer not initialized — the API did not start up correctly"})
@@ -176,6 +178,12 @@ async def _run_agent_turn(
     reply_text = _extract_reply(result)
     yield emit("stage", _stage("agent", "done", reply_text or "(no reply)"))
     yield {"__reply__": reply_text}  # sentinel, stripped by the caller before it ever reaches an SSE client
+    # Second sentinel, same convention — whether the agent called
+    # end_interview this turn (interview_tools.py's own end_signal
+    # closure). Checked by the caller AFTER this turn's reply/audio
+    # are fully done, so the candidate actually hears the closing
+    # remark before scoring takes over.
+    yield {"__end_requested__": bool(end_signal.get("requested"))}
 
 
 def _new_run(db, *, user_id: uuid.UUID, persona_id: uuid.UUID, session_id: uuid.UUID) -> AgentRun:
@@ -247,6 +255,56 @@ def _truncate_for_speech(text: str) -> str:
     return cut.rstrip() + " (continued below — read on for the rest)"
 
 
+# FGD/LGD needs at least two distinct voices to sound like a real
+# group discussion (raised directly by Adrian) rather than one person
+# reading every part — interview_agent.py's own FGD_LGD_SYSTEM_PROMPT
+# already formats every turn as "Speaker: text" lines (chat-cards.tsx's
+# AgentReplyText already parses this same format for on-screen
+# labeling), this is the same parse, run server-side so each speaker's
+# lines can be synthesized separately with a different voice.
+_SPEAKER_LINE_RE = re.compile(r"^([^:]{1,40}):\s(.*)$")
+
+
+def _split_speaker_segments(text: str, practice_type: str) -> list[tuple[str | None, str]]:
+    """Returns [(speaker_or_None, segment_text), ...] — one segment
+    covering the WHOLE reply for plain interview mode (nothing to
+    split, one voice), or one segment per "Speaker: text" line for
+    fgd/lgd. A line with no recognizable "Speaker:" prefix is folded
+    into the previous segment (the model occasionally wraps one
+    speaker's point across two lines) rather than treated as its own
+    unattributed segment."""
+
+    if practice_type not in ("fgd", "lgd"):
+        return [(None, text)]
+
+    segments: list[tuple[str | None, str]] = []
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = _SPEAKER_LINE_RE.match(line)
+        if m:
+            segments.append((m.group(1).strip(), m.group(2).strip()))
+        elif segments:
+            speaker, prev_text = segments[-1]
+            segments[-1] = (speaker, f"{prev_text} {line}")
+        else:
+            segments.append((None, line))
+    return segments or [(None, text)]
+
+
+def _role_for_speaker(speaker: str | None) -> str:
+    """"moderator" gets the primary voice (also used for plain 1-on-1
+    interview mode's single speaker, speaker=None); every simulated
+    FGD/LGD participant who ISN'T the moderator gets the secondary
+    voice — matched by substring, not exact equality, since the model
+    is free to phrase it as "Moderator" or "The moderator" etc."""
+
+    if speaker is None or "moderator" in speaker.lower():
+        return "moderator"
+    return "discusser"
+
+
 def _log_audio_cost(
     session_factory: sessionmaker,
     *,
@@ -291,71 +349,103 @@ def _log_audio_cost(
 
 
 async def _synthesize_stream_and_store(
-    session_factory: sessionmaker, *, session_id: uuid.UUID, text: str, emit, user_id: uuid.UUID, run_id: uuid.UUID,
+    session_factory: sessionmaker,
+    *,
+    session_id: uuid.UUID,
+    text: str,
+    practice_type: str,
+    emit,
+    user_id: uuid.UUID,
+    run_id: uuid.UUID,
 ) -> AsyncGenerator[dict, None]:
     """Streams synthesized speech to the client as raw PCM chunks
-    (audio_start once, audio_chunk repeatedly, audio_end once) instead
-    of the old "wait for the whole clip, then hand back one filename"
-    shape — interview_media.synthesize_stream's own docstring has the
-    live-measured numbers, but the short version: the provider already
-    sends this chunked, first bytes in ~1-1.5s, so the client can start
-    playing well before the full reply is done synthesizing rather
-    than waiting out the whole thing (raised directly by Adrian).
-    Every chunk is ALSO collected here and, once the stream ends,
-    wrapped into a real WAV file and stored — so the exact same clip
+    (audio_start, audio_chunk*, audio_end, repeated once per speaker
+    segment — see _split_speaker_segments/_role_for_speaker above)
+    instead of the old "wait for the whole clip, then hand back one
+    filename" shape — interview_media.synthesize_stream's own
+    docstring has the live-measured numbers, but the short version:
+    the provider already sends this chunked, first bytes in ~1-1.5s,
+    so the client can start playing well before the full reply is
+    done synthesizing rather than waiting out the whole thing (raised
+    directly by Adrian). Plain interview mode is just one segment
+    (speaker=None); FGD/LGD is one segment per "Speaker: text" line,
+    each synthesized with a different voice depending on whether it's
+    the moderator or another simulated participant — also raised
+    directly by Adrian, group discussion practice sounding like one
+    person reading every part isn't a realistic FGD/LGD.
+
+    Every chunk from every segment is ALSO collected into one combined
+    buffer and, once the whole turn's synthesis ends, wrapped into a
+    single WAV file and stored — so the exact same multi-voice clip
     that just played live is still replayable later (the ▶ replay
-    button, the results screen) via a plain one-shot fetch, same as
-    before this change.
+    button, the results screen) via a plain one-shot fetch.
 
     Ends by yielding a `{"__audio_filename__": ...}` sentinel (None on
-    any failure, mirroring _run_agent_turn's own `__reply__` sentinel
-    convention) — the caller strips it before it reaches an SSE
-    client. A failure at any point — including mid-stream, after some
-    chunks already played — degrades to text-only rather than raising:
-    the reply_text this session already has is real and worth keeping
+    total failure, mirroring _run_agent_turn's own `__reply__`
+    sentinel convention) — the caller strips it before it reaches an
+    SSE client. A failure on any ONE segment — including mid-stream,
+    after some of ITS chunks already played — degrades that segment to
+    text-only and moves on to the next one rather than raising: the
+    reply_text this session already has is real and worth keeping
     regardless of whether audio came with it (same accessibility
     reasoning the plan's own frontend design commits to: the question
     is always shown as real text, never audio-only)."""
 
     truncated_text = _truncate_for_speech(text)
-    try:
-        with session_factory() as db:
-            stream = await interview_media.synthesize_stream(db, text=truncated_text)
-    except interview_media.InterviewMediaError as exc:
-        yield emit("stage", _stage("synthesizing", "done", f"Audio unavailable — text only ({exc})"))
-        yield {"__audio_filename__": None}
-        return
+    segments = _split_speaker_segments(truncated_text, practice_type)
 
-    yield emit("audio_start", {"sample_rate": stream.sample_rate, "channels": stream.channels})
     pcm_buffer = bytearray()
-    try:
-        async for chunk in stream.chunks:
-            pcm_buffer.extend(chunk)
-            yield _emit_ephemeral("audio_chunk", {"data": base64.b64encode(chunk).decode("ascii")})
-    except interview_media.InterviewMediaError as exc:
-        # Whatever chunks already reached the client keep playing
-        # client-side regardless — not re-raised, this is still a
-        # text-only degradation of what remains, not a failed turn.
-        yield emit("stage", _stage("synthesizing", "done", f"Audio stream interrupted — text only from here ({exc})"))
+    combined_sample_rate: int | None = None
+    combined_channels: int | None = None
+
+    for speaker, segment_text in segments:
+        if not segment_text.strip():
+            continue
+        role = _role_for_speaker(speaker)
+        try:
+            with session_factory() as db:
+                stream = await interview_media.synthesize_stream(
+                    db, text=segment_text, secondary=(role == "discusser"),
+                )
+        except interview_media.InterviewMediaError as exc:
+            yield emit("stage", _stage("synthesizing", "done", f"Audio unavailable for one part — text only ({exc})"))
+            continue
+
+        yield emit("audio_start", {"sample_rate": stream.sample_rate, "channels": stream.channels, "speaker": speaker, "role": role})
+        combined_sample_rate = combined_sample_rate or stream.sample_rate
+        combined_channels = combined_channels or stream.channels
+        try:
+            async for chunk in stream.chunks:
+                pcm_buffer.extend(chunk)
+                yield _emit_ephemeral("audio_chunk", {"data": base64.b64encode(chunk).decode("ascii")})
+        except interview_media.InterviewMediaError as exc:
+            # Whatever chunks from THIS segment already reached the
+            # client keep playing client-side regardless — not
+            # re-raised, this segment degrades to text-only and the
+            # loop moves on to whichever segments come after it.
+            yield emit("stage", _stage("synthesizing", "done", f"Audio stream interrupted for one part — text only from here ({exc})"))
+            yield emit("audio_end", {})
+            continue
+
+        with session_factory() as db:
+            cost_usd, cost_known = interview_media.estimate_speech_cost(
+                db, provider=stream.provider, model_id=stream.model_id,
+                provider_connection_id=stream.provider_connection_id, char_count=len(segment_text),
+            )
+        _log_audio_cost(
+            session_factory, user_id=user_id, agent_run_id=run_id, stage="interview-practice-tts",
+            provider=stream.provider, model_id=stream.model_id, cost_usd=cost_usd, cost_known=cost_known,
+        )
+        yield emit("audio_end", {})
+
+    if combined_sample_rate is None or combined_channels is None:
         yield {"__audio_filename__": None}
         return
 
-    wav_bytes = interview_media.wrap_pcm_as_wav(bytes(pcm_buffer), sample_rate=stream.sample_rate, channels=stream.channels)
+    wav_bytes = interview_media.wrap_pcm_as_wav(bytes(pcm_buffer), sample_rate=combined_sample_rate, channels=combined_channels)
     filename = f"{uuid.uuid4()}.wav"
     key = f"interview-audio/{session_id}/{filename}"
     await to_thread(put_object, key, wav_bytes, "audio/wav")
-
-    with session_factory() as db:
-        cost_usd, cost_known = interview_media.estimate_speech_cost(
-            db, provider=stream.provider, model_id=stream.model_id,
-            provider_connection_id=stream.provider_connection_id, char_count=len(truncated_text),
-        )
-    _log_audio_cost(
-        session_factory, user_id=user_id, agent_run_id=run_id, stage="interview-practice-tts",
-        provider=stream.provider, model_id=stream.model_id, cost_usd=cost_usd, cost_known=cost_known,
-    )
-
-    yield emit("audio_end", {"audio_filename": filename})
     yield {"__audio_filename__": filename}
 
 
@@ -384,6 +474,7 @@ async def start_interview_session(
     )
 
     reply_text = ""
+    end_requested = False
     try:
         async for evt in _run_agent_turn(
             session_factory, practice_type=practice_type, thread_id=thread_id, run_id=run_id, user_id=user_id,
@@ -391,6 +482,9 @@ async def start_interview_session(
         ):
             if "__reply__" in evt:
                 reply_text = evt["__reply__"]
+                continue
+            if "__end_requested__" in evt:
+                end_requested = evt["__end_requested__"]
                 continue
             yield evt
         if not reply_text:
@@ -401,7 +495,8 @@ async def start_interview_session(
         yield emit("stage", _stage("synthesizing", "started", "Synthesizing question audio"))
         audio_filename = None
         async for evt in _synthesize_stream_and_store(
-            session_factory, session_id=session_id, text=reply_text, emit=emit, user_id=user_id, run_id=run_id,
+            session_factory, session_id=session_id, text=reply_text, practice_type=practice_type,
+            emit=emit, user_id=user_id, run_id=run_id,
         ):
             if "__audio_filename__" in evt:
                 audio_filename = evt["__audio_filename__"]
@@ -411,6 +506,9 @@ async def start_interview_session(
             yield emit("stage", _stage("synthesizing", "done", "Ready"))
         await _finish_run(session_factory, run_id=run_id, status="completed")
         yield emit("done", {"reply_text": reply_text, "audio_filename": audio_filename})
+        if end_requested:
+            async for evt in _end_session_after_turn(session_factory, session_id=session_id, user_id=user_id, emit=emit):
+                yield evt
     except Exception as exc:
         await _finish_run(session_factory, run_id=run_id, status="failed")
         yield emit("error", {"message": str(exc)[:500] or type(exc).__name__})
@@ -466,12 +564,16 @@ async def submit_turn(
         yield emit("message", {"role": "user", "text": transcript})
 
         reply_text = ""
+        end_requested = False
         async for evt in _run_agent_turn(
             session_factory, practice_type=practice_type, thread_id=thread_id, run_id=run_id, user_id=user_id,
             human_message=transcript, emit=emit,
         ):
             if "__reply__" in evt:
                 reply_text = evt["__reply__"]
+                continue
+            if "__end_requested__" in evt:
+                end_requested = evt["__end_requested__"]
                 continue
             yield evt
         if not reply_text:
@@ -482,7 +584,8 @@ async def submit_turn(
         yield emit("stage", _stage("synthesizing", "started", "Synthesizing response audio"))
         audio_filename = None
         async for evt in _synthesize_stream_and_store(
-            session_factory, session_id=session_id, text=reply_text, emit=emit, user_id=user_id, run_id=run_id,
+            session_factory, session_id=session_id, text=reply_text, practice_type=practice_type,
+            emit=emit, user_id=user_id, run_id=run_id,
         ):
             if "__audio_filename__" in evt:
                 audio_filename = evt["__audio_filename__"]
@@ -492,6 +595,9 @@ async def submit_turn(
             yield emit("stage", _stage("synthesizing", "done", "Ready"))
         await _finish_run(session_factory, run_id=run_id, status="completed")
         yield emit("done", {"reply_text": reply_text, "audio_filename": audio_filename})
+        if end_requested:
+            async for evt in _end_session_after_turn(session_factory, session_id=session_id, user_id=user_id, emit=emit):
+                yield evt
     except interview_media.InterviewMediaError as exc:
         # Still a hard failure here — unlike a synthesis failure
         # (degraded to text-only above), a transcription failure means
@@ -533,8 +639,12 @@ async def end_interview_session(
     session_factory: sessionmaker, *, session_id: uuid.UUID, user_id: uuid.UUID
 ) -> InterviewSession:
     """Scores the session from its real transcript and marks it
-    completed — user-driven only in this first pass (no agent-decided
-    auto-end), a deliberate simplification for now."""
+    completed — called either from the human clicking "End session"
+    (routers/interview_sessions.py's own POST .../end), or
+    automatically right after a turn in which the agent itself called
+    end_interview (_end_session_after_turn below, only ever invoked
+    once that turn's own "done" event — closing remark included — has
+    already gone out)."""
 
     with session_factory() as db:
         session_row = db.query(InterviewSession).filter_by(id=session_id, user_id=user_id).one_or_none()
@@ -567,3 +677,35 @@ async def end_interview_session(
         db.commit()
         db.refresh(session_row)
         return session_row
+
+
+async def _end_session_after_turn(
+    session_factory: sessionmaker, *, session_id: uuid.UUID, user_id: uuid.UUID, emit,
+) -> AsyncGenerator[dict, None]:
+    """The agent-initiated counterpart to a human clicking "End
+    session" — same end_interview_session call underneath, wrapped
+    with the SSE events the frontend needs to show a loading state
+    while scoring runs (raised directly by Adrian: this can take a
+    few real seconds, a real LLM call over the whole transcript) and
+    then land straight on the results screen without a second round-
+    trip. A scoring failure here is reported as an "error" event, not
+    raised — the turn itself (and its "done" event) already succeeded
+    by the time this runs, so this only ever degrades "the session
+    also auto-scored" back to "the human can still press End session
+    manually later", never the whole turn."""
+
+    yield emit("stage", _stage("scoring", "started", "Wrapping up — scoring your session"))
+    try:
+        session_row = await end_interview_session(session_factory, session_id=session_id, user_id=user_id)
+    except InterviewServiceError as exc:
+        yield emit("error", {"message": f"the interview ended, but scoring failed: {exc}"})
+        return
+    yield emit(
+        "session_ended",
+        {
+            "status": session_row.status,
+            "overall_score": float(session_row.overall_score) if session_row.overall_score is not None else None,
+            "feedback": session_row.feedback,
+            "ended_at": session_row.ended_at.isoformat() if session_row.ended_at else None,
+        },
+    )

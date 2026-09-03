@@ -166,12 +166,14 @@ class AudioSettingsOut(BaseModel):
     transcribe_catalog_entry_id: uuid.UUID | None
     speech_catalog_entry_id: uuid.UUID | None
     speech_voice: str | None
+    speech_voice_secondary: str | None = None
 
 
 class AudioSettingsUpdate(BaseModel):
     transcribe_catalog_entry_id: uuid.UUID | None = None
     speech_catalog_entry_id: uuid.UUID | None = None
     speech_voice: str | None = None
+    speech_voice_secondary: str | None = None
 
 
 # --- F1 Profile / EvidenceItem (step 4 CRUD stubs) ---

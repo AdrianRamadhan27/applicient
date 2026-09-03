@@ -198,7 +198,16 @@ class AudioSettings(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     speech_catalog_entry_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("model_catalog_entries.id", ondelete="SET NULL")
     )
+    # "Moderator / interviewer" voice — the single voice used for
+    # plain 1-on-1 interview mode, and the moderator's own lines in
+    # FGD/LGD mode.
     speech_voice: Mapped[str | None] = mapped_column(String(80))
+    # FGD/LGD needs at least two distinct voices to sound like a real
+    # group discussion rather than one person reading every part — this
+    # is the voice used for every simulated participant who ISN'T the
+    # moderator (interview_service.py's own _role_for_speaker decides
+    # who counts). Unused outside fgd/lgd practice_type.
+    speech_voice_secondary: Mapped[str | None] = mapped_column(String(80))
 
 
 class Budget(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):

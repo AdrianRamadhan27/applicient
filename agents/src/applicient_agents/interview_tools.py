@@ -15,7 +15,17 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import tool
 
 
-def build_interview_tools(*, model: BaseChatModel, supports_web_search: bool) -> list:
+def build_interview_tools(*, model: BaseChatModel, supports_web_search: bool, end_signal: dict) -> list:
+    """`end_signal` is a plain mutable dict, not a return value — a
+    tool's only channel back to the model is the string it returns,
+    but interview_service.py's own turn driver needs a real out-of-
+    band signal ("did the agent decide to end the session THIS turn")
+    once the whole ainvoke() call is done, same "closure reports
+    side-channel state" pattern browser_tools.py's record_screenshot/
+    record_email_draft and orchestrator_tools.py's emit_progress/
+    emit_card already establish."""
+
+
     @tool
     def search_company_interview_questions(company_name: str) -> str:
         """Look up real, commonly-reported interview questions/experiences for a specific company —
@@ -56,4 +66,19 @@ def build_interview_tools(*, model: BaseChatModel, supports_web_search: bool) ->
             return f"error: company research lookup failed ({exc}) — fall back to your own general knowledge instead."
         return str(response.content)[:3000]
 
-    return [search_company_interview_questions]
+    @tool
+    def end_interview() -> str:
+        """Ends this practice session right after your current reply
+        finishes — call this when you judge the session has covered a
+        well-rounded set of questions/rounds for its scope, OR
+        immediately if the candidate explicitly asks to stop/end the
+        interview. Always say a real, natural closing remark in your
+        OWN reply THIS SAME turn first (thank them, a short honest
+        note on how it went) — never call this tool silently instead
+        of replying. Scoring and feedback run automatically right
+        after your closing remark is heard."""
+
+        end_signal["requested"] = True
+        return "Understood — this session will end automatically once your closing remark finishes."
+
+    return [search_company_interview_questions, end_interview]
