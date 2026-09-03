@@ -1068,11 +1068,24 @@ class PlanOut(BaseModel):
     is_active: bool
 
 
+class AdminPlanOut(PlanOut):
+    """Admin-only view of a Plan — adds Dodo's own product ids, split
+    test/live (see models/billing.py) since they're never the same
+    object and shouldn't be shown to (or editable by) anyone but an
+    admin managing the actual Dodo setup. The public /billing/plans
+    listing stays on plain PlanOut."""
+
+    dodo_product_id_test: str | None = None
+    dodo_product_id_live: str | None = None
+
+
 class PlanCreate(BaseModel):
     name: str
     price_idr: int = Field(ge=0)
     monthly_usage_cap_usd: float = Field(gt=0)
     is_active: bool = True
+    dodo_product_id_test: str | None = None
+    dodo_product_id_live: str | None = None
 
 
 class PlanUpdate(BaseModel):
@@ -1080,6 +1093,8 @@ class PlanUpdate(BaseModel):
     price_idr: int | None = Field(default=None, ge=0)
     monthly_usage_cap_usd: float | None = Field(default=None, gt=0)
     is_active: bool | None = None
+    dodo_product_id_test: str | None = None
+    dodo_product_id_live: str | None = None
 
 
 class SubscriptionOut(BaseModel):

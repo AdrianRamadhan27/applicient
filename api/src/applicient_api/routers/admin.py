@@ -12,7 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
-from applicient_api.billing_service import DodoError, current_period_spend_usd, ensure_product_for_plan, sync_product_for_plan
+from applicient_api.billing_service import (
+    DodoError,
+    current_period_spend_usd,
+    ensure_product_for_plan,
+    plan_product_id,
+    sync_product_for_plan,
+)
 from applicient_api.deps import current_admin_user, get_db
 from applicient_api.models.billing import Plan, Subscription
 from applicient_api.models.profile import User
@@ -104,12 +110,12 @@ def _admin_user_out(db: Session, user: User) -> schemas.AdminUserOut:
     )
 
 
-@router.get("/plans", response_model=list[schemas.PlanOut])
+@router.get("/plans", response_model=list[schemas.AdminPlanOut])
 def list_plans(db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)):
     return db.query(Plan).order_by(Plan.price_idr.asc()).all()
 
 
-@router.post("/plans", response_model=schemas.PlanOut, status_code=201)
+@router.post("/plans", response_model=schemas.AdminPlanOut, status_code=201)
 async def create_plan(
     body: schemas.PlanCreate, db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)
 ):
@@ -118,6 +124,12 @@ async def create_plan(
         price_idr=body.price_idr,
         monthly_usage_cap_usd=body.monthly_usage_cap_usd,
         is_active=body.is_active,
+        # Lets an admin attach an already-existing Dodo product (e.g.
+        # one created by hand in the dashboard) instead of always
+        # auto-creating a new one below — ensure_product_for_plan is a
+        # no-op once either of these is already set.
+        dodo_product_id_test=body.dodo_product_id_test,
+        dodo_product_id_live=body.dodo_product_id_live,
     )
     db.add(plan)
     db.commit()
@@ -134,7 +146,7 @@ async def create_plan(
     return plan
 
 
-@router.patch("/plans/{plan_id}", response_model=schemas.PlanOut)
+@router.patch("/plans/{plan_id}", response_model=schemas.AdminPlanOut)
 async def update_plan(
     plan_id: uuid.UUID,
     body: schemas.PlanUpdate,
@@ -158,7 +170,7 @@ async def update_plan(
     # pricing model itself is immutable).
     if "name" in changed or "price_idr" in changed:
         try:
-            if plan.dodo_product_id:
+            if plan_product_id(plan):
                 await sync_product_for_plan(db, plan)
             else:
                 await ensure_product_for_plan(db, plan)

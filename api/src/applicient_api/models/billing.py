@@ -30,10 +30,21 @@ class Plan(UUIDPKMixin, TimestampMixin, Base):
     price_idr: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # smallest unit (Rupiah, no decimals)
     monthly_usage_cap_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)  # selectable at signup/upgrade
-    # Dodo's own Product, created on demand (billing_service.ensure_product_for_plan)
-    # rather than a manual dashboard step — null for the free plan
-    # (price_idr == 0), which never needs a checkout at all.
-    dodo_product_id: Mapped[str | None] = mapped_column(String(120))
+    # Dodo's own Product — auto-created on demand
+    # (billing_service.ensure_product_for_plan) when empty, or set
+    # directly through the admin Plans page for a product that already
+    # exists in Dodo's dashboard. Split test/live rather than one
+    # shared column: Dodo's test and live modes are fully separate
+    # catalogs (a product made in one mode simply doesn't exist in the
+    # other), so a single column meant switching DODO_PAYMENTS_ENVIRONMENT
+    # would blindly reuse a test-mode product id against the live API
+    # (or vice versa) — exactly what broke checkout after Adrian moved
+    # the real products over to live mode. billing_service picks
+    # whichever of these matches the server's current environment;
+    # null for the free plan (price_idr == 0) in either case, since
+    # there's nothing to check out for a $0 tier.
+    dodo_product_id_test: Mapped[str | None] = mapped_column(String(120))
+    dodo_product_id_live: Mapped[str | None] = mapped_column(String(120))
 
 
 class Subscription(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
@@ -47,7 +58,15 @@ class Subscription(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
 
     plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("plans.id", ondelete="RESTRICT"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # pending/active/on_hold/paused/cancelled/failed/expired/past_due
-    dodo_customer_id: Mapped[str | None] = mapped_column(String(120))
+    # Same split-by-environment reasoning as Plan.dodo_product_id_test/
+    # _live above — a Dodo customer is also test/live-scoped, so
+    # `_ensure_customer`'s cache-check (billing_service.py) would
+    # otherwise reuse a test-mode customer id against the live API (or
+    # vice versa) the moment DODO_PAYMENTS_ENVIRONMENT changes for a
+    # user who was ever exercised in the other mode — the exact next
+    # failure after the product-id one (raised directly by Adrian).
+    dodo_customer_id_test: Mapped[str | None] = mapped_column(String(120))
+    dodo_customer_id_live: Mapped[str | None] = mapped_column(String(120))
     current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

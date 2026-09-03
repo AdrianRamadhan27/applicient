@@ -28,6 +28,16 @@ export type Plan = {
   is_active: boolean;
 };
 
+// Admin-only view — adds Dodo's own product ids, split test/live since
+// they're never the same object in Dodo (moving from test to live
+// broke checkout precisely because one shared id was being reused
+// across both, raised directly by Adrian). The public billing plans
+// list (Plan above) never exposes these.
+export type AdminPlan = Plan & {
+  dodo_product_id_test: string | null;
+  dodo_product_id_live: string | null;
+};
+
 export type Subscription = {
   plan_id: string;
   plan_name: string;
@@ -1825,9 +1835,22 @@ export const api = {
       { method: "POST" },
     ),
 
-  listPlans: () => request<Plan[]>("/admin/plans"),
-  createPlan: (body: { name: string; price_idr: number; monthly_usage_cap_usd: number; is_active?: boolean }) =>
-    request<Plan>("/admin/plans", { method: "POST", body: JSON.stringify(body) }),
-  updatePlan: (id: string, body: Partial<Pick<Plan, "name" | "price_idr" | "monthly_usage_cap_usd" | "is_active">>) =>
-    request<Plan>(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  listPlans: () => request<AdminPlan[]>("/admin/plans"),
+  createPlan: (body: {
+    name: string;
+    price_idr: number;
+    monthly_usage_cap_usd: number;
+    is_active?: boolean;
+    dodo_product_id_test?: string | null;
+    dodo_product_id_live?: string | null;
+  }) => request<AdminPlan>("/admin/plans", { method: "POST", body: JSON.stringify(body) }),
+  updatePlan: (
+    id: string,
+    body: Partial<
+      Pick<
+        AdminPlan,
+        "name" | "price_idr" | "monthly_usage_cap_usd" | "is_active" | "dodo_product_id_test" | "dodo_product_id_live"
+      >
+    >,
+  ) => request<AdminPlan>(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 };

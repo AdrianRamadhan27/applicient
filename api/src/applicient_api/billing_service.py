@@ -96,6 +96,26 @@ def _client() -> AsyncDodoPayments:
     return AsyncDodoPayments(bearer_token=_api_key(), webhook_key=webhook_key(), environment=_environment())
 
 
+def plan_product_id(plan: Plan) -> str | None:
+    """Whichever of the plan's two product ids matches the server's
+    *current* DODO_PAYMENTS_ENVIRONMENT — test and live are fully
+    separate catalogs in Dodo, so this is never a fallback/either-or,
+    only the one that's actually valid against whatever mode `_client()`
+    is about to talk to. Exposed (not `_`-prefixed) so routers/admin.py
+    can use the same rule to decide whether an edited plan already has
+    a product for the active environment, without duplicating the
+    `_environment()` check there."""
+
+    return plan.dodo_product_id_live if _environment() == "live_mode" else plan.dodo_product_id_test
+
+
+def _set_plan_product_id(plan: Plan, product_id: str) -> None:
+    if _environment() == "live_mode":
+        plan.dodo_product_id_live = product_id
+    else:
+        plan.dodo_product_id_test = product_id
+
+
 def _frontend_url() -> str:
     return os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
@@ -141,16 +161,23 @@ def period_start(subscription: Subscription | None) -> datetime:
 
 
 async def ensure_product_for_plan(db: Session, plan: Plan) -> str | None:
-    """Find-or-create this plan's Dodo Product — "product creation
-    into the setup," not a manual dashboard step. Returns None for a
-    free plan (price_idr == 0): there's nothing to check out for a $0
-    tier, so it never gets a product. Idempotent — a plan that already
-    has a dodo_product_id is returned as-is, never recreated."""
+    """Find-or-create this plan's Dodo Product for the server's
+    *current* environment — "product creation into the setup," not a
+    manual dashboard step, though the admin Plans page can also set
+    one directly for a product that already exists in Dodo (e.g. one
+    created by hand after moving from test to live). Returns None for
+    a free plan (price_idr == 0): there's nothing to check out for a
+    $0 tier, so it never gets a product. Idempotent per environment —
+    a plan that already has a product id for the active environment is
+    returned as-is, never recreated; switching environments (test <->
+    live) naturally creates/uses the *other* column instead of
+    colliding with it."""
 
     if plan.price_idr <= 0:
         return None
-    if plan.dodo_product_id:
-        return plan.dodo_product_id
+    existing = plan_product_id(plan)
+    if existing:
+        return existing
 
     client = _client()
     try:
@@ -158,32 +185,52 @@ async def ensure_product_for_plan(db: Session, plan: Plan) -> str | None:
     except Exception as exc:
         raise DodoError(f"could not create a Dodo product for plan {plan.name!r}: {exc}") from exc
 
-    plan.dodo_product_id = product.product_id
+    _set_plan_product_id(plan, product.product_id)
     db.commit()
-    return plan.dodo_product_id
+    return plan_product_id(plan)
 
 
 async def sync_product_for_plan(db: Session, plan: Plan) -> None:
     """Called from the admin Plan CRUD's update path (routers/admin.py)
     so an edited name/price doesn't silently drift from what Dodo
     actually charges — confirmed live that both are patchable in place
-    (only the pricing *model*, one-time vs recurring, is immutable). A
-    no-op for a plan with no product yet; ensure_product_for_plan is
-    what creates one on first real need (plan creation, or the first
-    checkout against it, whichever comes first)."""
+    (only the pricing *model*, one-time vs recurring, is immutable).
+    Only ever touches the *current* environment's product (test and
+    live are separate Dodo objects — a price change made while running
+    in test mode has nothing to do with the live product, and vice
+    versa). A no-op if the active environment has no product id yet;
+    ensure_product_for_plan is what creates one on first real need."""
 
-    if not plan.dodo_product_id:
+    product_id = plan_product_id(plan)
+    if not product_id:
         return
     client = _client()
     try:
-        await client.products.update(plan.dodo_product_id, name=plan.name, price=_price_body(plan))
+        await client.products.update(product_id, name=plan.name, price=_price_body(plan))
     except Exception as exc:
         raise DodoError(f"could not update the Dodo product for plan {plan.name!r}: {exc}") from exc
 
 
+def subscription_customer_id(subscription: Subscription) -> str | None:
+    """Same rule as plan_product_id above, applied to the other half
+    of the same bug (raised directly by Adrian) — a Dodo customer is
+    also test/live-scoped, so this is never a fallback, only whichever
+    column matches the server's current environment."""
+
+    return subscription.dodo_customer_id_live if _environment() == "live_mode" else subscription.dodo_customer_id_test
+
+
+def _set_subscription_customer_id(subscription: Subscription, customer_id: str) -> None:
+    if _environment() == "live_mode":
+        subscription.dodo_customer_id_live = customer_id
+    else:
+        subscription.dodo_customer_id_test = customer_id
+
+
 async def _ensure_customer(db: Session, *, user: User, subscription: Subscription) -> str:
-    if subscription.dodo_customer_id:
-        return subscription.dodo_customer_id
+    existing = subscription_customer_id(subscription)
+    if existing:
+        return existing
     # No separate name field on User (same real, disclosed
     # simplification the Xendit build already made) — same
     # local-part-of-email convention reused here.
@@ -193,7 +240,7 @@ async def _ensure_customer(db: Session, *, user: User, subscription: Subscriptio
         customer = await client.customers.create(email=user.email, name=name)
     except Exception as exc:
         raise DodoError(f"could not create a Dodo customer: {exc}") from exc
-    subscription.dodo_customer_id = customer.customer_id
+    _set_subscription_customer_id(subscription, customer.customer_id)
     db.commit()
     return customer.customer_id
 
@@ -256,13 +303,21 @@ async def sync_subscription_from_dodo(
         raise DodoError(f"could not fetch Dodo subscription {target_id}: {exc}") from exc
 
     subscription.dodo_subscription_id = dodo_sub.subscription_id
-    subscription.dodo_customer_id = dodo_sub.customer.customer_id
+    _set_subscription_customer_id(subscription, dodo_sub.customer.customer_id)
     subscription.status = dodo_sub.status
     subscription.current_period_start = dodo_sub.previous_billing_date
     subscription.current_period_end = dodo_sub.next_billing_date
 
     if dodo_sub.status == "active":
-        plan = db.query(Plan).filter_by(dodo_product_id=dodo_sub.product_id).one_or_none()
+        # Leftover from the dodo_product_id_test/_live split — this
+        # used to filter on the old shared `dodo_product_id` column,
+        # which no longer exists at all (would have raised on the very
+        # next real sync). Matches against whichever of the two id
+        # columns corresponds to the environment `dodo_sub` was
+        # actually fetched from (the same one `_client()` just talked
+        # to), same as plan_product_id's own read side.
+        id_column = Plan.dodo_product_id_live if _environment() == "live_mode" else Plan.dodo_product_id_test
+        plan = db.query(Plan).filter(id_column == dodo_sub.product_id).one_or_none()
         if plan is not None:
             subscription.plan_id = plan.id
             subscription.pending_plan_id = None
@@ -297,7 +352,14 @@ def find_subscription_by_dodo_ids(
         if found is not None:
             return found
     if dodo_customer_id:
-        return db.query(Subscription).filter_by(dodo_customer_id=dodo_customer_id).one_or_none()
+        # A webhook only ever fires from whichever mode it's actually
+        # configured for — matches against the customer-id column for
+        # the environment this server is currently running as, same as
+        # subscription_customer_id's own read side.
+        id_column = (
+            Subscription.dodo_customer_id_live if _environment() == "live_mode" else Subscription.dodo_customer_id_test
+        )
+        return db.query(Subscription).filter(id_column == dodo_customer_id).one_or_none()
     return None
 
 
