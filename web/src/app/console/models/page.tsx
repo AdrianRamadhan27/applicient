@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import {
   api,
+  type AudioSettings,
   type ModelCatalogEntry,
   type ModelProfile,
   type ProviderConnection,
@@ -86,6 +87,24 @@ function money(v: number | null) {
   if (v === null) return "—";
   if (v === 0) return "free";
   return `$${v.toFixed(2)}`;
+}
+
+// Phase 11 (v2 plan) follow-up — a transcription/speech catalog entry
+// is priced per input-minute or per input-character instead of per
+// million tokens (ModelCatalogEntry's own docstring has the live-
+// verified reasoning). `money()`'s 2-decimal rounding would show
+// "$0.00" for basically every one of these (e.g. deepgram/aura-2's
+// real $0.00003/character) — real per-unit prices this small need
+// more precision to read as anything but "free".
+function catalogPrice(m: ModelCatalogEntry): string {
+  if (m.price_per_minute !== null) {
+    return m.price_per_minute === 0 ? "free" : `$${m.price_per_minute.toFixed(4)}/min`;
+  }
+  if (m.price_per_character !== null) {
+    return m.price_per_character === 0 ? "free" : `$${m.price_per_character.toFixed(6)}/char`;
+  }
+  if (!m.pricing_known) return "unknown";
+  return `${money(m.input_price_per_mtok)} · ${money(m.output_price_per_mtok)}`;
 }
 
 export default function ModelsPage() {
@@ -244,6 +263,79 @@ export default function ModelsPage() {
     }
     return options;
   }, [connections, catalogs]);
+
+  // Phase 11 (v2 plan) — interview practice's STT/TTS model + voice.
+  // Same "every connection's catalog, not just the selected one"
+  // reasoning tierOptions already uses.
+  const audioOptions = React.useMemo(() => {
+    const transcribe: TierOption[] = [];
+    const speech: TierOption[] = [];
+    for (const conn of connections) {
+      const connectionLabel = conn.label || conn.provider;
+      for (const entry of catalogs[conn.id] ?? []) {
+        const option = { entry, connectionId: conn.id, connectionLabel };
+        if (entry.capabilities.includes("transcription")) transcribe.push(option);
+        if (entry.capabilities.includes("speech")) speech.push(option);
+      }
+    }
+    return { transcribe, speech };
+  }, [connections, catalogs]);
+
+  const [audioSettings, setAudioSettings] = React.useState<AudioSettings | null>(null);
+  const [audioDraft, setAudioDraft] = React.useState({ transcribe: "", speech: "", voice: "" });
+  const [savingAudio, setSavingAudio] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await api.getAudioSettings();
+        if (!cancelled) setAudioSettings(s);
+      } catch (e) {
+        if (!cancelled) toast.error(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!audioSettings) return;
+    (() =>
+      setAudioDraft({
+        transcribe: audioSettings.transcribe_catalog_entry_id ?? "",
+        speech: audioSettings.speech_catalog_entry_id ?? "",
+        voice: audioSettings.speech_voice ?? "",
+      }))();
+  }, [audioSettings]);
+
+  const selectedSpeechEntry = React.useMemo(
+    () => audioOptions.speech.find((o) => o.entry.id === audioDraft.speech)?.entry ?? null,
+    [audioOptions.speech, audioDraft.speech],
+  );
+
+  function handleSpeechModelChange(entryId: string) {
+    const entry = audioOptions.speech.find((o) => o.entry.id === entryId)?.entry;
+    setAudioDraft((d) => ({ ...d, speech: entryId, voice: entry?.voices?.[0] ?? "" }));
+  }
+
+  async function handleSaveAudioSettings() {
+    setSavingAudio(true);
+    try {
+      const saved = await api.updateAudioSettings({
+        transcribe_catalog_entry_id: audioDraft.transcribe || null,
+        speech_catalog_entry_id: audioDraft.speech || null,
+        speech_voice: audioDraft.voice || null,
+      });
+      setAudioSettings(saved);
+      toast.success("Audio settings saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingAudio(false);
+    }
+  }
 
   const effectiveBindings = React.useMemo(() => {
     const next = { ...bindings };
@@ -725,6 +817,104 @@ export default function ModelsPage() {
           )}
         </section>
 
+        <section className="flex flex-col gap-2">
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+              Audio (interview practice)
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              Speech-to-text and text-to-speech for voice interview practice. Optional — left unset,
+              interview practice already works against a sensible OpenAI/OpenRouter default.
+            </span>
+          </div>
+
+          {!audioOptions.transcribe.length && !audioOptions.speech.length ? (
+            <div className="border border-dashed border-input p-5 text-center text-sm text-muted-foreground">
+              Refresh an OpenRouter or OpenAI connection&apos;s catalog to configure this — it lists real
+              transcription/speech models alongside the chat ones above.
+            </div>
+          ) : (
+            <div className="border border-border bg-card">
+              {(
+                [
+                  { key: "transcribe" as const, label: "Transcription (STT)", options: audioOptions.transcribe },
+                  { key: "speech" as const, label: "Speech (TTS)", options: audioOptions.speech },
+                ]
+              ).map(({ key, label, options }) => {
+                const byConnection = new Map<string, { label: string; options: TierOption[] }>();
+                for (const option of options) {
+                  if (!byConnection.has(option.connectionId)) {
+                    byConnection.set(option.connectionId, { label: option.connectionLabel, options: [] });
+                  }
+                  byConnection.get(option.connectionId)!.options.push(option);
+                }
+                return (
+                  <div
+                    key={key}
+                    className="flex flex-col gap-2 border-b border-border p-3 last:border-b-0 sm:flex-row sm:items-center"
+                  >
+                    <span className="w-32 shrink-0 font-mono text-xs font-medium">{label}</span>
+                    <select
+                      value={audioDraft[key]}
+                      onChange={(event) =>
+                        key === "speech"
+                          ? handleSpeechModelChange(event.target.value)
+                          : setAudioDraft((d) => ({ ...d, transcribe: event.target.value }))
+                      }
+                      disabled={!options.length}
+                      className="h-8 min-w-0 flex-1 border border-input bg-background px-2 font-mono text-xs"
+                    >
+                      <option value="">
+                        {options.length ? "Use the default" : "No compatible model in any catalog"}
+                      </option>
+                      {Array.from(byConnection.entries()).map(([connectionId, group]) => (
+                        <optgroup key={connectionId} label={group.label}>
+                          {group.options.map(({ entry }) => (
+                            <option key={entry.id} value={entry.id}>
+                              {entry.model_id}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+
+              <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-center">
+                <span className="w-32 shrink-0 font-mono text-xs font-medium">Voice</span>
+                {selectedSpeechEntry?.voices?.length ? (
+                  <select
+                    value={audioDraft.voice}
+                    onChange={(event) => setAudioDraft((d) => ({ ...d, voice: event.target.value }))}
+                    className="h-8 min-w-0 flex-1 border border-input bg-background px-2 font-mono text-xs"
+                  >
+                    {selectedSpeechEntry.voices.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    value={audioDraft.voice}
+                    onChange={(e) => setAudioDraft((d) => ({ ...d, voice: e.target.value }))}
+                    placeholder={selectedSpeechEntry ? "e.g. alloy — this model has no listed voices" : "pick a speech model first"}
+                    disabled={!selectedSpeechEntry}
+                    className="h-8 flex-1 font-mono text-xs"
+                  />
+                )}
+              </div>
+
+              <div className="flex justify-end border-t border-border bg-secondary px-3 py-2">
+                <Button size="sm" onClick={handleSaveAudioSettings} disabled={savingAudio}>
+                  {savingAudio ? "Saving…" : "Save audio settings"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+
         {selected && (
           <section className="flex flex-col gap-2 min-h-0">
             <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
@@ -737,9 +927,7 @@ export default function ModelsPage() {
                     <TableHead>Model</TableHead>
                     <TableHead className="w-[90px]">Context</TableHead>
                     <TableHead>Capabilities</TableHead>
-                    <TableHead className="text-right w-[160px]">
-                      Price / Mtok in · out
-                    </TableHead>
+                    <TableHead className="text-right w-[170px]">Price</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -759,9 +947,7 @@ export default function ModelsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs tabular">
-                        {m.pricing_known
-                          ? `${money(m.input_price_per_mtok)} · ${money(m.output_price_per_mtok)}`
-                          : "unknown"}
+                        {catalogPrice(m)}
                       </TableCell>
                     </TableRow>
                   ))}

@@ -58,6 +58,31 @@ class ModelCatalogEntry(UUIDPKMixin, TimestampMixin, Base):
     pricing_version: Mapped[str | None] = mapped_column(String(40))
     pricing_known: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # F12.8/F13.6
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Phase 11 (v2 plan) — only ever populated for a "speech" capability
+    # entry (a TTS model's real named-voice list, e.g. OpenRouter's
+    # deepgram/aura-2 reports 90 of these via its own catalog's
+    # `supported_voices` field). Null for every chat/embedding/
+    # transcription entry — there's nothing to pick there.
+    voices: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    # A transcription/speech entry's real cost is priced per minute of
+    # INPUT AUDIO or per CHARACTER of input text, respectively — never
+    # per-token like every other entry here (confirmed live against
+    # OpenRouter's own catalog, cross-checked against each provider's
+    # real published rate: openai/whisper-1's own `pricing.prompt`
+    # exactly equals its documented $0.006/minute; deepgram/aura-2's
+    # exactly equals its documented $0.030/1,000 chars). The existing
+    # *_price_per_mtok fields stay meaningless for these — reusing them
+    # would silently misrepresent the unit — so these two are genuinely
+    # separate columns, populated only for the one capability each
+    # applies to (mutually exclusive: an entry is never both).
+    # gpt-4o-transcribe-style genuinely-per-token transcription models
+    # are the one real exception (checked live: reports a real
+    # tokenizer, "GPT" not "Other", and its own prompt/completion
+    # prices exactly match OpenAI's published per-token rate) — those
+    # keep using input_price_per_mtok/output_price_per_mtok like a
+    # normal chat model instead of this column.
+    price_per_minute: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    price_per_character: Mapped[float | None] = mapped_column(Numeric(12, 8))
 
 
 class ModelProfile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
@@ -150,6 +175,30 @@ class LlmCall(UUIDPKMixin, Base):
     provider_request_id: Mapped[str | None] = mapped_column(String(200))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AudioSettings(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
+    """Phase 11 (v2 plan) — admin's chosen STT/TTS model + voice for
+    interview practice, surfaced on the Models & Providers page next to
+    tier bindings. Exactly one row for the whole deployment is ever
+    meant to exist (get-or-create in the router, same "not really
+    per-user" treatment ProviderConnection already gets in
+    interview_media.py's own _find_connection — user_id here just
+    records who last edited it, not who it's scoped to). Both catalog
+    FKs are nullable and SET NULL on delete: an admin removing the
+    connection/model currently selected here just falls back to
+    interview_media.py's own hardcoded defaults rather than breaking
+    interview practice outright."""
+
+    __tablename__ = "audio_settings"
+
+    transcribe_catalog_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_catalog_entries.id", ondelete="SET NULL")
+    )
+    speech_catalog_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_catalog_entries.id", ondelete="SET NULL")
+    )
+    speech_voice: Mapped[str | None] = mapped_column(String(80))
 
 
 class Budget(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):

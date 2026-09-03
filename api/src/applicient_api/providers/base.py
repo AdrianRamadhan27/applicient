@@ -35,6 +35,17 @@ class CatalogEntryData:
     cache_write_price_per_mtok: float | None = None
     pricing_version: str | None = None
     pricing_known: bool = False
+    # Phase 11 (v2 plan) — only meaningful for a "speech" capability
+    # entry: the model's own real named-voice list, when the provider
+    # reports one.
+    voices: list[str] | None = None
+    # Phase 11 (v2 plan) follow-up — audio's own two real billing
+    # units (per input-audio-minute for transcription, per input-text-
+    # character for speech); see ModelCatalogEntry's own docstring for
+    # why these are separate from *_price_per_mtok rather than reusing
+    # it. At most one of these is ever set on any given entry.
+    price_per_minute: float | None = None
+    price_per_character: float | None = None
 
 
 class ProviderAdapter:

@@ -7,7 +7,10 @@ was only ever set to `None`).
 
 Two callers so far: the CV-upload backfill (`cv.py`) and the LaTeX
 renderer (M3 §3) — both just need put/get-bytes-by-key, so the client
-stays exactly that, not a general-purpose S3 wrapper.
+stays exactly that, not a general-purpose S3 wrapper. `delete_prefix`
+(Phase 11 v2 plan follow-up) is the first real delete need — deleting
+an interview-practice session removes its stored turn audio too,
+rather than leaving orphaned objects in the bucket forever.
 """
 
 from __future__ import annotations
@@ -72,3 +75,28 @@ def put_object(key: str, data: bytes, content_type: str = "application/octet-str
 def get_object(key: str) -> bytes:
     client = _get_client()
     return client.get_object(Bucket=_bucket, Key=key)["Body"].read()
+
+
+def delete_prefix(prefix: str) -> None:
+    """Deletes every object under `prefix` (e.g.
+    `interview-audio/{session_id}/`) — list_objects_v2 + a batch
+    delete_objects call, paginated since a single delete_objects call
+    caps at 1000 keys (a real interview session has at most a few
+    dozen turns, but this stays correct regardless). A no-op, not an
+    error, if the prefix has nothing under it — deleting a session
+    whose synthesis always failed (text-only, no audio ever stored)
+    is a normal case, not a bug."""
+
+    client = _get_client()
+    continuation_token: str | None = None
+    while True:
+        kwargs = {"Bucket": _bucket, "Prefix": prefix}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        listing = client.list_objects_v2(**kwargs)
+        keys = [obj["Key"] for obj in listing.get("Contents", [])]
+        if keys:
+            client.delete_objects(Bucket=_bucket, Delete={"Objects": [{"Key": k} for k in keys]})
+        if not listing.get("IsTruncated"):
+            break
+        continuation_token = listing.get("NextContinuationToken")

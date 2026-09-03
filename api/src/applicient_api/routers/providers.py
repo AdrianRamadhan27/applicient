@@ -14,9 +14,10 @@ from sqlalchemy.orm import Session
 
 from applicient_api import connections, schemas
 from applicient_api.deps import current_admin_user, get_db
-from applicient_api.models.llm import EmbeddingIndex, ModelCatalogEntry, ModelProfile, ProviderConnection
+from applicient_api.models.llm import AudioSettings, EmbeddingIndex, ModelCatalogEntry, ModelProfile, ProviderConnection
 
 router = APIRouter(prefix="/provider-connections", tags=["providers"])
+audio_settings_router = APIRouter(prefix="/audio-settings", tags=["providers"])
 
 
 @router.get("", response_model=list[schemas.ProviderConnectionOut])
@@ -140,3 +141,53 @@ def get_catalog(
         .order_by(ModelCatalogEntry.model_id)
         .all()
     )
+
+
+# Phase 11 (v2 plan) — interview practice's STT/TTS model + voice,
+# configured here rather than a second admin screen since it reuses
+# the exact same catalog (transcription/speech-capability entries,
+# refreshed the same way chat/embedding ones already are). Deployment-
+# wide singleton — get-or-create, not a list of named presets like
+# ModelProfile, since there's only ever one "the" audio config
+# interview_media.py resolves against.
+def _get_or_create_audio_settings(db: Session, *, user_id: uuid.UUID) -> AudioSettings:
+    settings = db.query(AudioSettings).first()
+    if settings is None:
+        settings = AudioSettings(user_id=user_id)
+        db.add(settings)
+        db.flush()
+    return settings
+
+
+@audio_settings_router.get("", response_model=schemas.AudioSettingsOut)
+def get_audio_settings(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)):
+    settings = _get_or_create_audio_settings(db, user_id=user_id)
+    db.commit()
+    return settings
+
+
+def _validate_catalog_entry(db: Session, entry_id: uuid.UUID | None, capability: str) -> None:
+    if entry_id is None:
+        return
+    entry = db.get(ModelCatalogEntry, entry_id)
+    if entry is None:
+        raise HTTPException(422, f"model catalog entry {entry_id} not found — refresh the provider's catalog first")
+    if capability not in entry.capabilities:
+        raise HTTPException(422, f"{entry.model_id} isn't tagged '{capability}' — pick a model from that section of the catalog")
+
+
+@audio_settings_router.put("", response_model=schemas.AudioSettingsOut)
+def update_audio_settings(
+    body: schemas.AudioSettingsUpdate, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_admin_user)
+):
+    _validate_catalog_entry(db, body.transcribe_catalog_entry_id, "transcription")
+    _validate_catalog_entry(db, body.speech_catalog_entry_id, "speech")
+
+    settings = _get_or_create_audio_settings(db, user_id=user_id)
+    settings.transcribe_catalog_entry_id = body.transcribe_catalog_entry_id
+    settings.speech_catalog_entry_id = body.speech_catalog_entry_id
+    settings.speech_voice = body.speech_voice
+    settings.user_id = user_id
+    db.commit()
+    db.refresh(settings)
+    return settings

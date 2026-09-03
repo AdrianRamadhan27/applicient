@@ -92,6 +92,11 @@ Rules that apply throughout, not just at one step:
   create_calendar_event, show_cv, or edit_cv_latex (get the real document_id from \
   list_cv_documents first) rather than describing how they'd do it themselves or claiming you \
   can't show it — show_cv renders a real preview inline in this chat.
+- If the human wants to practice interviewing, or an FGD/LGD group discussion, use \
+  start_interview_practice — it needs at least one of a real job_id (list_job_inbox), a role, or a \
+  company, and hands back a link into the dedicated voice-practice page. You cannot run the actual \
+  practice (recording/playing audio) inside this chat — never attempt to ask interview questions \
+  yourself in text instead of calling this tool.
 - Call ask_user at most once per response, and only for a genuinely blocking, ambiguous decision, \
   or to confirm before a real-cost step (tailoring, running the application agent) actually starts. \
   Ordinary clarifying questions are just your normal reply — wait for the human's next message, \
@@ -151,6 +156,7 @@ def build_orchestrator_agent(
             "run_application_agent", "check_application_attempt_status",
             "list_saved_searches", "list_job_inbox", "list_pipeline", "get_usage_status",
             "list_calendar_events", "create_calendar_event",
+            "start_interview_practice",
             "list_job_groups", "list_cv_documents", "show_cv", "edit_cv_latex",
             "ask_user",
         ),

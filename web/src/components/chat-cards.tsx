@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   api,
   CALENDAR_EVENT_TYPE_LABEL,
+  INTERVIEW_PRACTICE_TYPE_LABEL,
   type ConversationCard,
   type EvidenceItem,
   type TailoredDocument,
@@ -264,6 +265,34 @@ export function DocumentsCard({ card }: { card: Extract<ConversationCard, { card
           <div className="shrink-0 font-mono text-xs text-muted-foreground">v{d.version}</div>
         </Link>
       ))}
+    </div>
+  );
+}
+
+export function InterviewSessionCard({ card }: { card: Extract<ConversationCard, { card_type: "interview_session" }> }) {
+  return (
+    <div className="max-w-[85%] w-full rounded-md border border-border bg-card p-2 space-y-1.5">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          {INTERVIEW_PRACTICE_TYPE_LABEL[card.practice_type]}
+        </span>
+      </div>
+      <div className="px-1 pb-0.5">
+        <div className="text-sm font-medium">
+          {card.role_title || card.company_name
+            ? [card.role_title, card.company_name].filter(Boolean).join(" @ ")
+            : "Practice session"}
+        </div>
+        <Button size="sm" className="mt-2 h-7 px-2.5 text-[11px]" asChild>
+          <Link
+            href={`/console/interview-practice?session_id=${encodeURIComponent(card.interview_session_id)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Start practice ↗
+          </Link>
+        </Button>
+      </div>
     </div>
   );
 }

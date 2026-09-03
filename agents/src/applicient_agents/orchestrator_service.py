@@ -107,6 +107,17 @@ async def close_checkpointer() -> None:
     _checkpointer_cm = None
 
 
+def get_checkpointer() -> AsyncPostgresSaver | None:
+    """Phase 11 (v2 plan) — the same shared checkpointer instance,
+    exposed for interview_service.py to reuse rather than opening a
+    second Postgres-backed checkpointer. Thread ids are already
+    globally unique (str(uuid.uuid4())) across every feature that uses
+    one, so one instance safely isolates orchestrator conversations
+    and interview sessions alike, purely by thread_id."""
+
+    return _checkpointer
+
+
 def _lock_for(conversation_id: uuid.UUID) -> asyncio.Lock:
     lock = _CONVERSATION_LOCKS.get(conversation_id)
     if lock is None:

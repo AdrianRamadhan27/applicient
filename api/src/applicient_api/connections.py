@@ -99,6 +99,9 @@ def refresh_catalog(session: Session, conn: ProviderConnection) -> list[ModelCat
         row.cache_write_price_per_mtok = entry.cache_write_price_per_mtok
         row.pricing_version = entry.pricing_version
         row.pricing_known = entry.pricing_known
+        row.voices = entry.voices
+        row.price_per_minute = entry.price_per_minute
+        row.price_per_character = entry.price_per_character
         row.fetched_at = now
         result.append(row)
 

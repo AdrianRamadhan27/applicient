@@ -15,6 +15,7 @@ import {
   type EvidenceCategory,
   type EvidenceItem,
   type InboxJob,
+  type InterviewSession,
   type PipelineStage,
   type Preference,
   type PreferenceUpsert,
@@ -44,7 +45,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { usePersona } from "@/components/persona-provider";
 import { RECOMMENDATION_LABEL, recommendationColor } from "@/lib/recommendation";
-import { Check, Circle, FileText, Loader2, Plus, Search, UploadCloud, Users } from "lucide-react";
+import { Check, Circle, FileText, Loader2, Mic, Plus, Search, UploadCloud, Users } from "lucide-react";
 
 // Dashboard = the old /console (account-wide stats) merged with the
 // old Profile Studio (/console/profile) into one page with its own
@@ -406,6 +407,28 @@ function OverviewPanel({
     };
   }, [selectedPersonaId]);
 
+  // Phase 11 (v2 plan) — most recent 3 interview-practice sessions.
+  const [recentInterviews, setRecentInterviews] = React.useState<InterviewSession[] | null>(null);
+
+  React.useEffect(() => {
+    if (!selectedPersonaId) {
+      (() => setRecentInterviews(null))();
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const sessions = await api.listInterviewSessions(selectedPersonaId);
+        if (!cancelled) setRecentInterviews(sessions.slice(0, 3));
+      } catch (e) {
+        if (!cancelled) toast.error(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPersonaId]);
+
   const stageDisplayName = React.useCallback(
     (key: string) => pipelineStages.find((s) => s.key === key)?.display_name ?? key,
     [pipelineStages],
@@ -641,6 +664,60 @@ function OverviewPanel({
                     </div>
                     <Badge variant="outline" className="text-[9px] font-mono shrink-0">
                       {stageDisplayName(app.state)}
+                    </Badge>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Phase 11 (v2 plan) — recent interview-practice sessions */}
+      <section className="max-w-md">
+        <div className="flex flex-col border border-border bg-card">
+          <div className="h-9 border-b border-border bg-secondary flex items-center justify-between px-3">
+            <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+              Interview practice
+            </span>
+            <Link
+              href="/console/interview-practice"
+              className="text-[11px] text-muted-foreground hover:text-foreground underline"
+            >
+              See more
+            </Link>
+          </div>
+          <div className="flex flex-1 flex-col p-3">
+            {!recentInterviews ? (
+              <span className="text-xs text-muted-foreground font-mono">loading…</span>
+            ) : recentInterviews.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
+                <Mic className="size-5 text-muted-foreground" strokeWidth={1.5} />
+                <span className="text-xs text-muted-foreground">
+                  Practice a mock interview, FGD, or LGD — with real voice and AI feedback.
+                </span>
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="/console/interview-practice">Start practice</Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {recentInterviews.map((s) => (
+                  <Link
+                    key={s.id}
+                    href={`/console/interview-practice?session_id=${s.id}`}
+                    className="flex items-start gap-2 border border-border px-2.5 py-2 hover:border-primary transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium truncate">
+                        {[s.role_title, s.company_name].filter(Boolean).join(" @ ") || s.practice_type}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {new Date(s.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-[9px] font-mono shrink-0">
+                      {s.overall_score !== null ? `${s.overall_score.toFixed(0)}/100` : s.status}
                     </Badge>
                   </Link>
                 ))}

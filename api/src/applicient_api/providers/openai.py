@@ -67,15 +67,71 @@ _PRICING: dict[str, tuple[float, float, float | None]] = {
 }
 _ALL_CURRENT_CHAT_CAPABILITIES = ["tools", "structured_output", "vision"]
 
+# Phase 11 (v2 plan) — `/v1/models` lists every OpenAI model in one
+# flat, capability-less list, whisper/tts included — before this fix,
+# _entry_to_catalog tagged EVERYTHING non-embedding as a chat model
+# (tools/structured_output/vision), which was simply wrong for these:
+# whisper-1 doesn't take tool calls, tts-1 doesn't take a text prompt
+# at all. Detected by id pattern (OpenAI's own naming convention, not
+# a capability flag the API exposes) rather than a hardcoded id list,
+# so a future whisper-2/tts-3 still gets tagged correctly.
+_TRANSCRIBE_ID_MARKERS = ("whisper", "transcribe")
+_SPEECH_ID_MARKERS = ("tts",)
+
+# OpenAI's `/v1/models` carries no voice list at all (unlike
+# OpenRouter's own catalog, which reports real `supported_voices` per
+# model — see providers/openrouter.py) — this is manually maintained
+# against OpenAI's published TTS docs, same "not live-verified, dated,
+# disclosed" discipline _PRICING above already uses.
+_OPENAI_TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"]
+
+# Phase 11 (v2 plan) follow-up — real published per-minute/per-
+# character rates (platform.openai.com/docs/pricing, same fetch date
+# as PRICING_VERSION above), the two flat-rate audio models this app
+# actually defaults to. Deliberately NOT exhaustive: gpt-4o-transcribe/
+# gpt-4o-mini-transcribe and gpt-4o-mini-tts are genuinely priced per
+# TOKEN instead (same "specialized audio model" gap _PRICING's own
+# comment already discloses for chat) — left with pricing_known=False
+# here rather than guessed.
+_TRANSCRIBE_PRICE_PER_MINUTE = {"whisper-1": 0.006}
+_SPEECH_PRICE_PER_CHARACTER = {"tts-1": 0.000015, "tts-1-hd": 0.00003}
+
 
 def _entry_to_catalog(entry: dict) -> CatalogEntryData:
     model_id = entry["id"]
-    is_embedding = "embedding" in model_id.lower()
+    lower_id = model_id.lower()
+    is_embedding = "embedding" in lower_id
+    is_transcribe = any(marker in lower_id for marker in _TRANSCRIBE_ID_MARKERS)
+    is_speech = any(marker in lower_id for marker in _SPEECH_ID_MARKERS)
     pricing = _PRICING.get(model_id)
+    per_minute = _TRANSCRIBE_PRICE_PER_MINUTE.get(model_id)
+    per_character = _SPEECH_PRICE_PER_CHARACTER.get(model_id)
+
+    if is_embedding:
+        capabilities = ["embedding"]
+    elif is_transcribe:
+        capabilities = ["transcription"]
+    elif is_speech:
+        capabilities = ["speech"]
+    else:
+        capabilities = _ALL_CURRENT_CHAT_CAPABILITIES
+
+    if is_transcribe or is_speech:
+        return CatalogEntryData(
+            model_id=model_id,
+            display_name=model_id,
+            capabilities=capabilities,
+            price_per_minute=per_minute,
+            price_per_character=per_character,
+            pricing_version=PRICING_VERSION if (per_minute or per_character) else None,
+            pricing_known=per_minute is not None or per_character is not None,
+            voices=_OPENAI_TTS_VOICES if is_speech else None,
+        )
+
     return CatalogEntryData(
         model_id=model_id,
         display_name=model_id,
-        capabilities=["embedding"] if is_embedding else _ALL_CURRENT_CHAT_CAPABILITIES,
+        capabilities=capabilities,
         input_price_per_mtok=pricing[0] if pricing else None,
         output_price_per_mtok=pricing[1] if pricing else None,
         cache_read_price_per_mtok=pricing[2] if pricing else None,

@@ -151,6 +151,27 @@ class ModelCatalogEntryOut(BaseModel):
     pricing_version: str | None
     pricing_known: bool
     fetched_at: datetime
+    voices: list[str] | None = None
+    price_per_minute: float | None = None
+    price_per_character: float | None = None
+
+
+# Phase 11 (v2 plan) — the Models & Providers page's Audio section.
+# Singleton: exactly one row for the whole deployment, get-or-create
+# in routers/providers.py, same reasoning AudioSettings' own docstring
+# gives.
+class AudioSettingsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    transcribe_catalog_entry_id: uuid.UUID | None
+    speech_catalog_entry_id: uuid.UUID | None
+    speech_voice: str | None
+
+
+class AudioSettingsUpdate(BaseModel):
+    transcribe_catalog_entry_id: uuid.UUID | None = None
+    speech_catalog_entry_id: uuid.UUID | None = None
+    speech_voice: str | None = None
 
 
 # --- F1 Profile / EvidenceItem (step 4 CRUD stubs) ---
@@ -1008,6 +1029,60 @@ class CalendarEventUpdate(BaseModel):
     # router always re-derives from this) — same reasoning as create.
     application_id: uuid.UUID | None = None
     notes: str | None = None
+
+
+# Phase 11 (v2 plan) — AI interview/FGD/LGD practice.
+INTERVIEW_PRACTICE_TYPES = ("interview", "fgd", "lgd")
+# interview-only — null/ignored for fgd/lgd (the agent picks its own
+# case/topic there instead of a user-chosen category).
+INTERVIEW_CATEGORIES = ("screening", "hr", "user", "role", "experience", "all")
+
+
+class InterviewSessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    persona_id: uuid.UUID
+    job_id: uuid.UUID | None
+    application_id: uuid.UUID | None
+    role_title: str | None
+    company_name: str | None
+    seniority: str | None
+    practice_type: str
+    category: str | None
+    status: str
+    overall_score: float | None
+    feedback: dict | None
+    created_at: datetime
+    ended_at: datetime | None
+
+
+class InterviewSessionCreate(BaseModel):
+    persona_id: uuid.UUID
+    job_id: uuid.UUID | None = None
+    application_id: uuid.UUID | None = None
+    # Free-text target — independently optional, any combination valid
+    # (role only / company only / both / neither if job_id is set
+    # instead). The router requires at least one of job_id/role_title/
+    # company_name to be present overall.
+    role_title: str | None = None
+    company_name: str | None = None
+    seniority: str | None = None
+    practice_type: str
+    category: str | None = None
+
+
+class InterviewSessionEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    created_at: datetime
+    event_type: str
+    data: dict
+
+
+class InterviewSessionEventsOut(BaseModel):
+    status: str
+    events: list[InterviewSessionEventOut]
 
 
 class ApplicationAttemptOut(BaseModel):

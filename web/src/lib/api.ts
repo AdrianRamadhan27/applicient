@@ -153,6 +153,26 @@ export type ModelCatalogEntry = {
   pricing_version: string | null;
   pricing_known: boolean;
   fetched_at: string;
+  // Phase 11 (v2 plan) — only ever populated on a "speech" capability
+  // entry (a TTS model's real named-voice list).
+  voices: string[] | null;
+  // Phase 11 (v2 plan) follow-up — a transcription/speech entry's real
+  // billing unit (per input-minute / per input-character), separate
+  // from input_price_per_mtok/output_price_per_mtok above since those
+  // mean something different (per million TEXT tokens) — see
+  // ModelCatalogEntry's own docstring (api/.../models/llm.py) for the
+  // live-verified reasoning. At most one of these two is ever set.
+  price_per_minute: number | null;
+  price_per_character: number | null;
+};
+
+// Phase 11 (v2 plan) — the Models & Providers page's Audio section.
+// Singleton for the whole deployment (get-or-create server-side, no
+// list of named presets the way ModelProfile has).
+export type AudioSettings = {
+  transcribe_catalog_entry_id: string | null;
+  speech_catalog_entry_id: string | null;
+  speech_voice: string | null;
 };
 
 export type Profile = {
@@ -805,6 +825,85 @@ export type CalendarEvent = {
   company_name: string;
 };
 
+// Phase 11 (v2 plan) — AI interview/FGD/LGD practice. Mirrors
+// schemas.INTERVIEW_PRACTICE_TYPES/INTERVIEW_CATEGORIES.
+export const INTERVIEW_PRACTICE_TYPES = ["interview", "fgd", "lgd"] as const;
+export type InterviewPracticeType = (typeof INTERVIEW_PRACTICE_TYPES)[number];
+
+export const INTERVIEW_PRACTICE_TYPE_LABEL: Record<InterviewPracticeType, string> = {
+  interview: "1-on-1 interview",
+  fgd: "FGD — focus group discussion",
+  lgd: "LGD — leaderless group discussion",
+};
+
+export const INTERVIEW_CATEGORIES = ["screening", "hr", "user", "role", "experience", "all"] as const;
+export type InterviewCategory = (typeof INTERVIEW_CATEGORIES)[number];
+
+export const INTERVIEW_CATEGORY_LABEL: Record<InterviewCategory, string> = {
+  screening: "Screening",
+  hr: "HR round",
+  user: "User / hiring manager",
+  role: "Role-specific",
+  experience: "Experience-based",
+  all: "All of the above",
+};
+
+export type InterviewFeedback = {
+  overall_score: number;
+  summary: string;
+  categories: { category: string; score: number; notes: string }[];
+  strengths: string[];
+  areas_to_improve: string[];
+};
+
+export type InterviewSession = {
+  id: string;
+  persona_id: string;
+  job_id: string | null;
+  application_id: string | null;
+  role_title: string | null;
+  company_name: string | null;
+  seniority: string | null;
+  practice_type: InterviewPracticeType;
+  category: InterviewCategory | null;
+  status: "in_progress" | "completed" | "cancelled";
+  overall_score: number | null;
+  feedback: InterviewFeedback | null;
+  created_at: string;
+  ended_at: string | null;
+};
+
+// Coarser than ApplicationStreamEvent/ConversationStreamEvent — one
+// interview turn is bounded (transcribe -> agent -> synthesize), so
+// interview_service.py emits plain stage markers rather than the
+// tool-call-by-tool-call granularity the other two agents stream.
+export type InterviewTurnEvent =
+  | { type: "stage"; stage: string; status: string; message: string }
+  | { type: "message"; role: "user"; text: string }
+  // Real-time TTS streaming (raised directly by Adrian — hearing the
+  // reply as it's generated instead of waiting out the whole clip).
+  // audio_start carries the format every audio_chunk that follows is
+  // in (16-bit signed PCM, little-endian, interleaved by channel —
+  // interview_media.py always requests this from the provider);
+  // audio_chunk's `data` is one chunk, base64-encoded; audio_end
+  // marks the stream finished and carries the filename the full clip
+  // was stored under (for the ▶ replay button later — the live
+  // playback itself never waits for this).
+  | { type: "audio_start"; sample_rate: number; channels: number }
+  | { type: "audio_chunk"; data: string }
+  | { type: "audio_end"; audio_filename: string }
+  // audio_filename is null when speech synthesis failed for this turn
+  // entirely (e.g. a very long FGD/LGD reply past the provider's own
+  // TTS input-size limit, or a stream that dropped mid-way) — the
+  // reply text is always real either way, so the turn still succeeds
+  // text-only rather than erroring out.
+  | { type: "done"; reply_text: string; audio_filename: string | null }
+  | { type: "error"; message: string };
+
+function toInterviewTurnEvent(eventType: string, data: Record<string, unknown>): InterviewTurnEvent {
+  return { type: eventType as InterviewTurnEvent["type"], ...data } as InterviewTurnEvent;
+}
+
 export type ApplicationAttempt = {
   id: string;
   application_id: string;
@@ -922,6 +1021,13 @@ export type ConversationCard =
   | {
       card_type: "documents";
       documents: { document_id: string; job_group_name: string; version: number; verified: boolean }[];
+    }
+  | {
+      card_type: "interview_session";
+      interview_session_id: string;
+      practice_type: InterviewPracticeType;
+      role_title: string | null;
+      company_name: string | null;
     };
 
 export type ConversationStreamEvent =
@@ -1074,6 +1180,10 @@ export const api = {
     }),
   getCatalog: (id: string) =>
     request<ModelCatalogEntry[]>(`/provider-connections/${id}/catalog`),
+
+  getAudioSettings: () => request<AudioSettings>("/audio-settings"),
+  updateAudioSettings: (body: AudioSettings) =>
+    request<AudioSettings>("/audio-settings", { method: "PUT", body: JSON.stringify(body) }),
 
   listProfiles: () => request<Profile[]>("/profiles"),
   getProfile: (id: string) => request<Profile>(`/profiles/${id}`),
@@ -1853,4 +1963,115 @@ export const api = {
       >
     >,
   ) => request<AdminPlan>(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  // --- Phase 11 (v2 plan) — AI interview/FGD/LGD practice ---
+
+  listInterviewSessions: (personaId?: string) =>
+    request<InterviewSession[]>(`/interview-sessions${personaId ? `?persona_id=${personaId}` : ""}`),
+  getInterviewSession: (id: string) => request<InterviewSession>(`/interview-sessions/${id}`),
+  endInterviewSession: (id: string) => request<InterviewSession>(`/interview-sessions/${id}/end`, { method: "POST" }),
+  deleteInterviewSession: (id: string) => request<void>(`/interview-sessions/${id}`, { method: "DELETE" }),
+
+  /** Same SSE shape (InterviewTurnEvent) is shared by createInterviewSession,
+   * startInterviewSession, and submitInterviewTurn below — factored
+   * into one generator since all three just POST somewhere and stream
+   * the response back. */
+  async *_streamInterviewEvents(res: Response): AsyncGenerator<InterviewTurnEvent> {
+    if (!res.ok) throw new Error(`interview turn failed: ${res.status}: ${await res.text()}`);
+    for await (const { event, data } of parseSSE(res)) {
+      yield toInterviewTurnEvent(event, JSON.parse(data));
+    }
+  },
+
+  /** Creates the session AND streams its opening turn (the agent's
+   * first question) in one call — the session's own id isn't
+   * mentioned anywhere in the SSE events themselves (start_interview_session
+   * is reused by startInterviewSession below, against an id the
+   * caller already has), so it rides along as a response header
+   * instead; read before the stream is consumed. */
+  async createInterviewSession(body: {
+    persona_id: string;
+    job_id?: string | null;
+    application_id?: string | null;
+    role_title?: string | null;
+    company_name?: string | null;
+    seniority?: string | null;
+    practice_type: InterviewPracticeType;
+    category?: InterviewCategory | null;
+  }): Promise<{ sessionId: string; events: AsyncGenerator<InterviewTurnEvent> }> {
+    const res = await fetch(`${API_BASE_URL}/interview-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`create interview session failed: ${res.status}: ${await res.text()}`);
+    const sessionId = res.headers.get("X-Interview-Session-Id");
+    if (!sessionId) throw new Error("create interview session: server did not return a session id");
+    return { sessionId, events: api._streamInterviewEvents(res) };
+  },
+
+  /** Starts the opening turn for a session that was created WITHOUT
+   * one already running — the Assistant's start_interview_practice
+   * tool only creates the row (a plain tool call can't stream SSE),
+   * so the practice page calls this once on first open instead. */
+  async *startInterviewSession(sessionId: string): AsyncGenerator<InterviewTurnEvent> {
+    const res = await fetch(`${API_BASE_URL}/interview-sessions/${sessionId}/start`, {
+      method: "POST",
+      headers: authHeader(),
+    });
+    yield* api._streamInterviewEvents(res);
+  },
+
+  /** One recorded answer -> the agent's next turn. `blob` is whatever
+   * MIME type MediaRecorder actually produced (webm in every browser
+   * that matters here) — sent through as-is, interview_media.py's own
+   * transcribe() passes it straight to the provider without assuming
+   * a specific format. */
+  async *submitInterviewTurn(sessionId: string, blob: Blob): AsyncGenerator<InterviewTurnEvent> {
+    const formData = new FormData();
+    const ext = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
+    formData.append("file", blob, `answer.${ext}`);
+    const res = await fetch(`${API_BASE_URL}/interview-sessions/${sessionId}/turns`, {
+      method: "POST",
+      headers: authHeader(),
+      body: formData,
+    });
+    yield* api._streamInterviewEvents(res);
+  },
+
+  /** Full replay — an interview session's history is small (a handful
+   * of turns), same "just re-render everything" reasoning as
+   * getConversationEvents. */
+  async getInterviewSessionEvents(
+    sessionId: string,
+  ): Promise<{ status: string; events: { createdAt: string; type: InterviewTurnEvent["type"]; data: Record<string, unknown> }[] }> {
+    const result = await request<{
+      status: string;
+      events: { created_at: string; event_type: string; data: Record<string, unknown> }[];
+    }>(`/interview-sessions/${sessionId}/events`);
+    return {
+      status: result.status,
+      events: result.events.map((e) => ({ createdAt: e.created_at, type: e.event_type as InterviewTurnEvent["type"], data: e.data })),
+    };
+  },
+
+  /** Fetched as an authenticated blob, not linked to directly as an
+   * `<audio src>` — a direct cross-origin `<audio>` load needs
+   * `crossOrigin="anonymous"` to ever be usable with the Web Audio
+   * API (the pulsating-orb effect), which in turn makes the browser
+   * hard-fail the whole load with "no supported source" the moment
+   * its own Origin isn't one this API's CORS config happens to
+   * recognize (confirmed live: broke exactly this way) — a real
+   * fragility a direct link shouldn't depend on. A blob: URL built
+   * from a normal authenticated fetch is same-origin from the page's
+   * own point of view, so neither problem exists; the caller turns
+   * this into a blob: URL via `URL.createObjectURL` and revokes the
+   * previous one when a new turn's audio replaces it. */
+  async fetchInterviewAudio(sessionId: string, filename: string): Promise<Blob> {
+    const res = await fetch(`${API_BASE_URL}/interview-sessions/${sessionId}/audio/${encodeURIComponent(filename)}`, {
+      headers: authHeader(),
+    });
+    if (!res.ok) throw new Error(`fetch audio failed: ${res.status}: ${await res.text()}`);
+    return res.blob();
+  },
 };

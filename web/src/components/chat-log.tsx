@@ -4,7 +4,14 @@ import remarkGfm from "remark-gfm";
 import { Bot, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ConversationCard } from "@/lib/api";
-import { JobsCard, DocumentCard, ApplicationCard, CalendarEventCard, DocumentsCard } from "@/components/chat-cards";
+import {
+  JobsCard,
+  DocumentCard,
+  ApplicationCard,
+  CalendarEventCard,
+  DocumentsCard,
+  InterviewSessionCard,
+} from "@/components/chat-cards";
 
 // Promoted out of pipeline/page.tsx (M7) so the Assistant chat page
 // can reuse the exact same bubble rendering — the agent's own text
@@ -71,6 +78,7 @@ function CardBubble({ card }: { card: ConversationCard }) {
   if (card.card_type === "document") return <DocumentCard card={card} />;
   if (card.card_type === "calendar_event") return <CalendarEventCard card={card} />;
   if (card.card_type === "documents") return <DocumentsCard card={card} />;
+  if (card.card_type === "interview_session") return <InterviewSessionCard card={card} />;
   return <ApplicationCard card={card} />;
 }
 

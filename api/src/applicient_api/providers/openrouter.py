@@ -93,6 +93,86 @@ def _chat_entry_to_catalog(entry: dict) -> CatalogEntryData:
     )
 
 
+# architecture.tokenizer turned out NOT to be a fully reliable signal
+# for "genuinely priced per TEXT token" — checked live and found a
+# real counter-example: openai/whisper-1 reports a real tokenizer
+# ("GPT", not "Other") yet is definitely still billed per input-
+# MINUTE, not per token (its pricing.prompt, "0.006", exactly matches
+# its documented $0.006/minute rate, independently reconfirmed by a
+# real transcription call's own usage.cost field in
+# interview_media.py's transcribe()). So "Other" safely implies
+# per-minute/per-character (there's no tokenizer at all, so per-token
+# text pricing is simply impossible) — that direction of the inference
+# holds and is what this function branches on below — but the reverse
+# ("a real tokenizer means genuinely per-token") does not, and isn't
+# used. Two small, deliberately non-exhaustive, individually-verified
+# exceptions to the "Other" rule are listed explicitly instead of
+# inferred: whisper-1 (per-minute despite its tokenizer) and
+# openai/gpt-4o-transcribe (genuinely per-token — its own
+# pricing.prompt/.completion, "0.0000025"/"0.00001", exactly match
+# OpenAI's published $2.50/$10-per-1M-token rate). Every other
+# transcription/speech model with a real tokenizer this module hasn't
+# individually checked (e.g. openai/gpt-transcribe — a DIFFERENT,
+# non-4o model whose pricing.prompt would imply an implausible
+# ~$4,500-per-1M-token rate if trusted the same way as gpt-4o-
+# transcribe, meaning its real unit is something else entirely,
+# most likely per-audio-token at a different scale) stays
+# pricing_known=False rather than guessed.
+_KNOWN_PER_MINUTE_DESPITE_REAL_TOKENIZER = {"openai/whisper-1"}
+_KNOWN_PER_TOKEN_TRANSCRIPTION_MODELS = {"openai/gpt-4o-transcribe"}
+
+
+def _audio_entry_to_catalog(entry: dict, capability: str) -> CatalogEntryData:
+    """Phase 11 (v2 plan) — transcription/speech catalog entries.
+    Confirmed live (`GET /models?output_modalities=transcription`/
+    `speech`) they carry the exact same envelope shape as the chat
+    listing (`pricing.prompt`/`.completion`), but usually NOT the same
+    units — an audio model's "prompt" price is normally per input
+    minute (transcription) or per input character (speech), not per
+    text token. See the two module-level sets just above for exactly
+    which signal/exceptions this branches on and why."""
+
+    pricing = entry.get("pricing", {})
+    model_id = entry["id"]
+    tokenizer = entry.get("architecture", {}).get("tokenizer")
+
+    if capability == "transcription" and model_id in _KNOWN_PER_TOKEN_TRANSCRIPTION_MODELS:
+        return CatalogEntryData(
+            model_id=model_id,
+            display_name=entry.get("name"),
+            capabilities=[capability],
+            input_price_per_mtok=_price_per_mtok(pricing, "prompt"),
+            output_price_per_mtok=_price_per_mtok(pricing, "completion"),
+            pricing_version=PRICING_VERSION,
+            pricing_known=_has_known_pricing(pricing),
+        )
+
+    is_flat_rate = tokenizer == "Other" or (
+        capability == "transcription" and model_id in _KNOWN_PER_MINUTE_DESPITE_REAL_TOKENIZER
+    )
+    if is_flat_rate:
+        prompt_price = pricing.get("prompt")
+        per_unit = float(prompt_price) if prompt_price is not None else None
+        return CatalogEntryData(
+            model_id=model_id,
+            display_name=entry.get("name"),
+            capabilities=[capability],
+            price_per_minute=per_unit if capability == "transcription" else None,
+            price_per_character=per_unit if capability == "speech" else None,
+            pricing_version=PRICING_VERSION,
+            pricing_known=per_unit is not None,
+            voices=entry.get("supported_voices"),
+        )
+
+    return CatalogEntryData(
+        model_id=model_id,
+        display_name=entry.get("name"),
+        capabilities=[capability],
+        pricing_known=False,
+        voices=entry.get("supported_voices"),
+    )
+
+
 def _embedding_entry_to_catalog(entry: dict) -> CatalogEntryData:
     pricing = entry.get("pricing", {})
     caps = ["embedding"]
@@ -135,7 +215,17 @@ class OpenRouterAdapter(ProviderAdapter):
             chat_resp.raise_for_status()
             embed_resp = await client.get(f"{root}/embeddings/models", headers=headers)
             embed_resp.raise_for_status()
+            # Phase 11 (v2 plan) — interview practice's STT/TTS picker
+            # needs these two listed too, same live-discovered
+            # discipline as chat/embedding above rather than a
+            # hardcoded model-id list.
+            transcribe_resp = await client.get(f"{root}/models", params={"output_modalities": "transcription"}, headers=headers)
+            transcribe_resp.raise_for_status()
+            speech_resp = await client.get(f"{root}/models", params={"output_modalities": "speech"}, headers=headers)
+            speech_resp.raise_for_status()
 
         chat_entries = [_chat_entry_to_catalog(e) for e in chat_resp.json()["data"]]
         embed_entries = [_embedding_entry_to_catalog(e) for e in embed_resp.json()["data"]]
-        return chat_entries + embed_entries
+        transcribe_entries = [_audio_entry_to_catalog(e, "transcription") for e in transcribe_resp.json()["data"]]
+        speech_entries = [_audio_entry_to_catalog(e, "speech") for e in speech_resp.json()["data"]]
+        return chat_entries + embed_entries + transcribe_entries + speech_entries

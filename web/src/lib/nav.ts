@@ -12,6 +12,7 @@ import {
   Layers,
   LayoutDashboard,
   Mail,
+  Mic,
   Radar,
   Terminal,
   Users,
@@ -49,6 +50,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/console/inbox", label: "Job Inbox", icon: Inbox, section: "Work" },
   { href: "/console/composer", label: "CV Composer", icon: FileText, section: "Work" },
   { href: "/console/pipeline", label: "Application Pipeline", icon: Workflow, section: "Work" },
+  // Phase 11 (v2 plan) — placed right after Pipeline: you practice
+  // once you're actually in the running for a role.
+  { href: "/console/interview-practice", label: "Interview Practice", icon: Mic, section: "Work" },
   { href: "/console/calendar", label: "Calendar", icon: CalendarDays, section: "Work" },
   { href: "/console/email-review", label: "Email Review", icon: Mail, section: "Work" },
 

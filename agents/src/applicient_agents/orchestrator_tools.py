@@ -53,6 +53,7 @@ from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.billing import Plan, Subscription
 from applicient_api.models.calendar import CalendarEvent
 from applicient_api.models.discovery import Job, SavedSearch, Source
+from applicient_api.models.interview import InterviewSession
 from applicient_api.models.documents import Document, JobGroup, JobGroupMember
 from applicient_api.models.enums import DocumentType
 from applicient_api.models.pipeline import Application, ApplicationAttempt, PipelineStage
@@ -887,6 +888,72 @@ def build_orchestrator_tools(
         return f"calendar_event_id={event.id}, scheduled {event.scheduled_at.isoformat()}"
 
     @tool
+    def start_interview_practice(
+        practice_type: str,
+        job_id: str | None = None,
+        role_title: str | None = None,
+        company_name: str | None = None,
+        seniority: str | None = None,
+        category: str | None = None,
+    ) -> str:
+        """Set up a voice-based interview/FGD/LGD practice session for
+        the human — this only CREATES the session and hands back a
+        card with a link into the dedicated practice page; it can't
+        run the actual practice inside this chat (recording/playing
+        audio only works there). practice_type must be exactly one of:
+        interview, fgd, lgd. For practice_type="interview", category
+        may optionally be one of: screening, hr, user, role,
+        experience, all (omit for a mix across all of them; ignored
+        for fgd/lgd — the agent picks its own case there). Target the
+        session with at least one of: job_id (a real one from
+        list_job_inbox, to ground it in that posting's actual
+        requirements), role_title, or company_name — any combination
+        is fine (e.g. company_name alone to practice for a specific
+        employer without a specific listing). seniority is free text
+        like "junior"/"mid"/"senior" if the human said or implied one."""
+
+        if practice_type not in schemas.INTERVIEW_PRACTICE_TYPES:
+            return f"error: practice_type must be one of {', '.join(schemas.INTERVIEW_PRACTICE_TYPES)}"
+        if category is not None and category not in schemas.INTERVIEW_CATEGORIES:
+            return f"error: category must be one of {', '.join(schemas.INTERVIEW_CATEGORIES)}"
+        if not job_id and not role_title and not company_name:
+            return "error: provide at least one of job_id, role_title, or company_name to target the practice"
+
+        with session_factory() as db:
+            job_uuid = None
+            resolved_role, resolved_company = role_title, company_name
+            if job_id:
+                job_uuid = _try_uuid(job_id)
+                if job_uuid is None:
+                    return f"error: '{job_id}' is not a valid job_id"
+                job = db.query(Job).filter_by(id=job_uuid, user_id=user_id).one_or_none()
+                if job is None:
+                    return f"error: job {job_id} not found"
+                # Denormalized onto the row, not re-joined live — same
+                # reasoning routers/interview_sessions.py's own
+                # create_interview_session already follows.
+                resolved_role, resolved_company = job.title, job.company_name_raw
+
+            session_row = InterviewSession(
+                user_id=user_id, persona_id=persona_id, job_id=job_uuid,
+                role_title=resolved_role, company_name=resolved_company, seniority=seniority,
+                practice_type=practice_type, category=category, thread_id=str(uuid.uuid4()), status="in_progress",
+            )
+            db.add(session_row)
+            db.commit()
+            db.refresh(session_row)
+
+        emit_card("interview_session", {
+            "interview_session_id": str(session_row.id), "practice_type": session_row.practice_type,
+            "role_title": session_row.role_title, "company_name": session_row.company_name,
+        })
+        return (
+            f"interview_session_id={session_row.id} — session created but not yet started; "
+            "tell the human to open the link shown to begin (opening it starts the agent's first "
+            "question automatically)."
+        )
+
+    @tool
     def list_job_groups() -> str:
         """List this persona's job groups — name, member job count and
         titles, and whether a CV has been generated for it yet. Unlike
@@ -1088,6 +1155,7 @@ def build_orchestrator_tools(
         get_usage_status,
         list_calendar_events,
         create_calendar_event,
+        start_interview_practice,
         list_job_groups,
         list_cv_documents,
         show_cv,

@@ -51,6 +51,12 @@ class AgentRun(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("orchestrator_conversations.id", ondelete="SET NULL")
     )
+    # Phase 11 (v2 plan) — same shape as conversation_id above, one
+    # more optional domain-specific FK on the same shared run-tracing
+    # table: which InterviewSession this turn belongs to, if any.
+    interview_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("interview_sessions.id", ondelete="SET NULL")
+    )
 
 
 class OrchestratorConversation(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):

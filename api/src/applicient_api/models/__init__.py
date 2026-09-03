@@ -11,6 +11,7 @@ from applicient_api.models import (  # noqa: F401
     documents,
     email,
     gmail,
+    interview,
     llm,
     notifications,
     pipeline,

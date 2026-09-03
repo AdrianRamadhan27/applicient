@@ -31,6 +31,7 @@ from applicient_api.routers import (
     evidence,
     gmail,
     health,
+    interview_sessions,
     job_groups,
     jobs,
     model_profiles,
@@ -123,8 +124,11 @@ app.add_middleware(
     # Content-Disposition isn't on the CORS-safelisted response-header
     # list, so a cross-origin fetch() can't read it unless explicitly
     # exposed — needed by get_application_document's real filename
-    # (a raw-CV fallback isn't always a .pdf).
-    expose_headers=["Content-Disposition"],
+    # (a raw-CV fallback isn't always a .pdf). X-Interview-Session-Id
+    # is the same story for create_interview_session's response (Phase
+    # 11, v2 plan) — the frontend needs the new session's id before
+    # it's ever mentioned in an SSE event.
+    expose_headers=["Content-Disposition", "X-Interview-Session-Id"],
 )
 
 app.include_router(health.router)
@@ -133,6 +137,7 @@ app.include_router(profiles.router)
 app.include_router(evidence.router)
 app.include_router(cv.router)
 app.include_router(providers.router)
+app.include_router(providers.audio_settings_router)
 app.include_router(model_profiles.router)
 app.include_router(cost.router)
 app.include_router(streaming.router)
@@ -156,6 +161,7 @@ app.include_router(email_messages.router)
 app.include_router(notifications.router)
 app.include_router(webhooks.router)
 app.include_router(orchestrator.router)
+app.include_router(interview_sessions.router)
 app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(calendar_events.router)
