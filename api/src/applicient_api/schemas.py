@@ -775,6 +775,11 @@ class InboxJobOut(BaseModel):
     fit_score: FitScoreOut | None
     prefilter: PrefilterResultOut | None
     source_names: list[str]
+    # Whether this job already has an Application row (manually added,
+    # or auto-added when a strong_apply/apply score landed — see
+    # scoring_service.py's `_auto_add_to_pipeline`) — lets the Inbox
+    # show "In pipeline" instead of a still-clickable add button.
+    in_pipeline: bool = False
 
 
 class InboxJobDetailOut(InboxJobOut):
@@ -862,15 +867,21 @@ class JobGroupOut(BaseModel):
     persona_id: uuid.UUID
     name: str
     job_ids: list[uuid.UUID]
+    target_role_title: str | None = None
+    target_company: str | None = None
 
 
 class JobGroupCreate(BaseModel):
     name: str
     job_ids: list[uuid.UUID] = Field(default_factory=list)
+    target_role_title: str | None = None
+    target_company: str | None = None
 
 
 class JobGroupUpdate(BaseModel):
     name: str | None = None
+    target_role_title: str | None = None
+    target_company: str | None = None
 
 
 class JobGroupAddMember(BaseModel):

@@ -26,12 +26,17 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from applicient_api.models.discovery import Job
+from applicient_api.models.enums import EventActor
 from applicient_api.models.llm import LlmCall
+from applicient_api.models.pipeline import Application, ApplicationEvent
 from applicient_api.models.profile import Persona, Preference, Profile
 from applicient_api.models.scoring import FitScore, PrefilterResult
+from applicient_api.pipeline_stage_service import first_stage_key
 from applicient_api.scoring_engine import (
     normalize_hard_blocker,
     retrieve_relevant_evidence,
@@ -44,6 +49,52 @@ from applicient_api.tier_resolution import resolve_tier
 PREFILTER_VERSION = "v1"
 SCORING_VERSION = "v1"
 
+# Adrian, direct: "I want jobs to be automatically be added to
+# pipeline instead of user having to always manually drag them there.
+# Upon being scored and recommended by ai score is apply with green
+# color... it automatically gets added to pipeline." Green in the
+# Inbox UI (`recommendationColor`, web/src/lib/recommendation.ts) is
+# both strong_apply and apply — skip/stretch never auto-add.
+_AUTO_PIPELINE_RECOMMENDATIONS = {"strong_apply", "apply"}
+
+
+def _auto_add_to_pipeline(
+    session: Session, *, job: Job, persona: Persona, user_id: uuid.UUID
+) -> bool:
+    """Mirrors `POST /applications`'s own create_application — same
+    idempotency (a pre-existing Application for this job wins, never
+    duplicated) and the same "created" ApplicationEvent for the
+    timeline — just triggered by a strong/apply score landing instead
+    of a manual drag or button click. Best-effort: any failure here
+    must never take down the scoring call that already succeeded and
+    committed its own FitScore row, so the caller wraps this in its
+    own try/except and only logs, never re-raises."""
+
+    existing = session.query(Application).filter_by(job_id=job.id, user_id=user_id).one_or_none()
+    if existing is not None:
+        return False
+
+    stage = first_stage_key(session, user_id=user_id) or "discovered"
+    application = Application(
+        user_id=user_id,
+        job_id=job.id,
+        persona_id=persona.id,
+        state=stage,
+    )
+    session.add(application)
+    session.flush()
+    session.add(
+        ApplicationEvent(
+            application_id=application.id,
+            actor=EventActor.AGENT.value,
+            event_type="created",
+            payload={"reason": "auto-added — AI recommendation"},
+            occurred_at=datetime.now(timezone.utc),
+        )
+    )
+    session.commit()
+    return True
+
 
 @dataclass
 class ScoreJobResult:
@@ -53,6 +104,7 @@ class ScoreJobResult:
     reason: str
     recommendation: str | None
     overall_score: float | None
+    auto_added_to_pipeline: bool = False
 
 
 def _latest_llm_call(session: Session, *, job_id: uuid.UUID, stage: str) -> LlmCall | None:
@@ -208,6 +260,16 @@ def score_job(
         db.add(fit_score)
         db.commit()
 
+        auto_added = False
+        if fit_score.recommendation in _AUTO_PIPELINE_RECOMMENDATIONS:
+            try:
+                auto_added = _auto_add_to_pipeline(db, job=job, persona=persona, user_id=user_id)
+            except Exception:
+                # Best-effort — a real FitScore row is already committed
+                # above; a failure to also auto-create the Application
+                # must not surface as a scoring failure.
+                db.rollback()
+
         return ScoreJobResult(
             job_id=job.id,
             job_title=job.title,
@@ -215,4 +277,5 @@ def score_job(
             reason=prefilter_result.reason,
             recommendation=fit_score.recommendation,
             overall_score=float(fit_score.overall_score),
+            auto_added_to_pipeline=auto_added,
         )

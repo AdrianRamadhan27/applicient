@@ -620,7 +620,7 @@ function OverviewPanel({
             </Button>
           </div>
         ) : (
-          <Button size="sm" variant="outline" onClick={() => setNewPersonaOpen(true)}>
+          <Button size="sm" onClick={() => setNewPersonaOpen(true)}>
             <Plus className="size-3.5" />
             New persona
           </Button>

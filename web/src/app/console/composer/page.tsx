@@ -1147,6 +1147,12 @@ export default function ComposerPage() {
 
   const [newGroupOpen, setNewGroupOpen] = React.useState(false);
   const [newGroupName, setNewGroupName] = React.useState("");
+  // Adrian, direct: composing a CV shouldn't require a real job
+  // listing first — these back the "Target role" / "Target company"
+  // fields in the New job group dialog, both optional and independent
+  // of assigning real scored jobs afterward via the existing selector.
+  const [newGroupTargetRole, setNewGroupTargetRole] = React.useState("");
+  const [newGroupTargetCompany, setNewGroupTargetCompany] = React.useState("");
   const [creatingGroup, setCreatingGroup] = React.useState(false);
 
   const [documents, setDocuments] = React.useState<TailoredDocument[]>([]);
@@ -1324,10 +1330,16 @@ export default function ComposerPage() {
     if (!selectedPersonaId || !newGroupName.trim()) return;
     setCreatingGroup(true);
     try {
-      const group = await api.createJobGroup(selectedPersonaId, { name: newGroupName.trim() });
+      const group = await api.createJobGroup(selectedPersonaId, {
+        name: newGroupName.trim(),
+        target_role_title: newGroupTargetRole.trim() || null,
+        target_company: newGroupTargetCompany.trim() || null,
+      });
       setGroups((prev) => [...prev, group]);
       setSelectedGroupId(group.id);
       setNewGroupName("");
+      setNewGroupTargetRole("");
+      setNewGroupTargetCompany("");
       setNewGroupOpen(false);
     } catch (e) {
       toast.error(String(e));
@@ -1649,7 +1661,13 @@ export default function ComposerPage() {
               >
                 <div className="min-w-0">
                   <div className="truncate">{g.name}</div>
-                  <div className="text-xs text-muted-foreground">{g.job_ids.length} job(s)</div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {g.job_ids.length > 0
+                      ? `${g.job_ids.length} job(s)`
+                      : g.target_role_title
+                        ? `Targeting: ${g.target_role_title}${g.target_company ? ` @ ${g.target_company}` : ""}`
+                        : "0 job(s)"}
+                  </div>
                 </div>
                 <button
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
@@ -1677,6 +1695,19 @@ export default function ComposerPage() {
             <div className="flex-1 overflow-y-auto p-5 space-y-6">
               <div>
                 <h2 className="text-lg font-semibold">{selectedGroup.name}</h2>
+                {selectedGroup.job_ids.length === 0 && selectedGroup.target_role_title && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    No specific job listing — tailoring generally toward{" "}
+                    <span className="font-medium text-foreground">{selectedGroup.target_role_title}</span>
+                    {selectedGroup.target_company && (
+                      <>
+                        {" "}
+                        at <span className="font-medium text-foreground">{selectedGroup.target_company}</span>
+                      </>
+                    )}
+                    .
+                  </p>
+                )}
                 <div className="mt-2 flex flex-wrap gap-2">
                   {selectedGroup.job_ids.map((jobId) => {
                     const job = jobsById.get(jobId);
@@ -1840,7 +1871,10 @@ export default function ComposerPage() {
               <div className="flex items-start gap-4">
                 <div className="flex flex-col gap-2">
                   <div className="relative w-fit">
-                    <Button onClick={handleGenerate} disabled={busy || selectedGroup.job_ids.length === 0}>
+                    <Button
+                      onClick={handleGenerate}
+                      disabled={busy || (selectedGroup.job_ids.length === 0 && !selectedGroup.target_role_title)}
+                    >
                       <Sparkles className="size-4" />
                       {tailoring ? "Generating…" : "Generate tailored CV"}
                     </Button>
@@ -2053,23 +2087,56 @@ export default function ComposerPage() {
         </div>
       )}
 
-      <Dialog open={newGroupOpen} onOpenChange={setNewGroupOpen}>
+      <Dialog
+        open={newGroupOpen}
+        onOpenChange={(open) => {
+          setNewGroupOpen(open);
+          if (!open) {
+            setNewGroupTargetRole("");
+            setNewGroupTargetCompany("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New job group</DialogTitle>
             <DialogDescription>
-              One tailored CV will be generated for every job you assign to this group.
+              Assign real scored jobs from the Job Inbox afterward, and/or set a target role below — a group
+              with no jobs but a target role is tailored generally toward that role instead of any one
+              listing.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="group-name">Name</Label>
-            <Input
-              id="group-name"
-              value={newGroupName}
-              onChange={(e) => setNewGroupName(e.target.value)}
-              placeholder="e.g. Backend roles"
-              onKeyDown={(e) => e.key === "Enter" && handleCreateGroup()}
-            />
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="group-name">Name</Label>
+              <Input
+                id="group-name"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder="e.g. Backend roles"
+                onKeyDown={(e) => e.key === "Enter" && handleCreateGroup()}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="group-target-role">Target role (optional)</Label>
+              <Input
+                id="group-target-role"
+                value={newGroupTargetRole}
+                onChange={(e) => setNewGroupTargetRole(e.target.value)}
+                placeholder="e.g. Senior Backend Engineer"
+                onKeyDown={(e) => e.key === "Enter" && handleCreateGroup()}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="group-target-company">Target company (optional)</Label>
+              <Input
+                id="group-target-company"
+                value={newGroupTargetCompany}
+                onChange={(e) => setNewGroupTargetCompany(e.target.value)}
+                placeholder="e.g. Acme Corp"
+                onKeyDown={(e) => e.key === "Enter" && handleCreateGroup()}
+              />
+            </div>
           </div>
           <Button onClick={handleCreateGroup} disabled={creatingGroup || !newGroupName.trim()}>
             {creatingGroup ? "Creating…" : "Create"}

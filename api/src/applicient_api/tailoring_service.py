@@ -53,8 +53,10 @@ def tailor_job_group(
             m.job_id for m in db.query(JobGroupMember).filter_by(job_group_id=group.id).all()
         ]
         jobs = db.query(Job).filter(Job.id.in_(member_job_ids)).all() if member_job_ids else []
-        if not jobs:
-            raise TailoringError(f"job group {job_group_id} has no member jobs to tailor for")
+        if not jobs and not group.target_role_title:
+            raise TailoringError(
+                f"job group {job_group_id} has no member jobs and no target role to tailor for"
+            )
 
         evidence_items = retrieve_full_evidence_bank(db, profile_id=profile.id)
         if not evidence_items:
@@ -75,6 +77,8 @@ def tailor_job_group(
             persona_name=persona.name,
             evidence_items=evidence_items,
             preference=preference,
+            target_role_title=group.target_role_title,
+            target_company=group.target_company,
         )
         validated = validate_tailoring_evidence(output, evidence_items)
 

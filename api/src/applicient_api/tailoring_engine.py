@@ -64,19 +64,37 @@ Rules:
 - Never generate claims about protected characteristics (F5.9)."""
 
 
-def job_group_summary(jobs: list[Job]) -> str:
-    blocks = []
-    for job in jobs:
-        parts = [
-            f"Title: {job.title}",
-            f"Company: {job.company_name_raw}",
-            f"Seniority: {job.seniority or 'not stated'}",
-        ]
-        text = "\n\n".join(p for p in [job.requirements, job.responsibilities] if p)
-        if text:
-            parts.append(f"Requirements/responsibilities:\n{text}")
-        blocks.append("\n".join(parts))
-    return "\n\n---\n\n".join(blocks)
+def job_group_summary(
+    jobs: list[Job], *, target_role_title: str | None = None, target_company: str | None = None
+) -> str:
+    """Real member listings, when there are any — else a free-text
+    target (Adrian, direct: composing a CV shouldn't require a real
+    job listing first). At least one of `jobs`/`target_role_title` is
+    expected by the time this is called; the caller (tailoring_service.py
+    and its cover-letter/answer-pack siblings) is what actually
+    enforces that, not this pure formatting function."""
+
+    if jobs:
+        blocks = []
+        for job in jobs:
+            parts = [
+                f"Title: {job.title}",
+                f"Company: {job.company_name_raw}",
+                f"Seniority: {job.seniority or 'not stated'}",
+            ]
+            text = "\n\n".join(p for p in [job.requirements, job.responsibilities] if p)
+            if text:
+                parts.append(f"Requirements/responsibilities:\n{text}")
+            blocks.append("\n".join(parts))
+        return "\n\n---\n\n".join(blocks)
+
+    parts = [f"Target role: {target_role_title or 'not specified'}"]
+    if target_company:
+        parts.append(f"Target company: {target_company}")
+    parts.append(
+        "(No specific job listing — tailor generally toward this role/company rather than any one posting's exact wording.)"
+    )
+    return "\n".join(parts)
 
 
 def profile_summary(profile: Profile, persona_name: str, preference: Preference | None = None) -> str:
@@ -129,6 +147,8 @@ def run_tailoring(
     evidence_items: list[EvidenceItem],
     preference: Preference | None = None,
     prior_violations: list[str] | None = None,
+    target_role_title: str | None = None,
+    target_company: str | None = None,
 ) -> TailoringOutput:
     # A full tailored CV (several sections, several bullets each, plus
     # a rationale paragraph) is long enough to exceed a provider's
@@ -143,7 +163,8 @@ def run_tailoring(
     prompt = (
         f"CANDIDATE:\n{profile_summary(profile, persona_name, preference)}\n\n"
         f"CANDIDATE'S FULL EVIDENCE BANK (cite evidence_id exactly as shown):\n{evidence_bank_summary(evidence_items)}\n\n"
-        f"JOB GROUP ({len(jobs)} posting(s) this CV must serve):\n{job_group_summary(jobs)}"
+        f"JOB GROUP ({len(jobs)} posting(s) this CV must serve):\n"
+        f"{job_group_summary(jobs, target_role_title=target_role_title, target_company=target_company)}"
     )
     if prior_violations:
         # F5.5 — regeneration attempt 2, the adversarial verifier's

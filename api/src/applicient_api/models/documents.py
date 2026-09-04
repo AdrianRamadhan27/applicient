@@ -28,6 +28,17 @@ class JobGroup(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
 
+    # Adrian, direct: composing a CV shouldn't require a real job
+    # listing first — a group can instead target a free-text role
+    # (optionally scoped to a company), tailored toward that role in
+    # general rather than any specific posting. Both nullable and
+    # independent of `job_ids` membership below — a group can carry
+    # real member jobs, free-text targeting, or (least usefully, but
+    # not forbidden) both at once; the generation services just need
+    # at least one of the two to have something to tailor against.
+    target_role_title: Mapped[str | None] = mapped_column(String(200))
+    target_company: Mapped[str | None] = mapped_column(String(200))
+
 
 class JobGroupMember(UUIDPKMixin, TimestampMixin, Base):
     """A job may belong to more than one group (e.g. a role that fits

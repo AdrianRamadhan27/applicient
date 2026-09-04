@@ -288,7 +288,14 @@ def _owned_group(db: Session, group_id: uuid.UUID, user_id: uuid.UUID) -> JobGro
 
 def _to_out(db: Session, group: JobGroup) -> schemas.JobGroupOut:
     job_ids = [m.job_id for m in db.query(JobGroupMember).filter_by(job_group_id=group.id).all()]
-    return schemas.JobGroupOut(id=group.id, persona_id=group.persona_id, name=group.name, job_ids=job_ids)
+    return schemas.JobGroupOut(
+        id=group.id,
+        persona_id=group.persona_id,
+        name=group.name,
+        job_ids=job_ids,
+        target_role_title=group.target_role_title,
+        target_company=group.target_company,
+    )
 
 
 @persona_router.get("", response_model=list[schemas.JobGroupOut])
@@ -310,7 +317,13 @@ def create_job_group(
 ):
     if db.query(Persona).filter_by(id=persona_id, user_id=user_id).one_or_none() is None:
         raise HTTPException(404, "persona not found")
-    group = JobGroup(user_id=user_id, persona_id=persona_id, name=body.name)
+    group = JobGroup(
+        user_id=user_id,
+        persona_id=persona_id,
+        name=body.name,
+        target_role_title=(body.target_role_title or "").strip() or None,
+        target_company=(body.target_company or "").strip() or None,
+    )
     db.add(group)
     db.flush()
     for job_id in body.job_ids:

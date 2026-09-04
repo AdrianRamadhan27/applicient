@@ -215,6 +215,26 @@ function money(v: number) {
   return `$${v.toFixed(2)}`;
 }
 
+// Adrian, direct: "In run job search, or anywhere it requires profile
+// to be confirmed... whenever it says error that profile must be
+// confirmed first, add a redirect/link to the profile page in the
+// message" — routers/radar.py's own precondition check (the only
+// backend gate on `profile.confirmed`) returns this exact 409 text;
+// caught here rather than duplicating the check client-side, so a
+// future wording change on the backend just stops matching instead of
+// silently going stale.
+function renderRunError(message: string): React.ReactNode {
+  if (!message.toLowerCase().includes("profile must be confirmed")) return message;
+  return (
+    <span>
+      {message}{" — "}
+      <Link href="/console?tab=profile" className="underline font-medium">
+        Go to Profile Studio
+      </Link>
+    </span>
+  );
+}
+
 type RunState = {
   savedSearchId: string;
   // Captured from the "run_started" event so a Cancel button can call
@@ -248,6 +268,7 @@ type RunState = {
       decision: "keep" | "drop" | "review";
       recommendation: string | null;
       overallScore: number | null;
+      autoAddedToPipeline: boolean;
     }[];
     scoringErrors: { jobId: string; title: string; message: string }[];
     summary: { kept: number; dropped: number; review: number; errors: number } | null;
@@ -791,8 +812,9 @@ export default function RadarPage() {
         applyRunEvent(savedSearch, event);
       }
     } catch (e) {
-      setRuns((prev) => (prev[savedSearch.id] ? { ...prev, [savedSearch.id]: { ...prev[savedSearch.id], error: String(e) } } : prev));
-      toast.error(String(e));
+      const message = String(e);
+      setRuns((prev) => (prev[savedSearch.id] ? { ...prev, [savedSearch.id]: { ...prev[savedSearch.id], error: message } } : prev));
+      toast.error(renderRunError(message));
     }
     // Refreshes the persisted view even though the live `runs` state
     // above already reflects the outcome — this is what keeps the
@@ -909,6 +931,7 @@ export default function RadarPage() {
                 decision: event.decision,
                 recommendation: event.recommendation,
                 overallScore: event.overall_score,
+                autoAddedToPipeline: event.auto_added_to_pipeline,
               },
             ],
           },
@@ -1182,9 +1205,14 @@ export default function RadarPage() {
                         )}
                         <span className="font-mono">scoring</span>
                         <span className="text-muted-foreground">
-                          {rowRun.scoring.summary
-                            ? `${rowRun.scoring.summary.kept} keep · ${rowRun.scoring.summary.review} review · ${rowRun.scoring.summary.dropped} drop${rowRun.scoring.summary.errors ? ` · ${rowRun.scoring.summary.errors} errors` : ""}`
-                            : `${rowRun.scoring.scored.length + rowRun.scoring.scoringErrors.length}/${rowRun.scoring.count} scored`}
+                          {(() => {
+                            const scoring = rowRun.scoring!;
+                            if (!scoring.summary) {
+                              return `${scoring.scored.length + scoring.scoringErrors.length}/${scoring.count} scored`;
+                            }
+                            const autoAdded = scoring.scored.filter((s) => s.autoAddedToPipeline).length;
+                            return `${scoring.summary.kept} keep · ${scoring.summary.review} review · ${scoring.summary.dropped} drop${scoring.summary.errors ? ` · ${scoring.summary.errors} errors` : ""}${autoAdded ? ` · ${autoAdded} auto-piped` : ""}`;
+                          })()}
                         </span>
                       </div>
                     )}
@@ -1198,7 +1226,7 @@ export default function RadarPage() {
                         {e}
                       </div>
                     ))}
-                    {rowRun.error && <div className="text-xs text-crit">{rowRun.error}</div>}
+                    {rowRun.error && <div className="text-xs text-crit">{renderRunError(rowRun.error)}</div>}
                     {rowRun.cancelled && (
                       <div className="text-xs text-muted-foreground font-mono">cancelled by you</div>
                     )}
@@ -1253,6 +1281,14 @@ export default function RadarPage() {
                                 </Link>
                                 {sc.overallScore !== null && (
                                   <span className="font-mono text-muted-foreground shrink-0">{sc.overallScore}</span>
+                                )}
+                                {sc.autoAddedToPipeline && (
+                                  <span
+                                    className="text-[9px] font-mono text-ok shrink-0"
+                                    title="Auto-added to your Application Pipeline"
+                                  >
+                                    ✓ piped
+                                  </span>
                                 )}
                               </div>
                             ))}

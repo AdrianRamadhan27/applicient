@@ -274,7 +274,10 @@ def build_orchestrator_tools(
                 return "error: saved search's persona is missing or inactive"
             profile = db.get(Profile, persona.profile_id)
             if profile is None or not profile.confirmed:
-                return "error: this persona's profile must be confirmed (in Profile Studio) before running a search"
+                return (
+                    "error: this persona's profile must be confirmed before running a search. "
+                    "Tell the user to confirm it here: [Profile Studio](/console?tab=profile)"
+                )
             insufficient = insufficient_credits_message(
                 db, user_id=user_id, feature_key=FEATURE_RADAR_RUN, label="running a job search"
             )

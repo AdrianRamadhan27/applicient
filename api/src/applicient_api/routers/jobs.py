@@ -34,6 +34,7 @@ from applicient_api.job_url_parsing import JobUrlParseError, open_snapshot_and_c
 from applicient_api.models.agents import AgentRun
 from applicient_api.models.discovery import Job, JobSighting, Source
 from applicient_api.models.enums import SourceTier
+from applicient_api.models.pipeline import Application
 from applicient_api.models.profile import Persona
 from applicient_api.models.scoring import FitScore, PrefilterResult
 from applicient_api.normalization import normalize_and_upsert
@@ -99,6 +100,7 @@ def _inbox_job_out(
             .first()
         )
     source_names = _source_names_by_job_id(db, user_id, [job.id]).get(job.id, [])
+    in_pipeline = db.query(Application.id).filter_by(job_id=job.id, user_id=user_id).first() is not None
     return schemas.InboxJobOut(
         id=job.id,
         title=job.title,
@@ -119,6 +121,7 @@ def _inbox_job_out(
         fit_score=schemas.FitScoreOut.model_validate(fit_score) if fit_score else None,
         prefilter=schemas.PrefilterResultOut.model_validate(prefilter) if prefilter else None,
         source_names=source_names,
+        in_pipeline=in_pipeline,
     )
 
 
@@ -197,6 +200,12 @@ def list_inbox_jobs(
         .all()
     )
     source_names = _source_names_by_job_id(db, user_id, job_ids)
+    piped_job_ids = {
+        row[0]
+        for row in db.query(Application.job_id).filter(
+            Application.user_id == user_id, Application.job_id.in_(job_ids)
+        )
+    }
 
     recommendation_filter = set(recommendation) if recommendation else None
 
@@ -257,6 +266,7 @@ def list_inbox_jobs(
             fit_score=schemas.FitScoreOut.model_validate(fit_scores[job.id]) if job.id in fit_scores else None,
             prefilter=schemas.PrefilterResultOut.model_validate(prefilters[job.id]) if job.id in prefilters else None,
             source_names=source_names.get(job.id, []),
+            in_pipeline=job.id in piped_job_ids,
         )
         for job in page
     ]
@@ -332,6 +342,7 @@ def get_inbox_job(
         fit_score=schemas.FitScoreOut.model_validate(fit_score) if fit_score else None,
         prefilter=schemas.PrefilterResultOut.model_validate(prefilter) if prefilter else None,
         source_names=source_names,
+        in_pipeline=db.query(Application.id).filter_by(job_id=job.id, user_id=user_id).first() is not None,
         requirements=job.requirements,
         responsibilities=job.responsibilities,
         benefits=job.benefits,

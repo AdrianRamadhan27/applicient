@@ -285,6 +285,8 @@ export type JobGroup = {
   persona_id: string;
   name: string;
   job_ids: string[];
+  target_role_title: string | null;
+  target_company: string | null;
 };
 
 export type TailoredBullet = { evidence_id: string; text: string };
@@ -792,6 +794,7 @@ export type InboxJob = {
   fit_score: FitScore | null;
   prefilter: PrefilterResult | null;
   source_names: string[];
+  in_pipeline: boolean;
 };
 
 export type InboxJobDetail = InboxJob & {
@@ -1172,6 +1175,7 @@ export type RadarRunProgressEvent =
       decision: "keep" | "drop" | "review";
       recommendation: "strong_apply" | "apply" | "stretch" | "skip" | null;
       overall_score: number | null;
+      auto_added_to_pipeline: boolean;
     }
   | { type: "job_scoring_error"; job_id: string; title: string; message: string }
   | { type: "scoring_done"; kept: number; dropped: number; review: number; errors: number }
@@ -1221,7 +1225,14 @@ async function checkStreamResponse(res: Response, context: string): Promise<void
   if (!res.ok) {
     const body = await res.text();
     reportIfInsufficientCredits(res.status, body);
-    throw new ApiError(`${context} failed: ${res.status}: ${body}`, res.status);
+    // The raw body is a JSON envelope ({"detail": "..."}) for a real
+    // FastAPI HTTPException, which every 4xx from this app's own
+    // preconditions is — dumping it verbatim in a toast (raised
+    // directly by Adrian, seeing the full `{"detail": "..."}` blob)
+    // is illegible; extractErrorMessage unwraps it to the plain
+    // sentence, falling back to the raw body for the rare non-JSON
+    // error path.
+    throw new ApiError(`${context} failed: ${extractErrorMessage(body)}`, res.status);
   }
 }
 
@@ -1290,7 +1301,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
     reportIfInsufficientCredits(res.status, body);
-    throw new ApiError(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${body}`, res.status);
+    // Same unwrap as checkStreamResponse — a plain sentence in the
+    // toast instead of the raw `{"detail": "..."}` JSON envelope.
+    throw new ApiError(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${extractErrorMessage(body)}`, res.status);
   }
   const method = (init?.method ?? "GET").toUpperCase();
   if (method !== "GET" && _pathIsOnboardingRelevant(path)) notifyOnboardingChanged();
@@ -1575,7 +1588,7 @@ export const api = {
     try {
       return await request<Preference>(`/personas/${personaId}/preferences`);
     } catch (err) {
-      if (err instanceof Error && err.message.includes("-> 404")) return null;
+      if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     }
   },
@@ -1693,9 +1706,11 @@ export const api = {
   // --- M3 §2-4/F5.10 — job groups, tailoring, verification, rendering ---
 
   listJobGroups: (personaId: string) => request<JobGroup[]>(`/personas/${personaId}/job-groups`),
-  createJobGroup: (personaId: string, body: { name: string; job_ids?: string[] }) =>
-    request<JobGroup>(`/personas/${personaId}/job-groups`, { method: "POST", body: JSON.stringify(body) }),
-  updateJobGroup: (id: string, body: { name?: string }) =>
+  createJobGroup: (
+    personaId: string,
+    body: { name: string; job_ids?: string[]; target_role_title?: string | null; target_company?: string | null },
+  ) => request<JobGroup>(`/personas/${personaId}/job-groups`, { method: "POST", body: JSON.stringify(body) }),
+  updateJobGroup: (id: string, body: { name?: string; target_role_title?: string | null; target_company?: string | null }) =>
     request<JobGroup>(`/job-groups/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteJobGroup: (id: string) => request<void>(`/job-groups/${id}`, { method: "DELETE" }),
   addJobGroupMember: (groupId: string, jobId: string) =>

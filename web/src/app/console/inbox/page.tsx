@@ -149,6 +149,7 @@ function JobDetailDrawer({
       // existing row if this job already has one), so this is safe to
       // click again on a job you've already added — it just reopens it.
       const application: Application = await api.createApplication({ job_id: jobId, persona_id: personaId });
+      setDetail((prev) => (prev ? { ...prev, in_pipeline: true } : prev));
       router.push(`/console/pipeline?application_id=${application.id}`);
     } catch (e) {
       toast.error(String(e));
@@ -160,10 +161,19 @@ function JobDetailDrawer({
   async function handleScoreJob() {
     setScoring(true);
     try {
+      const wasAlreadyInPipeline = detail?.in_pipeline ?? false;
       const scored = await api.scoreJob(jobId, personaId);
-      setDetail((prev) => (prev ? { ...prev, fit_score: scored.fit_score, prefilter: scored.prefilter } : prev));
+      setDetail((prev) =>
+        prev ? { ...prev, fit_score: scored.fit_score, prefilter: scored.prefilter, in_pipeline: scored.in_pipeline } : prev,
+      );
       onScored();
-      toast.success(scored.fit_score ? `Scored: ${scored.fit_score.recommendation}` : "Scored — prefilter dropped it, see below");
+      toast.success(
+        scored.fit_score
+          ? scored.in_pipeline && !wasAlreadyInPipeline
+            ? `Scored: ${scored.fit_score.recommendation} — auto-added to your pipeline`
+            : `Scored: ${scored.fit_score.recommendation}`
+          : "Scored — prefilter dropped it, see below",
+      );
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -402,11 +412,16 @@ function JobDetailDrawer({
                 )}
                 <Button
                   size="sm"
+                  variant={detail.in_pipeline ? "outline" : "default"}
                   onClick={handleStartApplication}
                   disabled={startingApplication}
-                  title="Creates a tracked Application and opens it on the Pipeline board, where you can run the application-agent or mark it applied manually"
+                  title={
+                    detail.in_pipeline
+                      ? "Already in your pipeline — open it on the Pipeline board"
+                      : "Creates a tracked Application and opens it on the Pipeline board, where you can run the application-agent or mark it applied manually"
+                  }
                 >
-                  {startingApplication ? "Adding…" : "Add to Pipeline"}
+                  {startingApplication ? "Adding…" : detail.in_pipeline ? "✓ In pipeline" : "Add to Pipeline"}
                 </Button>
               </div>
 
@@ -719,7 +734,7 @@ export default function InboxPage() {
           ranked by fit — real API data only, no sample jobs
         </span>
         <div className="ml-auto flex items-center gap-3">
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddJobOpen(true)}>
+          <Button size="sm" className="gap-1.5" onClick={() => setAddJobOpen(true)}>
             <Plus className="size-3.5" />
             Add job
           </Button>
@@ -952,6 +967,15 @@ export default function InboxPage() {
                   >
                     {job.fit_score ? RECOMMENDATION_LABEL[job.fit_score.recommendation] : "unscored"}
                   </Badge>
+                  {job.in_pipeline && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-mono shrink-0 mt-0.5"
+                      title="Already in your Application Pipeline"
+                    >
+                      ✓ in pipeline
+                    </Badge>
+                  )}
                   <div className="flex-1 min-w-0 flex flex-col gap-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{job.title}</span>

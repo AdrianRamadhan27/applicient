@@ -72,6 +72,8 @@ def run_cover_letter_generation(
     tone: str = "neutral",
     length: str = "medium",
     prior_violations: list[str] | None = None,
+    target_role_title: str | None = None,
+    target_company: str | None = None,
 ) -> CoverLetterOutput:
     structured = model.bind(max_tokens=8000).with_structured_output(CoverLetterOutput)
     length_guidance = _LENGTH_GUIDANCE.get(length, _LENGTH_GUIDANCE["medium"])
@@ -81,7 +83,8 @@ def run_cover_letter_generation(
         f"REQUESTED TONE: {tone_guidance}\n\n"
         f"CANDIDATE:\n{profile_summary(profile, persona_name, preference)}\n\n"
         f"CANDIDATE'S FULL EVIDENCE BANK (cite evidence_id exactly as shown):\n{evidence_bank_summary(evidence_items)}\n\n"
-        f"JOB GROUP ({len(jobs)} posting(s) this letter must serve):\n{job_group_summary(jobs)}"
+        f"JOB GROUP ({len(jobs)} posting(s) this letter must serve):\n"
+        f"{job_group_summary(jobs, target_role_title=target_role_title, target_company=target_company)}"
     )
     if prior_violations:
         violations_text = "\n".join(f"- {v}" for v in prior_violations)

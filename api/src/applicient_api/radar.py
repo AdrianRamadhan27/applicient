@@ -642,6 +642,7 @@ async def run_radar_search(
                             decision=result.decision,
                             recommendation=result.recommendation,
                             overall_score=result.overall_score,
+                            auto_added_to_pipeline=result.auto_added_to_pipeline,
                         )
 
                     db.add(

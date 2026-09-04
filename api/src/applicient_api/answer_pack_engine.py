@@ -56,13 +56,16 @@ def run_answer_pack_generation(
     evidence_items: list[EvidenceItem],
     preference: Preference | None = None,
     prior_violations: list[str] | None = None,
+    target_role_title: str | None = None,
+    target_company: str | None = None,
 ) -> AnswerPackOutput:
     structured = model.bind(max_tokens=8000).with_structured_output(AnswerPackOutput)
     questions_text = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
     prompt = (
         f"CANDIDATE:\n{profile_summary(profile, persona_name, preference)}\n\n"
         f"CANDIDATE'S FULL EVIDENCE BANK (cite evidence_id exactly as shown):\n{evidence_bank_summary(evidence_items)}\n\n"
-        f"JOB GROUP ({len(jobs)} posting(s) this application is for):\n{job_group_summary(jobs)}\n\n"
+        f"JOB GROUP ({len(jobs)} posting(s) this application is for):\n"
+        f"{job_group_summary(jobs, target_role_title=target_role_title, target_company=target_company)}\n\n"
         f"SCREENING QUESTIONS TO ANSWER:\n{questions_text}"
     )
     if prior_violations:

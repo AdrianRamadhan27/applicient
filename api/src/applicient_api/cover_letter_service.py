@@ -46,8 +46,10 @@ def generate_cover_letter(
             m.job_id for m in db.query(JobGroupMember).filter_by(job_group_id=group.id).all()
         ]
         jobs = db.query(Job).filter(Job.id.in_(member_job_ids)).all() if member_job_ids else []
-        if not jobs:
-            raise TailoringError(f"job group {job_group_id} has no member jobs to write a cover letter for")
+        if not jobs and not group.target_role_title:
+            raise TailoringError(
+                f"job group {job_group_id} has no member jobs and no target role to write a cover letter for"
+            )
 
         evidence_items = retrieve_full_evidence_bank(db, profile_id=profile.id)
         if not evidence_items:
@@ -70,6 +72,8 @@ def generate_cover_letter(
             preference=preference,
             tone=tone,
             length=length,
+            target_role_title=group.target_role_title,
+            target_company=group.target_company,
         )
         validated = validate_cover_letter_evidence(output, evidence_items)
 
