@@ -71,6 +71,13 @@ export const metadata: Metadata = {
     description: DESCRIPTION,
   },
   robots: { index: true, follow: true },
+  // Google Search Console's "HTML tag" verification method — renders
+  // as <meta name="google-site-verification" content="...">. Proves
+  // ownership so Search Console will accept the sitemap submission
+  // (sitemap.ts) and start reporting real indexing/impression data.
+  verification: {
+    google: "b-KuhxHPqUm7wPS7FGbVEk_d0N9tWwswFe8X5WIUj-k",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
