@@ -82,11 +82,11 @@ Rules that apply throughout, not just at one step:
 - You are always allowed to skip, reorder, or revisit a step whose real state already covers it — \
   check before redoing work (e.g. preferences already set, a saved search already active).
 - For a plain "what do I have" question — saved searches, what's in the Job Inbox, where \
-  applications stand in the Pipeline, how much of this month's usage cap is left, what's on the \
-  calendar, or which job groups/CVs exist — answer directly with list_saved_searches, \
-  list_job_inbox, list_pipeline, get_usage_status, list_calendar_events, list_job_groups, or \
-  list_cv_documents. These are read-only lookups, not part of the guided sequence above; use them \
-  any time, in any order, without asking permission first.
+  applications stand in the Pipeline, how many credits are left, what's on the calendar, or which \
+  job groups/CVs exist — answer directly with list_saved_searches, list_job_inbox, list_pipeline, \
+  get_usage_status, list_calendar_events, list_job_groups, or list_cv_documents. These are \
+  read-only lookups, not part of the guided sequence above; use them any time, in any order, \
+  without asking permission first.
 - If the human asks to schedule something (an interview, a deadline, a reminder), see/show/view a \
   CV, or change a CV's LaTeX directly (remove a section, reword something, adjust formatting), use \
   create_calendar_event, show_cv, or edit_cv_latex (get the real document_id from \
@@ -97,10 +97,27 @@ Rules that apply throughout, not just at one step:
   company, and hands back a link into the dedicated voice-practice page. You cannot run the actual \
   practice (recording/playing audio) inside this chat — never attempt to ask interview questions \
   yourself in text instead of calling this tool.
-- Call ask_user at most once per response, and only for a genuinely blocking, ambiguous decision, \
-  or to confirm before a real-cost step (tailoring, running the application agent) actually starts. \
-  Ordinary clarifying questions are just your normal reply — wait for the human's next message, \
-  don't use ask_user for those.
+- Four things cost the human real credits: delegating to discovery-agent to actually run a search \
+  (task -> discovery-agent, once it reaches run_discovery), delegating to tailoring-agent to \
+  generate a CV or cover letter (task -> tailoring-agent, once it reaches tailor_cv/\
+  generate_cover_letter_tool), and calling run_application_agent yourself. (start_interview_practice \
+  and CV parsing/upload are NOT — that tool only creates a row and hands back a link; the real \
+  charge happens later, when the human themselves presses start on the dedicated practice page, \
+  which is its own clear consent — never pre-confirm for that one.) These four are gated \
+  automatically by the platform itself, not by you: the moment any of them actually runs, the \
+  human is shown a real approve/reject prompt naming the exact credit cost and current balance, \
+  and execution genuinely pauses until they answer — you do NOT need to (and should NOT) call \
+  ask_user to pre-confirm any of these four yourself, that would just make the human confirm \
+  twice. Feel free to call get_usage_status first and mention the likely cost/balance in your own \
+  reply if it helps set expectations, but then just delegate/call the tool normally and let the \
+  platform's own confirmation handle the rest. If get_usage_status shows the balance can't cover \
+  it, say so plainly (in credits, never dollars) and point them at Billing instead of even \
+  attempting the call — the automatic prompt would just reject it anyway. If the human rejects one \
+  of these four, that's final for that specific request — do not immediately retry the same action \
+  yourself; wait for them to explicitly ask again before delegating/calling it a second time. \
+  Reserve ask_user for any OTHER genuinely blocking, ambiguous decision that isn't credit-related — \
+  call it at most once per response. Ordinary clarifying questions are just your normal reply — \
+  wait for the human's next message, don't use ask_user for those.
 - Never invent a job, a salary figure, a company fact, or a document outcome that no real tool \
   call actually returned to you.
 - Delegate the discovery and tailoring stages to your discovery-agent and tailoring-agent \
@@ -133,6 +150,7 @@ def build_orchestrator_agent(
     tailoring_model: BaseChatModel,
     tools: list,
     checkpointer: BaseCheckpointSaver,
+    credit_interrupt_descriptions: dict[str, str] | None = None,
 ):
     """`tools` is the FULL tool list from `build_orchestrator_tools`.
     `tools=` below is deliberately a narrow subset, not the full list
@@ -141,7 +159,25 @@ def build_orchestrator_agent(
     agent's own tool access, so passing the full list here would give
     the top-level agent direct access to run_discovery/tailor_cv
     anyway, defeating the entire point of isolating those stages'
-    context into their own subagents."""
+    context into their own subagents.
+
+    `credit_interrupt_descriptions` — Adrian, direct follow-up on Phase
+    16: the system prompt alone asking the model to call `ask_user`
+    before spending credits was never actually enforced (the model
+    could just skip it), so this is real enforcement instead: one
+    `HumanInTheLoopMiddleware`-backed `interrupt_on` entry per
+    credit-gated tool name present in this dict, `allowed_decisions`
+    limited to `["approve", "reject"]` (never `edit`/`respond` — a
+    credit spend is a yes/no, not something to renegotiate the
+    arguments of), with `description` set to the real cost/balance
+    line the caller (orchestrator_service.py, which has DB access)
+    already computed. `run_discovery`/`tailor_cv`/
+    `generate_cover_letter_tool` only ever run inside the discovery-
+    agent/tailoring-agent subagents below, never at this top level —
+    deepagents' own declarative-SubAgent contract has each inherit
+    this top-level `interrupt_on` automatically unless it sets its
+    own, so wrapping them here is enough; no per-subagent duplication
+    needed."""
 
     tools_by_name = {getattr(t, "name", None): t for t in tools}
 
@@ -185,6 +221,12 @@ def build_orchestrator_agent(
                 "model": tailoring_model,
             },
         ],
-        interrupt_on={"ask_user": {"allowed_decisions": ["respond"]}},
+        interrupt_on={
+            "ask_user": {"allowed_decisions": ["respond"]},
+            **{
+                tool_name: {"allowed_decisions": ["approve", "reject"], "description": description}
+                for tool_name, description in (credit_interrupt_descriptions or {}).items()
+            },
+        },
         checkpointer=checkpointer,
     )

@@ -15,12 +15,16 @@ from applicient_api import schemas
 from applicient_api.billing_service import (
     DodoError,
     current_period_spend_usd,
+    ensure_product_for_pack,
     ensure_product_for_plan,
+    pack_product_id,
     plan_product_id,
+    sync_product_for_pack,
     sync_product_for_plan,
 )
+from applicient_api.credit_ledger import admin_adjust_credits, get_balance
 from applicient_api.deps import current_admin_user, get_db
-from applicient_api.models.billing import Plan, Subscription
+from applicient_api.models.billing import CreditPack, FeatureCreditCost, Plan, Subscription
 from applicient_api.models.profile import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -47,6 +51,7 @@ def list_users(db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(cur
                 plan_name=plan.name if plan else None,
                 subscription_status=sub.status if sub else None,
                 current_period_spend_usd=float(spend or 0),
+                credits_total=get_balance(db, user_id=u.id)["total"],
             )
         )
     return out
@@ -107,6 +112,7 @@ def _admin_user_out(db: Session, user: User) -> schemas.AdminUserOut:
         plan_name=plan.name if plan else None,
         subscription_status=sub.status if sub else None,
         current_period_spend_usd=float(spend or 0),
+        credits_total=get_balance(db, user_id=user.id)["total"],
     )
 
 
@@ -122,7 +128,7 @@ async def create_plan(
     plan = Plan(
         name=body.name.strip(),
         price_idr=body.price_idr,
-        monthly_usage_cap_usd=body.monthly_usage_cap_usd,
+        monthly_credits=body.monthly_credits,
         is_active=body.is_active,
         # Lets an admin attach an already-existing Dodo product (e.g.
         # one created by hand in the dashboard) instead of always
@@ -177,3 +183,111 @@ async def update_plan(
         except DodoError as exc:
             raise HTTPException(502, f"plan saved, but its Dodo product could not be updated: {exc}")
     return plan
+
+
+# --- Phase 16 — feature credit costs (admin-tunable, see
+# credit_ledger.py's own docstring for why these are a fixed price per
+# feature, decoupled from real per-call $ cost). ---
+
+
+@router.get("/feature-costs", response_model=list[schemas.FeatureCreditCostOut])
+def list_feature_costs(db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)):
+    return db.query(FeatureCreditCost).order_by(FeatureCreditCost.key.asc()).all()
+
+
+@router.patch("/feature-costs/{feature_cost_id}", response_model=schemas.FeatureCreditCostOut)
+def update_feature_cost(
+    feature_cost_id: uuid.UUID,
+    body: schemas.FeatureCreditCostUpdate,
+    db: Session = Depends(get_db),
+    _admin_id: uuid.UUID = Depends(current_admin_user),
+):
+    row = db.get(FeatureCreditCost, feature_cost_id)
+    if row is None:
+        raise HTTPException(404, "feature cost not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# --- Phase 16 — credit packs (standalone, one-time purchases). Same
+# CRUD + Dodo-product-sync shape as Plan above, just a one-time price
+# instead of recurring (billing_service.ensure_product_for_pack/
+# sync_product_for_pack). ---
+
+
+@router.get("/credit-packs", response_model=list[schemas.AdminCreditPackOut])
+def list_credit_packs_admin(db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)):
+    return db.query(CreditPack).order_by(CreditPack.price_idr.asc()).all()
+
+
+@router.post("/credit-packs", response_model=schemas.AdminCreditPackOut, status_code=201)
+async def create_credit_pack(
+    body: schemas.CreditPackCreate, db: Session = Depends(get_db), _admin_id: uuid.UUID = Depends(current_admin_user)
+):
+    pack = CreditPack(
+        name=body.name.strip(),
+        price_idr=body.price_idr,
+        credits=body.credits,
+        is_active=body.is_active,
+        dodo_product_id_test=body.dodo_product_id_test,
+        dodo_product_id_live=body.dodo_product_id_live,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    try:
+        await ensure_product_for_pack(db, pack)
+    except DodoError as exc:
+        raise HTTPException(502, f"credit pack saved, but its Dodo product could not be created: {exc}")
+    return pack
+
+
+@router.patch("/credit-packs/{pack_id}", response_model=schemas.AdminCreditPackOut)
+async def update_credit_pack(
+    pack_id: uuid.UUID,
+    body: schemas.CreditPackUpdate,
+    db: Session = Depends(get_db),
+    _admin_id: uuid.UUID = Depends(current_admin_user),
+):
+    pack = db.get(CreditPack, pack_id)
+    if pack is None:
+        raise HTTPException(404, "credit pack not found")
+    changed = body.model_dump(exclude_unset=True)
+    for field, value in changed.items():
+        setattr(pack, field, value)
+    db.commit()
+    db.refresh(pack)
+
+    if "name" in changed or "price_idr" in changed:
+        try:
+            if pack_product_id(pack):
+                await sync_product_for_pack(db, pack)
+            else:
+                await ensure_product_for_pack(db, pack)
+        except DodoError as exc:
+            raise HTTPException(502, f"credit pack saved, but its Dodo product could not be updated: {exc}")
+    return pack
+
+
+# --- Phase 16 — admin grant/subtract credits. Transaction-based, not a
+# value edit (raised directly by Adrian): the only effect this endpoint
+# has is a new CreditTransaction row via admin_adjust_credits, which is
+# what makes it show up in the user's own history as "Granted by
+# admin"/"Deducted by admin" with the reason attached — there is no
+# balance column here to PATCH instead. ---
+
+
+@router.post("/users/{user_id}/credits/adjust", response_model=schemas.CreditTransactionOut)
+def adjust_user_credits(
+    user_id: uuid.UUID,
+    body: schemas.CreditAdjustIn,
+    db: Session = Depends(get_db),
+    admin_id: uuid.UUID = Depends(current_admin_user),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "user not found")
+    return admin_adjust_credits(db, user_id=user_id, admin_user_id=admin_id, amount=body.amount, reason=body.reason.strip())

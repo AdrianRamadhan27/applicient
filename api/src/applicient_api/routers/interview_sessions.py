@@ -20,6 +20,7 @@ from applicient_agents.interview_service import (
 )
 
 from applicient_api import schemas
+from applicient_api.credit_ledger import FEATURE_INTERVIEW_PRACTICE, require_credits
 from applicient_api.deps import current_user_id, get_db, get_session_factory
 from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.discovery import Job
@@ -44,13 +45,23 @@ def _owned_session(db: Session, session_id: uuid.UUID, user_id: uuid.UUID) -> In
     return session_row
 
 
-@router.post("", status_code=201)
+@router.post(
+    "",
+    status_code=201,
+    dependencies=[Depends(require_credits(FEATURE_INTERVIEW_PRACTICE, label="an interview practice session"))],
+)
 def create_interview_session(
     body: schemas.InterviewSessionCreate, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
 ) -> EventSourceResponse:
     """Creates the session row and immediately streams its opening turn
     (the agent's first question) — `{"event": "stage" | "message" |
-    "done" | "error", "data": "<json>"}`."""
+    "done" | "error", "data": "<json>"}`.
+
+    Credit-gated at CHECK time only (never charged here) — the whole
+    session is one fixed price, charged once at real completion
+    (interview_service.end_interview_session), not per turn. This is
+    purely a "don't let someone start something they can't afford to
+    finish" guard."""
 
     if body.practice_type not in schemas.INTERVIEW_PRACTICE_TYPES:
         raise HTTPException(422, f"invalid practice_type: {body.practice_type!r}")
@@ -107,7 +118,10 @@ def create_interview_session(
     )
 
 
-@router.post("/{session_id}/start")
+@router.post(
+    "/{session_id}/start",
+    dependencies=[Depends(require_credits(FEATURE_INTERVIEW_PRACTICE, label="an interview practice session"))],
+)
 def start_session(
     session_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
 ) -> EventSourceResponse:
@@ -127,6 +141,33 @@ def start_session(
     return EventSourceResponse(start_interview_session(get_session_factory(), session_id=session_id, user_id=user_id))
 
 
+def _last_agent_message(db: Session, session_id: uuid.UUID) -> str | None:
+    """The interviewer/moderator's own most recent line — same
+    "stage=agent, status=done" event shape interview_service.py's own
+    _build_transcript already keys off of. Filtered in Python over a
+    small, recency-capped slice rather than a JSONB `->>'stage'`
+    predicate in SQL — one real session's event volume is small enough
+    that this is simpler and safer than getting a Postgres JSONB
+    operator exactly right untested."""
+
+    run_ids = [r.id for r in db.query(AgentRun.id).filter_by(interview_session_id=session_id).all()]
+    if not run_ids:
+        return None
+    events = (
+        db.query(RunEvent)
+        .filter(RunEvent.agent_run_id.in_(run_ids))
+        .order_by(RunEvent.created_at.desc(), RunEvent.seq.desc())
+        .limit(50)
+        .all()
+    )
+    for event in events:
+        if event.event_type == "stage" and event.data.get("stage") == "agent" and event.data.get("status") == "done":
+            message = event.data.get("message")
+            if message:
+                return message
+    return None
+
+
 @router.get("", response_model=list[schemas.InterviewSessionOut])
 def list_interview_sessions(
     persona_id: uuid.UUID | None = None,
@@ -136,7 +177,13 @@ def list_interview_sessions(
     query = db.query(InterviewSession).filter_by(user_id=user_id)
     if persona_id is not None:
         query = query.filter_by(persona_id=persona_id)
-    return query.order_by(InterviewSession.created_at.desc()).all()
+    sessions = query.order_by(InterviewSession.created_at.desc()).all()
+    return [
+        schemas.InterviewSessionOut.model_validate(s).model_copy(
+            update={"last_message_preview": _last_agent_message(db, s.id)}
+        )
+        for s in sessions
+    ]
 
 
 @router.get("/{session_id}", response_model=schemas.InterviewSessionOut)

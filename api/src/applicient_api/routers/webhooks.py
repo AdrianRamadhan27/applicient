@@ -19,8 +19,9 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
-from applicient_api import billing_service, email_ingestion
+from applicient_api import billing_service, credit_ledger, email_ingestion
 from applicient_api.deps import get_session_factory
+from applicient_api.models.billing import CreditPack
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
@@ -64,17 +65,19 @@ async def dodo_webhook(request: Request):
     webhook-timestamp headers, HMAC-SHA256) happens inside
     unwrap_webhook_event via the official `standardwebhooks` library,
     not hand-rolled here — it raises rather than silently accepting an
-    unsigned or mis-signed request. Only subscription.* events matter
-    to this app; everything else (payments, refunds, disputes, license
-    keys, ...) is acked and ignored. Never trusts the webhook's own
-    `data` fields to mutate billing state directly — only uses
-    subscription_id/customer_id to find which of our own Subscription
-    rows to re-sync, then re-derives the rest from a direct GET inside
-    sync_subscription_from_dodo. Always acks 200 on a validly-signed
-    request — a sync failure here just means the user's own return to
-    /billing (or the next webhook) catches it, rather than making Dodo
-    retry-storm an event this handler can't act on differently next
-    time anyway."""
+    unsigned or mis-signed request. Only subscription.* events (Plan
+    subscriptions) and payment.succeeded (Phase 16 credit-pack one-time
+    purchases) matter to this app; everything else (refunds, disputes,
+    license keys, ...) is acked and ignored. Never trusts the webhook's
+    own `data` fields to mutate billing state directly — either re-syncs
+    from a direct GET (sync_subscription_from_dodo) or, for a payment,
+    re-fetches the payment itself before crediting anything
+    (retrieve_payment) — same "the webhook is a nudge, polling is the
+    real source of truth" discipline either way. Always acks 200 on a
+    validly-signed request — a failure here just means the user's own
+    return to /billing (or the next webhook) catches it, rather than
+    making Dodo retry-storm an event this handler can't act on
+    differently next time anyway."""
 
     raw_body = await request.body()
     headers = {
@@ -86,6 +89,10 @@ async def dodo_webhook(request: Request):
         event = billing_service.unwrap_webhook_event(raw_body, headers)
     except Exception:
         raise HTTPException(403, "invalid or unverifiable Dodo webhook signature")
+
+    if event.type == "payment.succeeded":
+        await _handle_payment_succeeded(event.data)
+        return {"ok": True}
 
     if not event.type.startswith("subscription."):
         return {"ok": True}
@@ -104,3 +111,36 @@ async def dodo_webhook(request: Request):
         except billing_service.DodoError:
             logger.exception("dodo webhook-triggered sync failed", extra={"subscription_id": data.subscription_id})
     return {"ok": True}
+
+
+async def _handle_payment_succeeded(payment) -> None:
+    """Phase 16 — credits a CreditPack purchase. `metadata` is whatever
+    start_pack_checkout stamped onto the checkout session
+    (billing_service.py); a payment with no `credit_pack_id` in its
+    metadata is a Plan subscription's own initial payment (a
+    subscription's first charge also fires payment.succeeded, alongside
+    its own subscription.active event) — nothing to do here for those,
+    the subscription.* branch above already handles activation."""
+
+    metadata = payment.metadata or {}
+    pack_id = metadata.get("credit_pack_id")
+    user_id = metadata.get("user_id")
+    if not pack_id or not user_id:
+        return
+    logger.info("dodo payment.succeeded received", extra={"payment_id": payment.payment_id, "credit_pack_id": pack_id})
+
+    with get_session_factory()() as db:
+        pack = db.get(CreditPack, pack_id)
+        if pack is None:
+            return
+        # Re-fetch the real payment rather than trusting the webhook
+        # payload's own status field, same "webhook is a nudge, polling
+        # is authoritative" reasoning sync_subscription_from_dodo uses.
+        try:
+            confirmed = await billing_service.retrieve_payment(payment.payment_id)
+        except billing_service.DodoError:
+            logger.exception("dodo webhook-triggered payment re-fetch failed", extra={"payment_id": payment.payment_id})
+            return
+        if confirmed.status != "succeeded":
+            return
+        credit_ledger.record_purchase(db, user_id=user_id, pack=pack, dodo_payment_id=payment.payment_id)

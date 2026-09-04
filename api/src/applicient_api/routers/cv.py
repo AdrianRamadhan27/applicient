@@ -44,6 +44,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from applicient_api import schemas
 from applicient_api.cv_parsing import ExtractionError, extract_text, parse_cv_text, parse_loose_date
+from applicient_api.cv_review_service import run_cv_score_for_profile
 from applicient_api.deps import current_user_id, get_db, get_session_factory
 from applicient_api.embedding_service import embed_evidence_items
 from applicient_api.models.agents import AgentRun, AgentStep
@@ -215,6 +216,24 @@ async def _parse_cv_stream(
             )
             emit_step("embedding", t0, {})
             yield _event("embedding", "done", "Embeddings complete")
+
+            # --- scoring (Adrian, direct: "after user upload cv there
+            # needs to be cv scoring... to give analysis and feedback",
+            # shown on Composer's Base CV page) — free, best-effort: a
+            # scoring failure degrades to "no score yet, retry from the
+            # Base CV page" rather than failing the whole upload the
+            # user actually cares about. ---
+            t0 = datetime.now(timezone.utc)
+            yield _event("scoring", "started", "Analyzing your CV")
+            try:
+                await to_thread(
+                    run_cv_score_for_profile,
+                    db, profile_id=profile_id, user_id=user_id, session_factory=session_factory,
+                )
+                emit_step("scoring", t0, {})
+                yield _event("scoring", "done", "Analysis complete")
+            except Exception as exc:
+                yield _event("scoring", "done", f"Analysis skipped: {str(exc)[:200]}")
 
             # --- finalize ---
             profile.parsed_profile = extracted.profile.model_dump(mode="json", exclude_none=True)

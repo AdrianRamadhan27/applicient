@@ -40,7 +40,15 @@ from sqlalchemy.orm import sessionmaker
 from applicient_agents.application_service import start_application_attempt
 
 from applicient_api import schemas
-from applicient_api.billing_service import current_period_spend_usd
+from applicient_api.credit_ledger import (
+    FEATURE_APPLICATION_APPLY,
+    FEATURE_COVER_LETTER,
+    FEATURE_CV_TAILOR,
+    FEATURE_RADAR_RUN,
+    charge_credits,
+    get_balance,
+    insufficient_credits_message,
+)
 from applicient_api.claim_verification_service import (
     VerificationError,
     regenerate_from_last_verification,
@@ -50,7 +58,7 @@ from applicient_api.cover_letter_service import generate_cover_letter
 from applicient_api.cv_latex_edit_engine import run_latex_edit
 from applicient_api.latex_rendering import RenderError, compile_tex
 from applicient_api.models.agents import AgentRun, RunEvent
-from applicient_api.models.billing import Plan, Subscription
+from applicient_api.models.billing import FeatureCreditCost, Plan, Subscription
 from applicient_api.models.calendar import CalendarEvent
 from applicient_api.models.discovery import Job, SavedSearch, Source
 from applicient_api.models.interview import InterviewSession
@@ -267,6 +275,11 @@ def build_orchestrator_tools(
             profile = db.get(Profile, persona.profile_id)
             if profile is None or not profile.confirmed:
                 return "error: this persona's profile must be confirmed (in Profile Studio) before running a search"
+            insufficient = insufficient_credits_message(
+                db, user_id=user_id, feature_key=FEATURE_RADAR_RUN, label="running a job search"
+            )
+            if insufficient:
+                return f"error: {insufficient}"
 
         new_count = 0
         scored_count = 0
@@ -380,6 +393,13 @@ def build_orchestrator_tools(
         if group_id is None:
             return f"error: '{job_group_id}' is not a valid job_group_id"
 
+        with session_factory() as db:
+            insufficient = insufficient_credits_message(
+                db, user_id=user_id, feature_key=FEATURE_CV_TAILOR, label="tailoring a CV"
+            )
+        if insufficient:
+            return f"error: {insufficient}"
+
         def _tailor() -> "Document":
             return tailor_job_group(session_factory, job_group_id=group_id, user_id=user_id, agent_run_id=agent_run_id)
 
@@ -414,6 +434,9 @@ def build_orchestrator_tools(
         except (TailoringError, VerificationError, TierResolutionError) as exc:
             return f"error: {exc}"
 
+        with session_factory() as db:
+            charge_credits(db, user_id=user_id, feature_key=FEATURE_CV_TAILOR, agent_run_id=agent_run_id, label="tailoring a CV")
+
         emit_card("document", {
             "document_id": str(document.id), "doc_type": document.doc_type,
             "template": document.template, "verified": document.verified,
@@ -432,6 +455,13 @@ def build_orchestrator_tools(
         group_id = _try_uuid(job_group_id)
         if group_id is None:
             return f"error: '{job_group_id}' is not a valid job_group_id"
+
+        with session_factory() as db:
+            insufficient = insufficient_credits_message(
+                db, user_id=user_id, feature_key=FEATURE_COVER_LETTER, label="generating a cover letter"
+            )
+        if insufficient:
+            return f"error: {insufficient}"
 
         def _generate() -> "Document":
             return generate_cover_letter(
@@ -469,6 +499,12 @@ def build_orchestrator_tools(
                 _emit("verifying.done", message="all claims verified" if clean else "still unresolved after 2 attempts", attempt=2, clean=clean)
         except (TailoringError, VerificationError, TierResolutionError) as exc:
             return f"error: {exc}"
+
+        with session_factory() as db:
+            charge_credits(
+                db, user_id=user_id, feature_key=FEATURE_COVER_LETTER, agent_run_id=agent_run_id,
+                label="generating a cover letter",
+            )
 
         emit_card("document", {
             "document_id": str(document.id), "doc_type": document.doc_type,
@@ -571,6 +607,13 @@ def build_orchestrator_tools(
         app_uuid = _try_uuid(application_id)
         if app_uuid is None:
             return f"error: '{application_id}' is not a valid application_id"
+
+        with session_factory() as db:
+            insufficient = insufficient_credits_message(
+                db, user_id=user_id, feature_key=FEATURE_APPLICATION_APPLY, label="applying to this job"
+            )
+        if insufficient:
+            return f"error: {insufficient}"
 
         # The card appears the moment attempt_id is known (this
         # application's own attempt_id, present on every event
@@ -785,11 +828,20 @@ def build_orchestrator_tools(
 
     @tool
     def get_usage_status() -> str:
-        """Check this account's current billing-period LLM spend
-        against its plan's monthly usage cap. Call this before
-        starting an expensive operation (tailor_cv, run_discovery,
-        run_application_agent) if the human seems cost-conscious, or
-        right after a tool call fails with a usage-cap error."""
+        """Check this account's current credit balance and what each
+        credit-gated action actually costs. Call this BEFORE calling
+        ask_user to confirm any credit-gated action (run_discovery,
+        tailor_cv, generate_cover_letter_tool, run_application_agent,
+        start_interview_practice) so you can name the real cost and
+        confirm there's enough balance — never guess or invent a
+        number. Also useful right after a tool call fails with an
+        insufficient-credits error, to explain why and by how much.
+
+        NEVER mention a `$`/dollar figure to the human — credits are
+        the only unit this account is ever billed or shown in,
+        deliberately opaque to any real cost behind them; this tool
+        itself only ever returns credits, never $, for exactly that
+        reason."""
 
         with session_factory() as db:
             subscription = db.query(Subscription).filter_by(user_id=user_id).one_or_none()
@@ -798,11 +850,14 @@ def build_orchestrator_tools(
             plan = db.get(Plan, subscription.plan_id)
             if plan is None:
                 return "subscription exists but its plan could not be found"
-            spend = current_period_spend_usd(db, user_id=user_id, subscription=subscription)
-            cap = float(plan.monthly_usage_cap_usd)
+            balance = get_balance(db, user_id=user_id)
+            costs = db.query(FeatureCreditCost).filter_by(is_active=True).order_by(FeatureCreditCost.key).all()
+            cost_lines = "\n".join(f"  - {c.display_name}: {c.credit_cost} credits" for c in costs)
             return (
-                f"plan={plan.name} | spent ${spend:.2f} of ${cap:.2f} this billing period "
-                f"(${max(cap - spend, 0):.2f} remaining)"
+                f"plan={plan.name} | balance: {balance['total']} credits "
+                f"({balance['monthly']} monthly + {balance['purchased']} purchased, purchased never expires)\n"
+                f"Feature costs:\n{cost_lines}\n"
+                "(CV parsing/upload is free, not listed — no cost to confirm for that one.)"
             )
 
     @tool

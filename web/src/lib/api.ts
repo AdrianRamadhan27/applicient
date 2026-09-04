@@ -1,3 +1,5 @@
+import { getCachedBaseCvBlob, invalidateBaseCvCache, setCachedBaseCvBlob } from "@/lib/base-cv-cache";
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -17,14 +19,40 @@ function authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// Carries the real HTTP status alongside the message `request()` was
+// already building — added so callers that need to tell "the token is
+// genuinely invalid" (401) apart from "the server hiccuped" (anything
+// else) actually can. auth.tsx's mount-time /auth/me check is the
+// motivating case: it used to catch ANY failure here — a real 401, a
+// 500, or the API being briefly unreachable mid-restart — identically,
+// wiping a perfectly good token and bouncing the user to /login just
+// because the server was down for a second (confirmed live: refreshing
+// mid interview-practice session, a long-running feature, was enough
+// to occasionally land right in that window). `status` is 0 for a
+// failure that never got an HTTP response at all (fetch itself threw —
+// offline, DNS, connection refused).
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export type User = { id: string; email: string; role: "user" | "admin"; email_verified: boolean };
 
 // SaaS pivot — admin-only surfaces.
+// Phase 16 — credits only, deliberately no `$` field here at all.
+// `monthly_usage_cap_usd` doesn't exist ANYWHERE any more, admin
+// included — removed entirely (Adrian, direct: it was fully vestigial,
+// zero enforcement code left standing since Phase 16), not just kept
+// off the public shape.
 export type Plan = {
   id: string;
   name: string;
   price_idr: number;
-  monthly_usage_cap_usd: number;
+  monthly_credits: number;
   is_active: boolean;
 };
 
@@ -42,12 +70,15 @@ export type Subscription = {
   plan_id: string;
   plan_name: string;
   price_idr: number;
-  monthly_usage_cap_usd: number;
+  monthly_credits: number;
+  credits_monthly: number;
+  credits_purchased: number;
+  credits_total: number;
   status: string;
-  current_period_spend_usd: number;
   current_period_end: string | null;
   pending_plan_id: string | null;
   pending_plan_name: string | null;
+  cancel_at_period_end: boolean;
 };
 
 export type AdminUser = {
@@ -58,7 +89,39 @@ export type AdminUser = {
   created_at: string;
   plan_name: string | null;
   subscription_status: string | null;
-  current_period_spend_usd: number;
+  current_period_spend_usd: number; // admin/internal-only real $ cost
+  credits_total: number;
+};
+
+export type FeatureCreditCost = {
+  id: string;
+  key: string;
+  display_name: string;
+  credit_cost: number;
+  is_active: boolean;
+};
+
+export type CreditPack = {
+  id: string;
+  name: string;
+  price_idr: number;
+  credits: number;
+  is_active: boolean;
+};
+
+export type AdminCreditPack = CreditPack & {
+  dodo_product_id_test: string | null;
+  dodo_product_id_live: string | null;
+};
+
+export type CreditTransaction = {
+  id: string;
+  type: "monthly_grant" | "purchase" | "usage" | "admin_grant" | "admin_adjustment" | "expiration";
+  bucket: "monthly" | "purchased";
+  amount: number;
+  balance_after: number;
+  description: string;
+  created_at: string;
 };
 
 /** The dedicated Live Browser page's own WebSocket connection —
@@ -181,6 +244,16 @@ export type AudioSettings = {
   speech_voice_secondary: string | null;
 };
 
+export type CvScoreCategory = { category: string; score: number; feedback: string };
+export type CvScore = {
+  overall_score: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  categories: CvScoreCategory[];
+};
+export type CvFixResult = { updated_count: number; notes: string };
+
 export type Profile = {
   id: string;
   user_id: string;
@@ -190,6 +263,8 @@ export type Profile = {
   parsed_at: string | null;
   visa_status: string | null;
   notice_period_days: number | null;
+  cv_score: CvScore | null;
+  cv_scored_at: string | null;
 };
 
 export type ParsedProfile = {
@@ -877,6 +952,10 @@ export type InterviewSession = {
   feedback: InterviewFeedback | null;
   created_at: string;
   ended_at: string | null;
+  /** The interviewer/moderator's own last line — set only by the LIST
+   * endpoint (routers/interview_sessions.py), null from a single-session
+   * GET (that page shows the full transcript instead). */
+  last_message_preview: string | null;
 };
 
 // Coarser than ApplicationStreamEvent/ConversationStreamEvent — one
@@ -1098,15 +1177,123 @@ export type RadarRunProgressEvent =
   | { type: "scoring_done"; kept: number; dropped: number; review: number; errors: number }
   | { type: "done"; result: RadarRunResult };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...authHeader(), ...init?.headers },
-  });
+// Phase 16 — a 402 (insufficient credits, credit_ledger.require_credits
+// on the backend) needs to surface as a real "go buy/upgrade" dialog,
+// not just another string in a toast, and needs to work from ANY call
+// site across the whole app (dozens of pages, plus the Assistant's own
+// SSE stream) without touching every one of them individually. This
+// module has no React tree of its own to render a dialog into, so it
+// exposes one registration slot instead — InsufficientCreditsProvider
+// (components/insufficient-credits-provider.tsx) calls
+// setInsufficientCreditsHandler once, on mount, and every place below
+// that already turns a non-2xx response into an error (request()
+// itself, and checkStreamResponse for the many SSE-streaming
+// endpoints) calls it in passing before throwing, so nothing else in
+// this file (or any page) needs to know this dialog exists.
+let insufficientCreditsHandler: ((message: string) => void) | null = null;
+export function setInsufficientCreditsHandler(handler: ((message: string) => void) | null) {
+  insufficientCreditsHandler = handler;
+}
+
+function extractErrorMessage(body: string): string {
+  // FastAPI's HTTPException(status, "message") serializes as
+  // {"detail": "message"} — surfaced as-is when present; the raw body
+  // otherwise (some error paths in this API aren't HTTPException at all).
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed?.detail === "string") return parsed.detail;
+  } catch {
+    // not JSON — fall through to the raw body
+  }
+  return body;
+}
+
+function reportIfInsufficientCredits(status: number, body: string) {
+  if (status === 402 && insufficientCreditsHandler) insufficientCreditsHandler(extractErrorMessage(body));
+}
+
+// Shared by every SSE-streaming endpoint's own `fetch()` call (they
+// can't all go through request() below — most are POST-with-body
+// followed by parseSSE, not a single JSON round-trip) so a 402 from
+// any of them reports the same way request() does, in one place
+// rather than repeated at each of the dozen-plus call sites.
+async function checkStreamResponse(res: Response, context: string): Promise<void> {
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${body}`);
+    reportIfInsufficientCredits(res.status, body);
+    throw new ApiError(`${context} failed: ${res.status}: ${body}`, res.status);
   }
+}
+
+// Same "one registration slot, called in passing from every relevant
+// call site" shape as setInsufficientCreditsHandler right above — the
+// sidebar's own credit balance (app-shell.tsx) otherwise only ever
+// refetched on a route change or a 30s poll, which read as "credits
+// don't update in real time" (Adrian, direct) when a feature was used
+// without navigating away. A plain DOM CustomEvent, not a React
+// context — this module has no component tree of its own, and a
+// browser event is the one thing every mounted listener (there's only
+// ever one, app-shell.tsx, but nothing stops there being more later)
+// can subscribe to without this file importing React. Called right
+// after every generator/request below that credit_ledger.charge_credits
+// can actually fire from — never a guess at WHICH one changed the
+// balance, since app-shell.tsx just refetches the real total either way.
+export const CREDITS_CHANGED_EVENT = "applicient:credits-changed";
+function notifyCreditsChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(CREDITS_CHANGED_EVENT));
+}
+
+// Same mechanism, same reason, for the onboarding checklist
+// (floating-onboarding.tsx / console/page.tsx's OnboardingProgressPreview)
+// — Adrian, direct: "same way credits dont update real time, the
+// onboarding progression doesnt update real time." Every step is
+// computed server-side from real rows existing (dashboard_service.py's
+// get_onboarding_progress) rather than a tracked flag, so — unlike
+// credits, which only ever change at a handful of known charge
+// points — almost any mutating request could be the one that just
+// completed a step (creating a persona, saving preferences, adding
+// evidence, creating a saved search/application/calendar event).
+// request() below fires this generically by path prefix rather than
+// hand-wiring a notify call at each of those call sites individually;
+// the SSE-streamed ones (CV parse, CV tailor, interview session
+// creation) still need their own explicit call since they bypass
+// request() entirely.
+export const ONBOARDING_CHANGED_EVENT = "applicient:onboarding-changed";
+function notifyOnboardingChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(ONBOARDING_CHANGED_EVENT));
+}
+const _ONBOARDING_RELEVANT_PATH_PREFIXES = [
+  "/personas",
+  "/evidence-items",
+  "/preferences",
+  "/saved-searches",
+  "/applications",
+  "/calendar-events",
+];
+function _pathIsOnboardingRelevant(path: string): boolean {
+  return _ONBOARDING_RELEVANT_PATH_PREFIXES.some((p) => path.includes(p));
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...authHeader(), ...init?.headers },
+    });
+  } catch (e) {
+    // fetch() itself threw — no HTTP response at all (offline, DNS,
+    // connection refused because the server is momentarily down).
+    // status 0 distinguishes this from a real HTTP error status.
+    throw new ApiError(`${init?.method ?? "GET"} ${path} -> network error: ${e}`, 0);
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    reportIfInsufficientCredits(res.status, body);
+    throw new ApiError(`${init?.method ?? "GET"} ${path} -> ${res.status}: ${body}`, res.status);
+  }
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (method !== "GET" && _pathIsOnboardingRelevant(path)) notifyOnboardingChanged();
   if (res.status === 204) return undefined as T;
   return res.json();
 }
@@ -1120,6 +1307,17 @@ export type DashboardSummary = {
   applications_by_stage: DashboardStageCount[];
   daily_activity: DashboardDailyActivity[];
 };
+
+// Home page's onboarding checklist — each step is computed server-side
+// from real data (a row exists or it doesn't), not a separately-tracked
+// "did they click through this" flag.
+export type OnboardingStep = {
+  key: "persona" | "cv" | "job_search" | "compose_cv" | "apply" | "interview_practice" | "tracking";
+  label: string;
+  done: boolean;
+  href: string | null;
+};
+export type OnboardingProgress = { steps: OnboardingStep[]; completed: number; total: number };
 
 export const api = {
   signup: (email: string, password: string) =>
@@ -1218,12 +1416,28 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  resetProfile: (id: string) =>
-    request<Profile>(`/profiles/${id}/reset`, { method: "POST" }),
+  resetProfile: async (id: string) => {
+    const result = await request<Profile>(`/profiles/${id}/reset`, { method: "POST" });
+    invalidateBaseCvCache(); // wipes the evidence bank entirely
+    return result;
+  },
+  /** Free — general, non-job-specific CV quality feedback, shown on
+   * the Base CV page. Also fired automatically right after a fresh
+   * CV parse (routers/cv.py's own "scoring" stage), so this is only
+   * needed for an explicit "Re-analyze" click. */
+  scoreCv: (profileId: string) => request<Profile>(`/profiles/${profileId}/cv-score`, { method: "POST" }),
+  /** "Fix my CV" — rewrites weak evidence-bank wording in place
+   * (never facts/metrics). Costs credits (first use free). */
+  fixCv: async (profileId: string) => {
+    const result = await request<CvFixResult>(`/profiles/${profileId}/cv-fix`, { method: "POST" });
+    notifyCreditsChanged();
+    invalidateBaseCvCache(); // rewrote evidence-bank wording — the cached render no longer matches
+    return result;
+  },
 
   listEvidence: (profileId: string) =>
     request<EvidenceItem[]>(`/profiles/${profileId}/evidence-items`),
-  createEvidence: (
+  createEvidence: async (
     profileId: string,
     body: {
       category: EvidenceCategory;
@@ -1235,16 +1449,22 @@ export const api = {
       date_start?: string | null;
       date_end?: string | null;
     },
-  ) =>
-    request<EvidenceItem>(`/profiles/${profileId}/evidence-items`, {
+  ) => {
+    const result = await request<EvidenceItem>(`/profiles/${profileId}/evidence-items`, {
       method: "POST",
       body: JSON.stringify(body),
-    }),
-  deleteEvidence: (profileId: string, evidenceId: string) =>
-    request<void>(`/profiles/${profileId}/evidence-items/${evidenceId}`, {
+    });
+    invalidateBaseCvCache();
+    return result;
+  },
+  deleteEvidence: async (profileId: string, evidenceId: string) => {
+    const result = await request<void>(`/profiles/${profileId}/evidence-items/${evidenceId}`, {
       method: "DELETE",
-    }),
-  updateEvidence: (
+    });
+    invalidateBaseCvCache();
+    return result;
+  },
+  updateEvidence: async (
     profileId: string,
     evidenceId: string,
     body: {
@@ -1257,11 +1477,14 @@ export const api = {
       date_start?: string | null;
       date_end?: string | null;
     },
-  ) =>
-    request<EvidenceItem>(`/profiles/${profileId}/evidence-items/${evidenceId}`, {
+  ) => {
+    const result = await request<EvidenceItem>(`/profiles/${profileId}/evidence-items/${evidenceId}`, {
       method: "PATCH",
       body: JSON.stringify(body),
-    }),
+    });
+    invalidateBaseCvCache();
+    return result;
+  },
 
   /**
    * Streams real progress from the backend (extract → resolve models →
@@ -1276,9 +1499,7 @@ export const api = {
       headers: authHeader(),
       body: formData,
     });
-    if (!res.ok) {
-      throw new Error(`CV parse failed: ${res.status}: ${await res.text()}`);
-    }
+    await checkStreamResponse(res, "CV parse");
 
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
@@ -1286,6 +1507,8 @@ export const api = {
       else if (event === "done") yield { type: "done", result: payload as CVParseResult };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
+    notifyOnboardingChanged(); // populates the evidence bank — the "Upload your CV" step
+    invalidateBaseCvCache(); // a fresh evidence bank makes any cached Base CV render stale
   },
 
   /** Same SSE shape as streamParseCV — see radar.py's module docstring
@@ -1295,13 +1518,12 @@ export const api = {
       method: "POST",
       headers: authHeader(),
     });
-    if (!res.ok) {
-      throw new Error(`radar run failed: ${res.status}: ${await res.text()}`);
-    }
+    await checkStreamResponse(res, "radar run");
 
     for await (const { event, data } of parseSSE(res)) {
       yield toRadarProgressEvent(event, JSON.parse(data));
     }
+    notifyCreditsChanged();
   },
 
   /** Replay/reconnect path for a run this page didn't start live (a
@@ -1496,8 +1718,13 @@ export const api = {
     request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/complete`, { method: "POST" }),
   reopenSkillGapItem: (groupId: string, itemId: string) =>
     request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/reopen`, { method: "POST" }),
-  generateSkillGapSyllabus: (groupId: string, itemId: string) =>
-    request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/generate-syllabus`, { method: "POST" }),
+  generateSkillGapSyllabus: async (groupId: string, itemId: string) => {
+    const result = await request<SkillGapItem>(`/job-groups/${groupId}/skill-gap/${itemId}/generate-syllabus`, {
+      method: "POST",
+    });
+    notifyCreditsChanged();
+    return result;
+  },
   listTemplates: (docType: "cv" | "cover_letter" = "cv") =>
     request<CvTemplate[]>(`/documents/templates?doc_type=${docType}`),
   listDocumentVerifications: (documentId: string) =>
@@ -1511,21 +1738,32 @@ export const api = {
       `${API_BASE_URL}/documents/${documentId}/render?template_id=${encodeURIComponent(templateId)}`,
       { method: "POST", headers: authHeader() },
     );
-    if (!res.ok) throw new Error(`render failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "render");
     return res.blob();
   },
 
   /** An untailored CV straight from the persona's evidence bank — no
-   * job group required. Stateless: nothing is persisted server-side,
-   * so this always recompiles fresh and there's no `getRendered`
-   * counterpart to restore from. */
-  async renderBaseCv(personaId: string, templateId: string): Promise<Blob> {
+   * job group required. Stateless server-side (nothing persisted, so
+   * there's no `getRendered` counterpart to restore from) — but
+   * cached client-side for a few minutes (base-cv-cache.ts, Adrian
+   * direct: "I want a cache on the client... so it doesnt render each
+   * time") since both the Dashboard's own preview card and Composer's
+   * BaseCvPanel call this on every plain visit. `force: true` (the
+   * Composer's own "Refresh" button) always bypasses the cache and
+   * re-populates it with the fresh result. */
+  async renderBaseCv(personaId: string, templateId: string, opts?: { force?: boolean }): Promise<Blob> {
+    if (!opts?.force) {
+      const cached = getCachedBaseCvBlob(personaId, templateId);
+      if (cached) return cached;
+    }
     const res = await fetch(
       `${API_BASE_URL}/personas/${personaId}/base-cv?template_id=${encodeURIComponent(templateId)}`,
       { method: "POST", headers: authHeader() },
     );
-    if (!res.ok) throw new Error(`render failed: ${res.status}: ${await res.text()}`);
-    return res.blob();
+    await checkStreamResponse(res, "render");
+    const blob = await res.blob();
+    setCachedBaseCvBlob(personaId, templateId, blob);
+    return blob;
   },
 
   /** The already-rendered PDF, if one exists — no recompile. Returns
@@ -1538,18 +1776,18 @@ export const api = {
       { headers: authHeader() },
     );
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`fetch rendered PDF failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "fetch rendered PDF");
     return res.blob();
   },
 
   /** Same SSE shape as streamParseCV/streamRadarRun — see
    * job_groups.py's module docstring. */
-  async *streamTailorJobGroup(groupId: string): AsyncGenerator<TailorProgressEvent> {
-    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/tailor`, {
+  async *streamTailorJobGroup(groupId: string, verify = false): AsyncGenerator<TailorProgressEvent> {
+    const res = await fetch(`${API_BASE_URL}/job-groups/${groupId}/tailor?verify=${verify}`, {
       method: "POST",
       headers: authHeader(),
     });
-    if (!res.ok) throw new Error(`tailor failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "tailor");
 
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
@@ -1557,6 +1795,8 @@ export const api = {
       else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
+    notifyCreditsChanged();
+    notifyOnboardingChanged(); // produces a Document — the "Tailor a CV" step
   },
 
   /** F5.7 — a per-application toggle, off by default: nothing calls
@@ -1571,7 +1811,7 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ tone: style?.tone ?? "neutral", length: style?.length ?? "medium" }),
     });
-    if (!res.ok) throw new Error(`cover letter generation failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "cover letter generation");
 
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
@@ -1579,6 +1819,8 @@ export const api = {
       else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
+    notifyCreditsChanged();
+    notifyOnboardingChanged(); // also produces a Document
   },
 
   /** F6.8 — ready-to-copy answers to real screening questions,
@@ -1591,7 +1833,7 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ questions }),
     });
-    if (!res.ok) throw new Error(`answer pack generation failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "answer pack generation");
 
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
@@ -1599,6 +1841,7 @@ export const api = {
       else if (event === "done") yield { type: "done", result: payload as TailoredDocument };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
+    notifyCreditsChanged();
   },
 
   /** Re-runs verification (and the one regeneration attempt, if
@@ -1612,7 +1855,7 @@ export const api = {
       method: "POST",
       headers: authHeader(),
     });
-    if (!res.ok) throw new Error(`verify failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "verify");
 
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
@@ -1638,11 +1881,14 @@ export const api = {
    * "experience card", add/remove/reword a bullet, edit the summary)
    * — distinct from saveDocumentTex's raw-source edit. Resets
    * `verified` server-side, since the content just changed. */
-  saveDocumentDelta: (documentId: string, delta: TailoringDelta) =>
-    request<TailoredDocument>(`/documents/${documentId}/delta`, {
+  saveDocumentDelta: async (documentId: string, delta: TailoringDelta) => {
+    const result = await request<TailoredDocument>(`/documents/${documentId}/delta`, {
       method: "PUT",
       body: JSON.stringify(delta),
-    }),
+    });
+    notifyCreditsChanged(); // job_groups.py's save_document_delta_route charges credits too, not just the initial draft
+    return result;
+  },
 
   getActiveModelProfile: () => request<ModelProfile | null>("/model-profiles/active"),
   listModelProfiles: () => request<ModelProfile[]>("/model-profiles"),
@@ -1707,7 +1953,7 @@ export const api = {
       method: "POST",
       headers: authHeader(),
     });
-    if (!res.ok) throw new Error(`apply failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "apply");
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
       if (event === "stage") yield { type: "stage", ...payload };
@@ -1716,6 +1962,7 @@ export const api = {
       else if (event === "cancelled") yield { type: "cancelled", ...payload };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
+    notifyCreditsChanged(); // application_service.py's charge can land on either this stream or the resume one below
   },
   async *streamResumeApplication(
     applicationId: string,
@@ -1727,7 +1974,7 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ decisions }),
     });
-    if (!res.ok) throw new Error(`resume failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "resume");
     for await (const { event, data } of parseSSE(res)) {
       const payload = JSON.parse(data);
       if (event === "stage") yield { type: "stage", ...payload };
@@ -1736,6 +1983,7 @@ export const api = {
       else if (event === "cancelled") yield { type: "cancelled", ...payload };
       else if (event === "error") yield { type: "error", message: payload.message };
     }
+    notifyCreditsChanged();
   },
   /** Stop button — see application_service.request_cancel for what
    * actually happens server-side. Fire-and-forget from the caller's
@@ -1802,7 +2050,7 @@ export const api = {
       headers: authHeader(),
     });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`document fetch failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "document fetch");
     const disposition = res.headers.get("Content-Disposition") ?? "";
     const match = /filename="?([^"]+)"?/.exec(disposition);
     const filename = match?.[1] ?? `${docType}.pdf`;
@@ -1880,16 +2128,27 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ text }),
     });
-    if (!res.ok) throw new Error(`send message failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "send message");
+    // A hand-maintained if/else chain here (as this used to be) is
+    // exactly how the "message" event — the human's own side of the
+    // turn — went missing live while still replaying fine on reload:
+    // it was added to the union type and to getConversationEvents'
+    // replay path, but this separate live-streaming switch never got
+    // the matching branch, so it silently dropped every "message"
+    // event before consume() ever saw it (confirmed live: the backend
+    // sends it as the very first SSE frame, well before the agent's
+    // own reply). toConversationStreamEvent is the same generic
+    // passthrough getConversationEvents already uses — one mapping,
+    // not two that can drift apart again for the next new event type.
     for await (const { event, data } of parseSSE(res)) {
-      const payload = JSON.parse(data);
-      if (event === "stage") yield { type: "stage", ...payload };
-      else if (event === "interrupt") yield { type: "interrupt", ...payload };
-      else if (event === "done") yield { type: "done", ...payload };
-      else if (event === "cancelled") yield { type: "cancelled", ...payload };
-      else if (event === "error") yield { type: "error", message: payload.message };
-      else if (event === "card") yield { type: "card", ...payload };
+      yield toConversationStreamEvent(event, JSON.parse(data));
     }
+    // The Assistant can trigger any of the four credit-gated tools
+    // itself (orchestrator_service.py's _CREDIT_GATED_TOOLS) — this one
+    // hook covers every one of them, rather than needing a matching
+    // notify call inside each individual page's own direct-use path AND
+    // a second one here.
+    notifyCreditsChanged();
   },
 
   /** Resolves the conversation's current pending ask_user interrupt. */
@@ -1902,16 +2161,13 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ decisions }),
     });
-    if (!res.ok) throw new Error(`resume failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "resume");
+    // See streamOrchestratorMessage's own comment above — same generic
+    // mapper, same reason.
     for await (const { event, data } of parseSSE(res)) {
-      const payload = JSON.parse(data);
-      if (event === "stage") yield { type: "stage", ...payload };
-      else if (event === "interrupt") yield { type: "interrupt", ...payload };
-      else if (event === "done") yield { type: "done", ...payload };
-      else if (event === "cancelled") yield { type: "cancelled", ...payload };
-      else if (event === "error") yield { type: "error", message: payload.message };
-      else if (event === "card") yield { type: "card", ...payload };
+      yield toConversationStreamEvent(event, JSON.parse(data));
     }
+    notifyCreditsChanged(); // an approve decision on a credit-gated tool resolves here, not in the message stream
   },
 
   /** Stop button — see orchestrator_service.request_cancel for what
@@ -1952,6 +2208,7 @@ export const api = {
   demoteUser: (userId: string) => request<AdminUser>(`/admin/users/${userId}/demote`, { method: "POST" }),
 
   getDashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
+  getOnboardingProgress: () => request<OnboardingProgress>("/dashboard/onboarding"),
 
   listBillingPlans: () => request<Plan[]>("/billing/plans"),
   getMySubscription: () => request<Subscription>("/billing/subscription"),
@@ -1962,12 +2219,42 @@ export const api = {
       `/billing/sync${dodoSubscriptionId ? `?dodo_subscription_id=${encodeURIComponent(dodoSubscriptionId)}` : ""}`,
       { method: "POST" },
     ),
+  /** Upgrade/downgrade an already-paid subscription to a different
+   * paid plan — scheduled for the next billing cycle, never
+   * immediate (confirmed directly with Adrian). Free -> Paid stays on
+   * startCheckout above. */
+  changePlan: (planId: string) =>
+    request<Subscription>("/billing/change-plan", { method: "POST", body: JSON.stringify({ plan_id: planId }) }),
+  undoChangePlan: () => request<Subscription>("/billing/change-plan/undo", { method: "POST" }),
+  /** Schedules cancellation at the end of the current billing period
+   * — the account reverts to the Free plan once it actually ends,
+   * never immediately. */
+  cancelSubscription: () => request<Subscription>("/billing/cancel", { method: "POST" }),
+  undoCancelSubscription: () => request<Subscription>("/billing/cancel/undo", { method: "POST" }),
+
+  // Phase 16 — standalone credit purchases (fixed packs, never expire)
+  // and the user's own credit transaction history.
+  listCreditPacks: () => request<CreditPack[]>("/billing/credit-packs"),
+  listFeatureCosts: () => request<FeatureCreditCost[]>("/billing/feature-costs"),
+  /** {feature_key: true} means this user's NEXT use of that feature is
+   * free (credit_ledger.py's own first-use-free rule) — per-user, so
+   * unlike listFeatureCosts above this needs auth and can't be cached
+   * forever the same way. */
+  getFirstUseStatus: () => request<Record<string, boolean>>("/billing/credits/first-use-status"),
+  startPackCheckout: (packId: string) =>
+    request<{ checkout_url: string }>(`/billing/credit-packs/${packId}/checkout`, { method: "POST" }),
+  confirmPackPurchase: (dodoPaymentId: string) =>
+    request<{ credits: number }>(`/billing/credit-packs/confirm?dodo_payment_id=${encodeURIComponent(dodoPaymentId)}`, {
+      method: "POST",
+    }),
+  listCreditTransactions: (before?: string) =>
+    request<CreditTransaction[]>(`/billing/credits/transactions${before ? `?before=${before}` : ""}`),
 
   listPlans: () => request<AdminPlan[]>("/admin/plans"),
   createPlan: (body: {
     name: string;
     price_idr: number;
-    monthly_usage_cap_usd: number;
+    monthly_credits: number;
     is_active?: boolean;
     dodo_product_id_test?: string | null;
     dodo_product_id_live?: string | null;
@@ -1977,17 +2264,49 @@ export const api = {
     body: Partial<
       Pick<
         AdminPlan,
-        "name" | "price_idr" | "monthly_usage_cap_usd" | "is_active" | "dodo_product_id_test" | "dodo_product_id_live"
+        "name" | "price_idr" | "monthly_credits" | "is_active" | "dodo_product_id_test" | "dodo_product_id_live"
       >
     >,
   ) => request<AdminPlan>(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  // Phase 16 admin — feature costs (fixed price per AI feature) and
+  // credit packs are both admin-tunable without a redeploy, same
+  // mirrored CRUD shape as Plan above.
+  listAdminFeatureCosts: () => request<FeatureCreditCost[]>("/admin/feature-costs"),
+  updateFeatureCost: (id: string, body: Partial<Pick<FeatureCreditCost, "display_name" | "credit_cost" | "is_active">>) =>
+    request<FeatureCreditCost>(`/admin/feature-costs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  listAdminCreditPacks: () => request<AdminCreditPack[]>("/admin/credit-packs"),
+  createCreditPack: (body: {
+    name: string;
+    price_idr: number;
+    credits: number;
+    is_active?: boolean;
+    dodo_product_id_test?: string | null;
+    dodo_product_id_live?: string | null;
+  }) => request<AdminCreditPack>("/admin/credit-packs", { method: "POST", body: JSON.stringify(body) }),
+  updateCreditPack: (
+    id: string,
+    body: Partial<Pick<AdminCreditPack, "name" | "price_idr" | "credits" | "is_active" | "dodo_product_id_test" | "dodo_product_id_live">>,
+  ) => request<AdminCreditPack>(`/admin/credit-packs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // Transaction-based, not a value edit (raised directly by Adrian) —
+  // the only effect this has is a new, real CreditTransaction row the
+  // user's own history shows as "Granted by admin"/"Deducted by admin".
+  adjustUserCredits: (userId: string, amount: number, reason: string) =>
+    request<CreditTransaction>(`/admin/users/${userId}/credits/adjust`, {
+      method: "POST",
+      body: JSON.stringify({ amount, reason }),
+    }),
 
   // --- Phase 11 (v2 plan) — AI interview/FGD/LGD practice ---
 
   listInterviewSessions: (personaId?: string) =>
     request<InterviewSession[]>(`/interview-sessions${personaId ? `?persona_id=${personaId}` : ""}`),
   getInterviewSession: (id: string) => request<InterviewSession>(`/interview-sessions/${id}`),
-  endInterviewSession: (id: string) => request<InterviewSession>(`/interview-sessions/${id}/end`, { method: "POST" }),
+  endInterviewSession: async (id: string) => {
+    const result = await request<InterviewSession>(`/interview-sessions/${id}/end`, { method: "POST" });
+    notifyCreditsChanged(); // the one point interview_service.py's end_interview_session actually charges
+    return result;
+  },
   deleteInterviewSession: (id: string) => request<void>(`/interview-sessions/${id}`, { method: "DELETE" }),
 
   /** Same SSE shape (InterviewTurnEvent) is shared by createInterviewSession,
@@ -1995,8 +2314,14 @@ export const api = {
    * into one generator since all three just POST somewhere and stream
    * the response back. */
   async *_streamInterviewEvents(res: Response): AsyncGenerator<InterviewTurnEvent> {
-    if (!res.ok) throw new Error(`interview turn failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "interview turn");
     for await (const { event, data } of parseSSE(res)) {
+      // The agent's own end_interview tool can end a session mid-turn
+      // (interview_service.py's _end_session_after_turn), not just the
+      // explicit "End session" button (endInterviewSession above) — the
+      // ONE real charge point either path converges on, so this shared
+      // generator is the one place both need the notify hook.
+      if (event === "session_ended") notifyCreditsChanged();
       yield toInterviewTurnEvent(event, JSON.parse(data));
     }
   },
@@ -2022,9 +2347,10 @@ export const api = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`create interview session failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "create interview session");
     const sessionId = res.headers.get("X-Interview-Session-Id");
     if (!sessionId) throw new Error("create interview session: server did not return a session id");
+    notifyOnboardingChanged(); // creates the InterviewSession row — the "Practice an interview" step
     return { sessionId, events: api._streamInterviewEvents(res) };
   },
 
@@ -2089,7 +2415,7 @@ export const api = {
     const res = await fetch(`${API_BASE_URL}/interview-sessions/${sessionId}/audio/${encodeURIComponent(filename)}`, {
       headers: authHeader(),
     });
-    if (!res.ok) throw new Error(`fetch audio failed: ${res.status}: ${await res.text()}`);
+    await checkStreamResponse(res, "fetch audio");
     return res.blob();
   },
 };

@@ -39,6 +39,7 @@ import { usePersona } from "@/components/persona-provider";
 import { ChevronDown, ChevronUp, Loader2, Radar as RadarIcon } from "lucide-react";
 import { type PlatformKey, PLATFORMS, PLATFORM_BY_KEY, platformForSource } from "@/lib/platforms";
 import { PlatformLogo } from "@/components/platform-logo";
+import { CreditCostBadge } from "@/components/credit-cost-badge";
 
 const COMPANY_IDENTIFIER_HINT: Partial<Record<PlatformKey, string>> = {
   greenhouse: "the board token, e.g. job-boards.greenhouse.io/gitlab",
@@ -1089,14 +1090,17 @@ export default function RadarPage() {
                       )}
                     </span>
                   </div>
-                  <div className="flex gap-2 shrink-0">
-                    <Button
-                      size="sm"
-                      disabled={rowRunning}
-                      onClick={() => handleRun(s)}
-                    >
-                      {rowRunning ? "Running…" : "Run"}
-                    </Button>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <div className="relative">
+                      <Button
+                        size="sm"
+                        disabled={rowRunning}
+                        onClick={() => handleRun(s)}
+                      >
+                        {rowRunning ? "Running…" : "Run"}
+                      </Button>
+                      <CreditCostBadge featureKey="radar-run" />
+                    </div>
                     {rowRunning && rowRun?.agentRunId && (
                       <Button size="sm" variant="outline" onClick={() => handleCancelRun(rowRun.agentRunId!)}>
                         Cancel

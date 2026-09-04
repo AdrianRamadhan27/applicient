@@ -11,7 +11,7 @@ integration.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,7 +28,18 @@ class Plan(UUIDPKMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. "Open to Work", "Unemployed"
     price_idr: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # smallest unit (Rupiah, no decimals)
-    monthly_usage_cap_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    # `monthly_usage_cap_usd` (a real `$` cap column) removed entirely
+    # (Adrian, direct — "why do users per tier still have internal
+    # cap, remove that entirely"): it was genuinely vestigial, not
+    # just hidden from regular users — `enforce_usage_cap`, the only
+    # code that ever read it, had zero call sites since Phase 16
+    # replaced it with `require_credits`/`charge_credits`; it just
+    # kept showing up in the admin Plans page as "internal cap $X"
+    # with nothing behind it. `monthly_credits` is the real, only cap
+    # that does anything now — the number granted to the user each
+    # period (or once, for the Free plan — see credit_ledger.py's own
+    # docstring), admin-tunable independent of any `$` figure.
+    monthly_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)  # selectable at signup/upgrade
     # Dodo's own Product — auto-created on demand
     # (billing_service.ensure_product_for_plan) when empty, or set
@@ -86,3 +97,96 @@ class Subscription(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     pending_plan_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("plans.id", ondelete="SET NULL")
     )
+    # Upgrade/downgrade/cancel (Adrian, direct: "should only apply in
+    # the next billing cycle, except free -> paid, which applies
+    # immediately") — mirrors Dodo's own `cancel_at_next_billing_date`
+    # field on its Subscription object 1:1, re-synced on every real
+    # sync (billing_service.sync_subscription_from_dodo), not written
+    # optimistically and trusted forever. A scheduled PLAN CHANGE
+    # (upgrade or downgrade to a different paid plan) reuses
+    # `pending_plan_id` above rather than a second column — same
+    # "the plan this subscription is moving TO" meaning either way,
+    # just a Dodo `change_plan(effective_at="next_billing_date")` call
+    # instead of a fresh checkout. This column is specifically for the
+    # "cancel down to Free" case, which has no product/plan to point
+    # `pending_plan_id` at.
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class FeatureCreditCost(UUIDPKMixin, TimestampMixin, Base):
+    """Phase 16 — how many credits a single use of a given AI feature
+    costs. Not user-scoped (a shared, admin-managed price list, same
+    pattern as `Plan` and `ModelCatalogEntry`) and deliberately decoupled
+    from real per-call `$` cost (`LlmCall.cost_usd`) — a fixed, simple,
+    predictable number per feature, not a precise per-token bill. `key`
+    is what credit_ledger.py's `require_credits`/`charge_credits` look
+    up by (e.g. "cv-tailor", "interview-practice"); CV parsing has no
+    row here at all — it's deliberately free, not priced at 0."""
+
+    __tablename__ = "feature_credit_costs"
+
+    key: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    credit_cost: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class CreditPack(UUIDPKMixin, TimestampMixin, Base):
+    """Phase 16 — a standalone, one-time credit purchase. Mirrors `Plan`'s
+    own shape deliberately (name/price/Dodo product ids split by
+    environment) so checkout creation can reuse the exact same
+    find-or-create-product logic (`ensure_product_for_plan`) — the only
+    real difference from a `Plan` checkout is the Dodo price type
+    (one-time, not recurring) and that it never touches `Subscription`
+    at all. Purchased credits never expire (confirmed with Adrian) —
+    landed in `CreditTransaction.bucket="purchased"`, never swept."""
+
+    __tablename__ = "credit_packs"
+
+    name: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. "Small", "Medium", "Large"
+    price_idr: Mapped[int] = mapped_column(Integer, nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    dodo_product_id_test: Mapped[str | None] = mapped_column(String(120))
+    dodo_product_id_live: Mapped[str | None] = mapped_column(String(120))
+
+
+class CreditTransaction(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
+    """Phase 16 — the single source of truth for a user's credit
+    balance. Append-only, never updated — same "recompute from the
+    ledger, never trust a denormalized copy" discipline
+    `current_period_spend_usd` already applies to `$` spend today, just
+    for credits. A user's balance is always `SUM(amount)`, optionally
+    filtered by `bucket`; there is no separate balance column anywhere
+    else to drift out of sync with this table. See credit_ledger.py for
+    the functions that write these rows and the reasoning behind
+    `bucket`'s two values."""
+
+    __tablename__ = "credit_transactions"
+
+    # monthly_grant | purchase | usage | admin_grant | admin_adjustment | expiration
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    # "monthly" — swept to 0 at the next period rollover (monthly_grant,
+    # and any usage that drew from it). "purchased" — never swept
+    # (purchase, admin_grant/admin_adjustment, and any usage that drew
+    # from it) — this is what actually implements "purchased credits
+    # never expire" without needing per-row expiry dates: a period
+    # rollover only ever touches bucket="monthly" rows.
+    bucket: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # signed: + grant/purchase, - usage/expiration/deduction
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False)  # running total in `bucket`, after this row
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    admin_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    feature_key: Mapped[str | None] = mapped_column(String(60))
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL"))
+    credit_purchase_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("credit_packs.id", ondelete="SET NULL")
+    )
+    # Set only for type="purchase" rows — the real idempotency key for
+    # record_purchase (credit_ledger.py): a webhook retry, or the
+    # webhook and the frontend's own manual confirm both landing for
+    # the SAME real Dodo payment, must never credit twice.
+    # credit_purchase_id alone can't tell "duplicate event for this
+    # purchase" apart from "a genuine second purchase of the same
+    # pack" — this can.
+    dodo_payment_id: Mapped[str | None] = mapped_column(String(120), unique=True)

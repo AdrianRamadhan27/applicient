@@ -31,8 +31,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatLog, type LogItem } from "@/components/chat-log";
+import { CreditCostBadge } from "@/components/credit-cost-badge";
+import { AddToPipelineDialog } from "@/components/add-to-pipeline-dialog";
+import { usePersona } from "@/components/persona-provider";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, ChevronUp, Settings, Square } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, Plus, Settings, Square } from "lucide-react";
 
 // Detail panel width — draggable, persisted per-browser (first use of
 // localStorage in this file; persona-provider.tsx's selectedPersonaId
@@ -65,6 +68,8 @@ function timestamp(iso: string) {
 
 export default function PipelinePage() {
   const router = useRouter();
+  const { selectedPersonaId } = usePersona();
+  const [addToPipelineOpen, setAddToPipelineOpen] = React.useState(false);
   const [applications, setApplications] = React.useState<Application[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -192,6 +197,12 @@ export default function PipelinePage() {
           <span className="text-sm font-semibold">Application Pipeline</span>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground font-mono">{applications.length} applications</span>
+            {selectedPersonaId && (
+              <Button size="sm" onClick={() => setAddToPipelineOpen(true)}>
+                <Plus className="size-3.5" />
+                Add to pipeline
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => setManageStagesOpen(true)}>
               <Settings className="size-3.5" />
               Manage Stages
@@ -206,11 +217,13 @@ export default function PipelinePage() {
           <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground font-mono">
             loading…
           </div>
-        ) : applications.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground font-mono text-center px-8">
-            No applications yet — create one from a job in the Inbox or Composer.
-          </div>
         ) : (
+          // Always the real board, even with zero applications (Adrian,
+          // direct: "I don't like this" about the old plain-text empty
+          // state) — every defined stage still renders as its own empty
+          // column, and "Add to pipeline" above is right there to fill
+          // it, same as Calendar's own "the board/grid is always there,
+          // add an event into it" convention.
           <div className="flex-1 overflow-x-auto">
             <div className="flex gap-3 p-4 h-full min-w-max">
               {boardColumns.map(({ key: col, label }) => (
@@ -277,6 +290,24 @@ export default function PipelinePage() {
           onClose={closeApplication}
           onChanged={refresh}
           stages={stages}
+        />
+      )}
+
+      {selectedPersonaId && (
+        <AddToPipelineDialog
+          open={addToPipelineOpen}
+          onOpenChange={setAddToPipelineOpen}
+          personaId={selectedPersonaId}
+          existingJobIds={new Set(applications.map((a) => a.job_id))}
+          onAdded={() => {
+            // Deliberately doesn't close the dialog or jump to the new
+            // application's detail panel — the "From Job Inbox" tab is
+            // a browsable list meant for adding several jobs in one
+            // sitting (each row's own "Add" button already confirms
+            // via toast), not a single-pick-and-done flow. Closing here
+            // would fight that.
+            void refresh();
+          }}
         />
       )}
 
@@ -913,9 +944,12 @@ function ApplicationDetailPanel({
               {cancelling ? "Stopping…" : "Stop"}
             </Button>
           ) : (
-            <Button size="sm" onClick={handleRunAgent} disabled={!!pendingInterrupt}>
-              {pendingInterrupt ? "Awaiting your input above" : "Run agent"}
-            </Button>
+            <div className="relative">
+              <Button size="sm" onClick={handleRunAgent} disabled={!!pendingInterrupt}>
+                {pendingInterrupt ? "Awaiting your input above" : "Run agent"}
+              </Button>
+              <CreditCostBadge featureKey="application-apply" />
+            </div>
           )}
           <Button size="sm" variant="outline" onClick={handleMarkApplied}>
             Mark applied

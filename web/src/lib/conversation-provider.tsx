@@ -97,6 +97,8 @@ type ConversationContextValue = {
   archiveConversation: (id: string) => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
   respond: (message: string) => Promise<void>;
+  approve: () => Promise<void>;
+  reject: () => Promise<void>;
   cancelRun: () => Promise<void>;
 };
 
@@ -244,6 +246,25 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
     await consume(api.streamOrchestratorResume(conversationId, [{ type: "respond", message: text }]));
   }
 
+  // Phase 16 follow-up — the real approve/reject counterpart to
+  // respond() above, for the platform-enforced credit-spend
+  // confirmations (interrupt-panel.tsx renders the buttons that call
+  // these; see orchestrator_service.py's _build_credit_interrupt_descriptions
+  // for what's actually being confirmed).
+  async function approve() {
+    if (!conversationId || !pendingInterrupt) return;
+    setPendingInterrupt(null);
+    setRunning(true);
+    await consume(api.streamOrchestratorResume(conversationId, [{ type: "approve" }]));
+  }
+
+  async function reject() {
+    if (!conversationId || !pendingInterrupt) return;
+    setPendingInterrupt(null);
+    setRunning(true);
+    await consume(api.streamOrchestratorResume(conversationId, [{ type: "reject" }]));
+  }
+
   async function cancelRun() {
     if (!conversationId || !running) return;
     setCancelling(true);
@@ -270,6 +291,8 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
         archiveConversation,
         sendMessage,
         respond,
+        approve,
+        reject,
         cancelRun,
       }}
     >

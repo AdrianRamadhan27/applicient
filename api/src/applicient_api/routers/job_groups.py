@@ -25,7 +25,14 @@ from applicient_api.latex_rendering import COVER_LETTER_TEMPLATES, RenderError, 
 from applicient_api.models.agents import AgentRun
 from applicient_api.models.discovery import Job
 from applicient_api.models.documents import ClaimVerification, Document, JobGroup, JobGroupMember
-from applicient_api.billing_service import enforce_usage_cap
+from applicient_api.credit_ledger import (
+    FEATURE_ANSWER_PACK,
+    FEATURE_COVER_LETTER,
+    FEATURE_CV_TAILOR,
+    FEATURE_SKILL_GAP_SYLLABUS,
+    charge_credits,
+    require_credits,
+)
 from applicient_api.models.profile import Persona
 from applicient_api.rate_limit import rate_limit
 from applicient_api.claim_verification_service import (
@@ -232,7 +239,11 @@ def clear_document_tex_route(
         raise HTTPException(422, str(exc))
 
 
-@documents_router.put("/{document_id}/delta", response_model=schemas.DocumentOut)
+@documents_router.put(
+    "/{document_id}/delta",
+    response_model=schemas.DocumentOut,
+    dependencies=[Depends(require_credits(FEATURE_CV_TAILOR, label="editing this CV"))],
+)
 def save_document_delta_route(
     document_id: uuid.UUID,
     body: dict,
@@ -246,7 +257,13 @@ def save_document_delta_route(
     rationale); validated with the same Pydantic model the tailoring
     engine itself produces, so there's one schema, not two drifting
     copies. Resets `verified` to False — the previous verification
-    described the old content, not this edit."""
+    described the old content, not this edit.
+
+    Costs the same credits as generating the draft (Adrian, direct: "CV
+    tailor cost not only for draft but for edits as well") — each save
+    is its own charge, no agent_run_id to dedupe against (unlike the
+    generation stream, a hand edit has no AgentRun of its own, and
+    genuinely IS a new, separate action each time)."""
 
     if db.query(Document).filter_by(id=document_id, user_id=user_id).one_or_none() is None:
         raise HTTPException(404, "document not found")
@@ -255,9 +272,11 @@ def save_document_delta_route(
     except ValidationError as exc:
         raise HTTPException(422, str(exc))
     try:
-        return save_document_delta(get_session_factory(), document_id=document_id, user_id=user_id, delta=delta)
+        document = save_document_delta(get_session_factory(), document_id=document_id, user_id=user_id, delta=delta)
     except TailoringError as exc:
         raise HTTPException(404, str(exc))
+    charge_credits(db, user_id=user_id, feature_key=FEATURE_CV_TAILOR, label="editing this CV")
+    return document
 
 
 def _owned_group(db: Session, group_id: uuid.UUID, user_id: uuid.UUID) -> JobGroup:
@@ -394,7 +413,10 @@ def reopen_skill_gap(
 @router.post(
     "/{group_id}/skill-gap/{item_id}/generate-syllabus",
     response_model=schemas.SkillGapItemOut,
-    dependencies=[Depends(rate_limit("skill-gap-syllabus", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+    dependencies=[
+        Depends(rate_limit("skill-gap-syllabus", limit=10, window_seconds=60)),
+        Depends(require_credits(FEATURE_SKILL_GAP_SYLLABUS, label="generating a learning plan")),
+    ],
 )
 def generate_skill_gap_syllabus(
     group_id: uuid.UUID,
@@ -409,13 +431,15 @@ def generate_skill_gap_syllabus(
 
     group = _owned_group(db, group_id, user_id)
     try:
-        return generate_syllabus(
+        result = generate_syllabus(
             db, group=group, item_id=item_id, user_id=user_id, session_factory=get_session_factory()
         )
     except SkillGapError as exc:
         raise HTTPException(404, str(exc))
     except TierResolutionError as exc:
         raise HTTPException(422, f"model routing not configured: {exc}")
+    charge_credits(db, user_id=user_id, feature_key=FEATURE_SKILL_GAP_SYLLABUS, label="generating a learning plan")
+    return result
 
 
 @router.get("/{group_id}/documents", response_model=list[schemas.DocumentOut])
@@ -445,7 +469,7 @@ def _error_event(message: str) -> dict:
     return {"event": "error", "data": json.dumps({"message": message})}
 
 
-async def _tailor_stream(group_id: uuid.UUID, user_id: uuid.UUID) -> AsyncGenerator[dict, None]:
+async def _tailor_stream(group_id: uuid.UUID, user_id: uuid.UUID, verify: bool) -> AsyncGenerator[dict, None]:
     session_factory = get_session_factory()
 
     with session_factory() as db:
@@ -490,55 +514,67 @@ async def _tailor_stream(group_id: uuid.UUID, user_id: uuid.UUID) -> AsyncGenera
             # calls total: tailor, verify) or need one regeneration
             # (4 calls: tailor, verify, regenerate, re-verify), and
             # each one is genuinely a 1-3+ minute deep-tier call in
-            # this environment — not a single fast request.
-            yield _event("verifying", "started", "Checking every claim against the evidence bank", attempt=1)
-            document, clean = await to_thread(
-                run_verification_attempt,
-                session_factory,
-                document_id=document.id,
-                user_id=user_id,
-                attempt_number=1,
-                agent_run_id=run.id,
-            )
-            yield _event(
-                "verifying",
-                "done",
-                "All claims verified" if clean else "Some claims were flagged — regenerating",
-                attempt=1,
-                clean=clean,
-            )
-
-            if not clean:
-                yield _event(
-                    "regenerating", "started", "Re-tailoring to fix the specific claims the verifier flagged"
-                )
-                document = await to_thread(
-                    regenerate_from_last_verification,
-                    session_factory,
-                    document_id=document.id,
-                    user_id=user_id,
-                    agent_run_id=run.id,
-                )
-                yield _event("regenerating", "done", "Re-tailored delta generated")
-
-                yield _event("verifying", "started", "Re-checking every claim against the evidence bank", attempt=2)
+            # this environment — not a single fast request. That
+            # latency compounds badly (up to ~4 slow calls back to
+            # back), so `verify` (raised by Adrian) lets the caller
+            # skip this whole block and get the tailored draft alone —
+            # `document.verified` simply stays its default `False`
+            # ("never checked", not "checked and failed"; the Composer
+            # UI already distinguishes the two and only blocks export
+            # for the latter), and the dedicated Re-verify action still
+            # runs this same check later, on demand, at no loss of
+            # capability — just not forced up front.
+            if verify:
+                yield _event("verifying", "started", "Checking every claim against the evidence bank", attempt=1)
                 document, clean = await to_thread(
                     run_verification_attempt,
                     session_factory,
                     document_id=document.id,
                     user_id=user_id,
-                    attempt_number=2,
+                    attempt_number=1,
                     agent_run_id=run.id,
                 )
                 yield _event(
                     "verifying",
                     "done",
-                    "All claims verified"
-                    if clean
-                    else "Some claims could not be verified after 2 attempts — export is blocked until resolved",
-                    attempt=2,
+                    "All claims verified" if clean else "Some claims were flagged — regenerating",
+                    attempt=1,
                     clean=clean,
                 )
+
+                if not clean:
+                    yield _event(
+                        "regenerating", "started", "Re-tailoring to fix the specific claims the verifier flagged"
+                    )
+                    document = await to_thread(
+                        regenerate_from_last_verification,
+                        session_factory,
+                        document_id=document.id,
+                        user_id=user_id,
+                        agent_run_id=run.id,
+                    )
+                    yield _event("regenerating", "done", "Re-tailored delta generated")
+
+                    yield _event(
+                        "verifying", "started", "Re-checking every claim against the evidence bank", attempt=2
+                    )
+                    document, clean = await to_thread(
+                        run_verification_attempt,
+                        session_factory,
+                        document_id=document.id,
+                        user_id=user_id,
+                        attempt_number=2,
+                        agent_run_id=run.id,
+                    )
+                    yield _event(
+                        "verifying",
+                        "done",
+                        "All claims verified"
+                        if clean
+                        else "Some claims could not be verified after 2 attempts — export is blocked until resolved",
+                        attempt=2,
+                        clean=clean,
+                    )
 
             # M3 §3's render step is a separate on-demand call
             # (POST /documents/{id}/render) triggered by the Composer's
@@ -551,6 +587,7 @@ async def _tailor_stream(group_id: uuid.UUID, user_id: uuid.UUID) -> AsyncGenera
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
+            charge_credits(db, user_id=user_id, feature_key=FEATURE_CV_TAILOR, agent_run_id=run.id, label="tailoring a CV")
 
             yield {
                 "event": "done",
@@ -696,18 +733,30 @@ async def reverify_document(
 
 @router.post(
     "/{group_id}/tailor",
-    dependencies=[Depends(rate_limit("tailor", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+    dependencies=[
+        Depends(rate_limit("tailor", limit=10, window_seconds=60)),
+        Depends(require_credits(FEATURE_CV_TAILOR, label="tailoring a CV")),
+    ],
 )
 async def tailor_group(
-    group_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+    group_id: uuid.UUID,
+    verify: bool = False,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
 ):
     """Streams `{"event": "stage" | "done" | "error", "data": "<json>"}`.
-    The done payload is a full DocumentOut; error is {message}."""
+    The done payload is a full DocumentOut; error is {message}. `verify`
+    defaults to False — raised by Adrian: the mandatory verify(+retry)
+    pass roughly doubled (worst case ~4x'd) an already-slow tailoring
+    call, and most drafts get eyeballed by the candidate anyway before
+    they'd trust it regardless. Opt in per-call for the extra safety
+    net; the dedicated Re-verify action on an existing document is
+    unaffected either way."""
 
     if db.query(JobGroup).filter_by(id=group_id, user_id=user_id).one_or_none() is None:
         raise HTTPException(404, "job group not found")
 
-    return EventSourceResponse(_tailor_stream(group_id, user_id))
+    return EventSourceResponse(_tailor_stream(group_id, user_id, verify=verify))
 
 
 async def _cover_letter_stream(
@@ -805,6 +854,10 @@ async def _cover_letter_stream(
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
+            charge_credits(
+                db, user_id=user_id, feature_key=FEATURE_COVER_LETTER, agent_run_id=run.id,
+                label="generating a cover letter",
+            )
 
             yield {
                 "event": "done",
@@ -834,7 +887,10 @@ async def _cover_letter_stream(
 
 @router.post(
     "/{group_id}/cover-letter",
-    dependencies=[Depends(rate_limit("cover-letter", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+    dependencies=[
+        Depends(rate_limit("cover-letter", limit=10, window_seconds=60)),
+        Depends(require_credits(FEATURE_COVER_LETTER, label="generating a cover letter")),
+    ],
 )
 async def cover_letter_group(
     group_id: uuid.UUID,
@@ -946,6 +1002,10 @@ async def _answer_pack_stream(
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
+            charge_credits(
+                db, user_id=user_id, feature_key=FEATURE_ANSWER_PACK, agent_run_id=run.id,
+                label="generating an answer pack",
+            )
 
             yield {
                 "event": "done",
@@ -975,7 +1035,10 @@ async def _answer_pack_stream(
 
 @router.post(
     "/{group_id}/answer-pack",
-    dependencies=[Depends(rate_limit("answer-pack", limit=10, window_seconds=60)), Depends(enforce_usage_cap)],
+    dependencies=[
+        Depends(rate_limit("answer-pack", limit=10, window_seconds=60)),
+        Depends(require_credits(FEATURE_ANSWER_PACK, label="generating an answer pack")),
+    ],
 )
 async def answer_pack_group(
     group_id: uuid.UUID,

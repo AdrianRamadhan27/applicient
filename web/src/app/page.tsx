@@ -11,7 +11,8 @@ import {
   FileCheck2,
   MousePointerClick,
   KanbanSquare,
-  Coins,
+  BotMessageSquare,
+  Mic,
   PlayCircle,
   ChevronDown,
   ArrowRight,
@@ -30,7 +31,6 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TierLabel } from "@/lib/plan-tiers";
-import { detectCurrency, formatLocalizedPrice } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { ParticleField } from "@/components/particle-field";
 
@@ -72,9 +72,9 @@ const FEATURES = [
     body: "Application status updates automatically from interview invites, rejections and assessments detected in your inbox.",
   },
   {
-    icon: Coins,
-    title: "Cost you can see",
-    body: "Every LLM call is metered and priced. Know exactly what a radar run or a tailored CV costs, before and after it runs.",
+    icon: Mic,
+    title: "Practice interviews out loud",
+    body: "A real spoken back-and-forth with an AI interviewer — or a full group discussion round — scored with structured feedback right after every session.",
   },
 ];
 
@@ -255,6 +255,31 @@ function EmailDiagram() {
   );
 }
 
+// A spoken exchange (mic in, agent voice out), ending in real scored
+// feedback — same bordered-box-plus-icon language and anim-* classes
+// as every other panel here, not a new visual idiom.
+function InterviewPracticeDiagram() {
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
+          <Mic className="anim-pop size-5 text-primary" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-primary">You, out loud</span>
+        </div>
+        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+        <div className="flex flex-col items-center gap-1.5 border border-border bg-card px-4 py-3">
+          <BotMessageSquare className="size-5 text-muted-foreground" strokeWidth={1.5} />
+          <span className="font-mono text-[9px] text-muted-foreground">AI interviewer</span>
+        </div>
+      </div>
+      <div className="h-4 w-px bg-border" />
+      <div className="anim-fade-cycle border border-ok bg-ok-bg px-3 py-1.5">
+        <span className="font-mono text-[9px] text-ok">Scored feedback</span>
+      </div>
+    </div>
+  );
+}
+
 // One panel per major stage of the loop, not just the claim verifier —
 // raised directly by Adrian after the verifier panel shipped alone;
 // scrolls sideways (scroll-snap, no carousel library — same "no new
@@ -294,6 +319,13 @@ const HIGHLIGHTS = [
     title: "Your pipeline updates itself",
     body: "Interview invites, rejections and assessment requests are detected straight from your inbox and reflected on the pipeline board automatically — no manual status updates after you hit apply.",
     diagram: <EmailDiagram />,
+    badges: null as React.ReactNode,
+  },
+  {
+    eyebrow: "Interview practice",
+    title: "A real spoken interview, not a script",
+    body: "Practice out loud with an AI interviewer grounded in the actual role and your real experience — or a full group discussion where it plays every other participant. Every session ends with structured, scored feedback.",
+    diagram: <InterviewPracticeDiagram />,
     badges: null as React.ReactNode,
   },
 ];
@@ -549,11 +581,6 @@ export default function LandingPage() {
   const [plans, setPlans] = React.useState<Plan[]>([]);
   const [plansLoading, setPlansLoading] = React.useState(true);
   const [openFaq, setOpenFaq] = React.useState<number | null>(0);
-  // null until after mount — detectCurrency reads navigator, so this
-  // has to happen in an effect (server-rendered/first-paint HTML has
-  // no locale to go on) rather than during render, or it'd hydration-
-  // mismatch.
-  const [localCurrency, setLocalCurrency] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     (async () => {
@@ -565,7 +592,6 @@ export default function LandingPage() {
         setPlansLoading(false);
       }
     })();
-    (() => setLocalCurrency(detectCurrency()))();
   }, []);
 
   const primaryHref = user ? "/console" : "/signup";
@@ -735,7 +761,7 @@ export default function LandingPage() {
           Flat monthly plans, no surprises
         </h2>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Every plan includes a hardcoded monthly usage cap you can always see — never a bill that
+          Every plan includes a fixed monthly credit allowance you can always see — never a bill that
           shows up bigger than you expected.
         </p>
         {plansLoading ? (
@@ -743,7 +769,6 @@ export default function LandingPage() {
         ) : (
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
             {plans.map((p) => {
-              const localized = localCurrency ? formatLocalizedPrice(p.price_idr, localCurrency) : null;
               return (
                 <div key={p.id} className="flex flex-col gap-4 border border-border bg-card p-6">
                   <div>
@@ -752,11 +777,8 @@ export default function LandingPage() {
                       {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
                       {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                     </div>
-                    {localized && (
-                      <span className="block text-xs text-muted-foreground">≈ {localized}/mo</span>
-                    )}
                     <span className="mt-1 block text-xs text-muted-foreground font-mono">
-                      ${p.monthly_usage_cap_usd.toFixed(2)} usage cap / mo
+                      {p.monthly_credits.toLocaleString()} credits{p.price_idr === 0 ? " to start" : " / mo"}
                     </span>
                   </div>
                   <Button asChild className="mt-auto">
@@ -767,6 +789,10 @@ export default function LandingPage() {
             })}
           </div>
         )}
+        <p className="mt-4 text-xs text-muted-foreground">
+          Need a boost without a new subscription? You can also buy credits individually — see Buy more credits on
+          the Billing page once you&apos;re signed in.
+        </p>
       </Section>
 
       {/* FAQ */}

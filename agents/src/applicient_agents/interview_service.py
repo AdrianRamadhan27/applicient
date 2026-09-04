@@ -38,6 +38,7 @@ from applicient_agents.interview_tools import build_interview_tools
 from applicient_agents.orchestrator_service import get_checkpointer
 
 from applicient_api import interview_media
+from applicient_api.credit_ledger import FEATURE_INTERVIEW_PRACTICE, charge_credits
 from applicient_api.interview_feedback_engine import run_interview_feedback
 from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.discovery import Job
@@ -675,6 +676,16 @@ async def end_interview_session(
         session_row.status = "completed"
         session_row.ended_at = datetime.now(timezone.utc)
         db.commit()
+        # Charged ONCE, right here, not per turn (Adrian, direct: "set a
+        # fixed price for the whole run") — the ONLY place this
+        # function's own status check above (`if status != "in_progress":
+        # return`) lets execution reach a "completed" transition, so
+        # whichever of the two real callers (the human's "End session"
+        # button, or the agent's own end_interview tool via
+        # _end_session_after_turn below) gets here first is the one and
+        # only charge for this session; the other path's own call
+        # returns early before ever reaching this line.
+        charge_credits(db, user_id=user_id, feature_key=FEATURE_INTERVIEW_PRACTICE, label="an interview practice session")
         db.refresh(session_row)
         return session_row
 

@@ -25,6 +25,7 @@ import os
 
 from applicient_api.auth import hash_password
 from applicient_api.billing_service import default_plan
+from applicient_api.credit_ledger import grant_monthly_credits
 from applicient_api.db import make_engine, make_session_factory
 from applicient_api.models.billing import Subscription
 from applicient_api.models.profile import User
@@ -68,7 +69,8 @@ def seed() -> None:
             plan = default_plan(session)
             if plan is not None:
                 session.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
-                print(f"  subscribed to plan {plan.name!r}")
+                grant_monthly_credits(session, user_id=user.id, plan=plan)
+                print(f"  subscribed to plan {plan.name!r}, granted {plan.monthly_credits} starting credits")
         session.commit()
 
 

@@ -7,8 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from applicient_api import schemas
-from applicient_api.deps import current_user_id, get_db
+from applicient_api.credit_ledger import FEATURE_CV_FIX, charge_credits, require_credits
+from applicient_api.cv_review_service import CvReviewError, run_cv_fix_for_profile, run_cv_score_for_profile
+from applicient_api.deps import current_user_id, get_db, get_session_factory
 from applicient_api.models.profile import EvidenceItem, Profile
+from applicient_api.rate_limit import rate_limit
+from applicient_api.tier_resolution import TierResolutionError
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -103,3 +107,52 @@ def reset_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+@router.post(
+    "/{profile_id}/cv-score",
+    response_model=schemas.ProfileOut,
+    dependencies=[Depends(rate_limit("cv-score", limit=10, window_seconds=60))],
+)
+def score_cv(
+    profile_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    """Adrian, direct: "after user upload cv there needs to be cv
+    scoring... to give analysis and feedback." Free — no
+    require_credits/charge_credits here at all, same as CV parsing
+    itself (cv_review_service.py's own docstring)."""
+
+    try:
+        return run_cv_score_for_profile(db, profile_id=profile_id, user_id=user_id, session_factory=get_session_factory())
+    except CvReviewError as exc:
+        raise HTTPException(409, str(exc))
+    except TierResolutionError as exc:
+        raise HTTPException(422, f"model routing not configured: {exc}")
+
+
+@router.post(
+    "/{profile_id}/cv-fix",
+    response_model=schemas.CvFixResultOut,
+    dependencies=[
+        Depends(rate_limit("cv-fix", limit=5, window_seconds=60)),
+        Depends(require_credits(FEATURE_CV_FIX, label="fixing your CV")),
+    ],
+)
+def fix_cv(
+    profile_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    """"Fix my CV" (Adrian, direct) — general wording improvement
+    across the whole evidence bank, informed by the persona's own
+    preferences but not tailored to any specific job. See
+    cv_fix_engine.py's own docstring for the "wording only, never
+    facts" rule and cv_review_service.py for how each revision is
+    applied as a real EvidenceItem.text update."""
+
+    try:
+        result = run_cv_fix_for_profile(db, profile_id=profile_id, user_id=user_id, session_factory=get_session_factory())
+    except CvReviewError as exc:
+        raise HTTPException(409, str(exc))
+    except TierResolutionError as exc:
+        raise HTTPException(422, f"model routing not configured: {exc}")
+    charge_credits(db, user_id=user_id, feature_key=FEATURE_CV_FIX, label="fixing your CV")
+    return result

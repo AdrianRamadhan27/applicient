@@ -4,6 +4,7 @@ import * as React from "react";
 import { usePersona } from "@/components/persona-provider";
 import { useConversation, conversationLabel } from "@/lib/conversation-provider";
 import { ChatLog } from "@/components/chat-log";
+import { InterruptPanel } from "@/components/interrupt-panel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -38,22 +39,14 @@ export default function AssistantPage() {
     newChat,
     archiveConversation,
     sendMessage,
-    respond,
     cancelRun,
   } = useConversation();
-  const [respondMessage, setRespondMessage] = React.useState("");
   const [draft, setDraft] = React.useState("");
 
   async function handleSend() {
     const text = draft;
     setDraft("");
     await sendMessage(text);
-  }
-
-  async function handleRespond() {
-    const message = respondMessage;
-    setRespondMessage("");
-    await respond(message);
   }
 
   if (personaLoading) {
@@ -126,30 +119,7 @@ export default function AssistantPage() {
           </div>
         )}
 
-        {pendingInterrupt && pendingInterrupt.length > 0 && (
-          <div className="shrink-0 border-t border-warn bg-warn/10 p-3 mx-4 mb-2 rounded-md text-xs space-y-2">
-            <div className="font-semibold">The assistant needs an answer from you</div>
-            <div className="text-muted-foreground whitespace-pre-wrap">{pendingInterrupt[0].description}</div>
-            <div className="flex gap-2">
-              <Textarea
-                placeholder="Type your answer…"
-                value={respondMessage}
-                onChange={(e) => setRespondMessage(e.target.value)}
-                rows={2}
-                className="flex-1"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleRespond();
-                  }
-                }}
-              />
-              <Button size="sm" onClick={handleRespond}>
-                Send answer
-              </Button>
-            </div>
-          </div>
-        )}
+        <InterruptPanel />
 
         <div className="shrink-0 border-t border-border bg-card p-3 flex items-center gap-2">
           <Textarea

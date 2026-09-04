@@ -73,6 +73,15 @@ class Profile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     # in Preference below).
     visa_status: Mapped[str | None] = mapped_column(String(120))
     notice_period_days: Mapped[int | None] = mapped_column(Integer)
+    # General, non-job-specific CV quality feedback (cv_score_engine.py's
+    # CvScoreOutput, dumped as-is) — recomputed on demand (a button on
+    # the Composer's Base CV page, or right after a fresh CV parse),
+    # never a live/derived value the way FitScore is. Distinct from
+    # FitScore (job-specific fit against one real posting) and from a
+    # Document's own verification state (factual-claim checking) —
+    # this is a general "how good is this CV" self-assessment.
+    cv_score: Mapped[dict | None] = mapped_column(JSONB)
+    cv_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Persona(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):

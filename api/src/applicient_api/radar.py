@@ -75,6 +75,7 @@ from typing import Any, AsyncGenerator
 from sqlalchemy.orm import sessionmaker
 
 from applicient_api import schemas
+from applicient_api.credit_ledger import FEATURE_RADAR_RUN, charge_credits
 from applicient_api.job_embedding import embed_jobs
 from applicient_api.live_logs import run_with_live_logs
 from applicient_api.models.agents import AgentRun, AgentStep, RunEvent
@@ -660,6 +661,7 @@ async def run_radar_search(
             run.finished_at = datetime.now(timezone.utc)
             run.total_cost_usd = sum(float(c.cost_usd) for c in db.query(LlmCall).filter_by(agent_run_id=run.id).all())
             db.commit()
+            charge_credits(db, user_id=user_id, feature_key=FEATURE_RADAR_RUN, agent_run_id=run.id, label="a job search run")
 
             source_runs = db.query(SourceRun).filter(SourceRun.id.in_(source_run_ids)).all()
             result = schemas.RadarRunResult(

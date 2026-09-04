@@ -44,13 +44,14 @@ import {
   type InterviewTurnEvent,
 } from "@/lib/api";
 import { usePersona } from "@/components/persona-provider";
+import { CreditCostBadge } from "@/components/credit-cost-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Loader2, Mic, MicOff, Trash2, Video, VideoOff, Volume2 } from "lucide-react";
+import { Loader2, Mic, MicOff, Pause, PhoneOff, Play, Trash2, Video, VideoOff, Volume2 } from "lucide-react";
 
 const SENIORITY_OPTIONS = ["intern", "junior", "mid", "senior", "lead", "staff", "principal"];
 
@@ -219,16 +220,95 @@ function buildTranscriptFromEvents(
   return items;
 }
 
+function formatAudioTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// One shared <audio> element backs every replay across the whole
+// transcript (see audioElRef's own comment — only one clip can ever be
+// loaded/playing at a time, matching a real call-recording replay), so
+// each bubble's player here is a thin, mostly-presentational control
+// over that single element: "active" means THIS bubble's clip is the
+// one currently loaded, in which case its own play/pause + progress
+// reflect the real element; otherwise it's just a plain "load and play
+// this one" button.
+function AgentAudioPlayer({
+  filename,
+  active,
+  isPlaying,
+  currentTime,
+  duration,
+  onPlay,
+  onTogglePause,
+  onSeek,
+}: {
+  filename: string;
+  active: boolean;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  onPlay: (filename: string) => void;
+  onTogglePause: () => void;
+  onSeek: (time: number) => void;
+}) {
+  const playing = active && isPlaying;
+  const shownTime = active ? currentTime : 0;
+  const shownDuration = active ? duration : 0;
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => (active ? onTogglePause() : onPlay(filename))}
+        className="flex size-6 shrink-0 items-center justify-center rounded-full border border-primary/40 text-primary hover:bg-primary/10"
+        title={playing ? "Pause" : "Play"}
+      >
+        {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={shownDuration > 0 ? shownDuration : 1}
+        step={0.01}
+        value={shownTime}
+        onChange={(e) => {
+          if (!active) onPlay(filename);
+          onSeek(Number(e.target.value));
+        }}
+        className="h-1 flex-1 accent-primary"
+        aria-label="Seek audio"
+      />
+      <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+        {formatAudioTime(shownTime)} / {formatAudioTime(shownDuration)}
+      </span>
+    </div>
+  );
+}
+
 function TranscriptView({
   items,
   running,
   stageMessage,
+  activeAudioFilename,
+  isPlaying,
+  audioCurrentTime,
+  audioDuration,
   onReplay,
+  onTogglePause,
+  onSeek,
 }: {
   items: TranscriptItem[];
   running: boolean;
   stageMessage: string | null;
+  activeAudioFilename: string | null;
+  isPlaying: boolean;
+  audioCurrentTime: number;
+  audioDuration: number;
   onReplay: (filename: string) => void;
+  onTogglePause: () => void;
+  onSeek: (time: number) => void;
 }) {
   const bottomRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -256,13 +336,16 @@ function TranscriptView({
                 )}
                 <div className="whitespace-pre-wrap">{item.text}</div>
                 {item.audioFilename && (
-                  <button
-                    type="button"
-                    className="mt-1.5 text-[10px] text-primary underline underline-offset-2"
-                    onClick={() => onReplay(item.audioFilename!)}
-                  >
-                    ▶ replay audio
-                  </button>
+                  <AgentAudioPlayer
+                    filename={item.audioFilename}
+                    active={activeAudioFilename === item.audioFilename}
+                    isPlaying={isPlaying}
+                    currentTime={audioCurrentTime}
+                    duration={audioDuration}
+                    onPlay={onReplay}
+                    onTogglePause={onTogglePause}
+                    onSeek={onSeek}
+                  />
                 )}
               </>
             ) : (
@@ -637,6 +720,7 @@ export default function InterviewPracticePage() {
         feedback: null,
         created_at: new Date().toISOString(),
         ended_at: null,
+        last_message_preview: null,
       });
       setTranscript([]);
       setAudioUrl(null);
@@ -674,8 +758,48 @@ export default function InterviewPracticePage() {
     }
   }
 
+  // Safety net for the "ending" loading screen: the "session_ended" SSE
+  // event (fired mid-turn when the agent's own end_interview tool ends
+  // things, as opposed to this same page's own "End session" button,
+  // which ends things via a plain REST call and never relies on this at
+  // all) *should* carry the page straight to the results screen on its
+  // own. But that's one single long-lived turn's stream doing double
+  // duty — the whole agent reply, its audio, AND the scoring step all
+  // have to arrive over the same connection — so there's no independent
+  // channel telling the client scoring finished if that stream is ever
+  // interrupted or a chunk goes missing. Confirmed live: the session
+  // really did complete server-side in that case (status/score/feedback
+  // all correct in the DB) — the page just never heard about it and sat
+  // on this screen until a manual reload. Poll the session's own status
+  // while on this screen as a cheap backstop; a no-op whenever the SSE
+  // event gets there first (which is still the common, faster path).
+  React.useEffect(() => {
+    if (phase !== "ending" || !activeSessionId) return;
+    let cancelled = false;
+    const sessionId = activeSessionId;
+    const interval = window.setInterval(async () => {
+      try {
+        const s = await api.getInterviewSession(sessionId);
+        if (cancelled || s.status === "in_progress") return;
+        setSession(s);
+        setPhase("results");
+        void refreshList();
+      } catch {
+        // Transient (e.g. a momentary network blip) — just try again
+        // next tick rather than surfacing an error over a loading screen.
+      }
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [phase, activeSessionId, refreshList]);
+
   function handleReplay(filename: string) {
     if (!activeSessionId) return;
+    setActiveAudioFilename(filename);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
     void loadAudio(activeSessionId, filename);
   }
 
@@ -938,6 +1062,14 @@ export default function InterviewPracticePage() {
   const playbackGraphRef = React.useRef<{ ctx: AudioContext; analyser: AnalyserNode } | null>(null);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = React.useState(false);
+  // Which past turn's clip (by filename) is currently loaded into the
+  // shared <audio> element, plus its live progress — drives the
+  // per-bubble play/pause + seek bar in TranscriptView. Reset together
+  // whenever a NEW clip is loaded (handleReplay) so a stale duration
+  // from the previous clip never flashes on the next one.
+  const [activeAudioFilename, setActiveAudioFilename] = React.useState<string | null>(null);
+  const [audioCurrentTime, setAudioCurrentTime] = React.useState(0);
+  const [audioDuration, setAudioDuration] = React.useState(0);
 
   // createMediaElementSource can only ever be called ONCE per <audio>
   // element (a second call throws) — this element is reused across
@@ -973,6 +1105,30 @@ export default function InterviewPracticePage() {
 
   function handleAudioStop() {
     setIsPlaying(false);
+  }
+
+  function handleAudioEnded() {
+    setIsPlaying(false);
+    // Reset to the start rather than leaving it parked at the end —
+    // the next click on this same bubble's Play button should replay
+    // from the beginning, like any normal player.
+    if (audioElRef.current) audioElRef.current.currentTime = 0;
+    setAudioCurrentTime(0);
+  }
+
+  function handleTogglePause() {
+    const el = audioElRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play().catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't play the audio"));
+    } else {
+      el.pause();
+    }
+  }
+
+  function handleSeek(time: number) {
+    if (audioElRef.current) audioElRef.current.currentTime = time;
+    setAudioCurrentTime(time);
   }
 
   React.useEffect(() => {
@@ -1119,10 +1275,39 @@ export default function InterviewPracticePage() {
     }
     const source = graph.ctx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(graph.analyser);
+    // Each chunk becomes its own independently-scheduled node — butting
+    // two of those together with a hard edge (the original code here)
+    // is a well-known source of audible clicking in gapless PCM
+    // streaming: a sub-sample phase/DC discontinuity right at the
+    // boundary, even though the underlying bytes are perfectly
+    // contiguous (confirmed by the fact the SAME bytes, assembled
+    // server-side into one continuous WAV for replay, sound clean — the
+    // data isn't the problem, the boundary between separate Web Audio
+    // nodes is). A first attempt at fixing this made consecutive
+    // buffers actually OVERLAP in time (a real crossfade) — wrong move:
+    // this is contiguous speech, not audio meant to be layered, so for
+    // that overlap window two genuinely DIFFERENT stretches of speech
+    // sounded at once, which is exactly what phases/combs into a
+    // "gargled"/underwater texture (heard live, reported back). Fixed
+    // properly here: buffers stay perfectly back-to-back with ZERO time
+    // overlap (nothing ever plays simultaneously), and each one only
+    // softens its OWN start/end edges — enough to erase the hard
+    // sample-value jump that caused the click, brief enough (~1.5ms)
+    // that the momentary dip in loudness at each seam is inaudible.
+    const gain = graph.ctx.createGain();
+    source.connect(gain);
+    gain.connect(graph.analyser);
+    const dur = audioBuffer.duration;
+    const fade = Math.min(0.0015, dur / 2); // 1.5ms
     const startAt = Math.max(pcmNextStartRef.current, graph.ctx.currentTime);
+    gain.gain.setValueAtTime(0, startAt);
+    gain.gain.linearRampToValueAtTime(1, startAt + fade);
+    if (dur > fade) {
+      gain.gain.setValueAtTime(1, startAt + dur - fade);
+      gain.gain.linearRampToValueAtTime(0, startAt + dur);
+    }
     source.start(startAt);
-    pcmNextStartRef.current = startAt + audioBuffer.duration;
+    pcmNextStartRef.current = startAt + dur;
   }
 
   // Called once per TURN (on the "done" event), not per segment —
@@ -1206,7 +1391,10 @@ export default function InterviewPracticePage() {
         src={audioUrl ?? undefined}
         onPlay={handleAudioPlay}
         onPause={handleAudioStop}
-        onEnded={handleAudioStop}
+        onEnded={handleAudioEnded}
+        onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setAudioDuration(e.currentTarget.duration || 0)}
+        onDurationChange={(e) => setAudioDuration(e.currentTarget.duration || 0)}
         className="hidden"
       />
 
@@ -1235,7 +1423,11 @@ export default function InterviewPracticePage() {
         )}
 
         {phase === "list" && (
-          <div className="flex flex-col gap-4 max-w-2xl">
+          // Adrian, direct: "The page should also fill the width of
+          // screen" — same mx-auto/max-w-6xl centered-but-wide shape
+          // billing/composer/dashboard already use, replacing the old
+          // narrow max-w-2xl single column.
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground max-w-lg">
                 Practice a mock interview, focus group discussion, or leaderless group discussion — real voice,
@@ -1254,40 +1446,48 @@ export default function InterviewPracticePage() {
                 No practice sessions yet.
               </div>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {sessions.map((s) => (
                   <div
                     key={s.id}
-                    className="flex items-center gap-2 border border-border bg-card px-3 py-2.5 hover:border-primary transition-colors"
+                    className="flex flex-col gap-2 border border-border bg-card px-3 py-2.5 hover:border-primary transition-colors"
                   >
-                    <button
-                      type="button"
-                      onClick={() => openSession(s.id)}
-                      className="flex flex-1 min-w-0 items-center justify-between gap-3 text-left"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">
+                    <button type="button" onClick={() => openSession(s.id)} className="flex flex-col gap-1 text-left">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 text-sm font-medium truncate">
                           {[s.role_title, s.company_name].filter(Boolean).join(" @ ") ||
                             INTERVIEW_PRACTICE_TYPE_LABEL[s.practice_type]}
                         </div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {INTERVIEW_PRACTICE_TYPE_LABEL[s.practice_type]} ·{" "}
-                          {new Date(s.created_at).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </div>
+                        <Badge variant={s.status === "in_progress" ? "secondary" : "outline"} className="font-mono shrink-0">
+                          {s.overall_score !== null ? `${s.overall_score.toFixed(0)}/100` : s.status}
+                        </Badge>
                       </div>
-                      <Badge variant={s.status === "in_progress" ? "secondary" : "outline"} className="font-mono shrink-0">
-                        {s.overall_score !== null ? `${s.overall_score.toFixed(0)}/100` : s.status}
-                      </Badge>
+                      <div className="text-[11px] text-muted-foreground">
+                        {INTERVIEW_PRACTICE_TYPE_LABEL[s.practice_type]} ·{" "}
+                        {new Date(s.created_at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                      {/* Adrian, direct: "the item/cards should have
+                          a preview of the last message spoken by
+                          the ai from the transcript (but truncated
+                          with ...)" — `truncate` handles the visual
+                          clipping; the trailing "…" is added only
+                          when the raw text actually got cut off. */}
+                      {s.last_message_preview && (
+                        <div className="truncate text-[11px] text-muted-foreground/80 italic">
+                          &ldquo;{s.last_message_preview.slice(0, 140)}
+                          {s.last_message_preview.length > 140 ? "…" : ""}&rdquo;
+                        </div>
+                      )}
                     </button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="shrink-0 text-muted-foreground hover:text-crit"
+                      className="self-end text-muted-foreground hover:text-crit"
                       disabled={deletingId === s.id}
                       onClick={(e) => handleDeleteSession(s, e)}
                       title="Delete this practice session"
@@ -1409,9 +1609,12 @@ export default function InterviewPracticePage() {
               </div>
             )}
 
-            <Button onClick={handleCreateSession} disabled={creating}>
-              {creating ? "Starting…" : "Start practice"}
-            </Button>
+            <div className="relative w-fit">
+              <Button onClick={handleCreateSession} disabled={creating}>
+                {creating ? "Starting…" : "Start practice"}
+              </Button>
+              <CreditCostBadge featureKey="interview-practice" />
+            </div>
           </div>
         )}
 
@@ -1515,8 +1718,15 @@ export default function InterviewPracticePage() {
               >
                 {cameraOn ? <Video className="size-5" /> : <VideoOff className="size-5" />}
               </Button>
-              <Button variant="destructive" onClick={handleEndSession} disabled={running}>
-                End session
+              <Button
+                size="lg"
+                variant="destructive"
+                onClick={handleEndSession}
+                disabled={running}
+                className="size-12 rounded-full p-0"
+                title="End session"
+              >
+                <PhoneOff className="size-5" />
               </Button>
             </div>
 
@@ -1529,7 +1739,13 @@ export default function InterviewPracticePage() {
                   items={transcript}
                   running={running}
                   stageMessage={stageMessage}
+                  activeAudioFilename={activeAudioFilename}
+                  isPlaying={isPlaying}
+                  audioCurrentTime={audioCurrentTime}
+                  audioDuration={audioDuration}
                   onReplay={handleReplay}
+                  onTogglePause={handleTogglePause}
+                  onSeek={handleSeek}
                 />
               </div>
             </details>
@@ -1595,7 +1811,13 @@ export default function InterviewPracticePage() {
                   items={transcript}
                   running={false}
                   stageMessage={null}
+                  activeAudioFilename={activeAudioFilename}
+                  isPlaying={isPlaying}
+                  audioCurrentTime={audioCurrentTime}
+                  audioDuration={audioDuration}
                   onReplay={handleReplay}
+                  onTogglePause={handleTogglePause}
+                  onSeek={handleSeek}
                 />
               </div>
             )}

@@ -2,13 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   api,
   CATEGORY_COLOR_CLASS,
   CV_PARSE_STAGES,
   EVIDENCE_CATEGORIES,
+  ONBOARDING_CHANGED_EVENT,
   type Application,
   type CVParseStage,
   type DashboardSummary,
@@ -16,6 +17,7 @@ import {
   type EvidenceItem,
   type InboxJob,
   type InterviewSession,
+  type OnboardingProgress,
   type PipelineStage,
   type Preference,
   type PreferenceUpsert,
@@ -252,6 +254,77 @@ function NoJobsYet() {
   );
 }
 
+// Module-level, not component state — survives unmount/remount (i.e.
+// navigating away and back), same stale-while-revalidate shape
+// composer/page.tsx's own _composerGroupsCache uses.
+let _dashboardSummaryCache: DashboardSummary | null = null;
+
+// A compact, read-mostly onboarding progress preview — shown on the
+// Dashboard itself, specifically in the pre-persona empty state below
+// (raised directly by Adrian: onboarding progress should be visible
+// there too, not only via the floating widget — a brand-new account
+// lands here first, before there's a persona for anything else on this
+// page to key off of). Deliberately simpler than the floating widget's
+// own checklist: no click-to-open-a-dialog steps for persona/cv (the
+// persona-creation form is already right there on this same page), just
+// a donut plus a plain list, each real step still a real link.
+function OnboardingProgressPreview() {
+  const [progress, setProgress] = React.useState<OnboardingProgress | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    try {
+      setProgress(await api.getOnboardingProgress());
+    } catch {
+      // best-effort — this is a nice-to-have preview, not worth an error toast
+    }
+  }, []);
+
+  React.useEffect(() => {
+    (async () => {
+      await refresh();
+    })();
+    // Same real-time fix as floating-onboarding.tsx's own poll —
+    // refetch the moment api.ts's ONBOARDING_CHANGED_EVENT fires
+    // rather than only on mount.
+    const onChanged = () => void refresh();
+    window.addEventListener(ONBOARDING_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(ONBOARDING_CHANGED_EVENT, onChanged);
+  }, [refresh]);
+
+  if (!progress || progress.completed === progress.total) return null;
+
+  return (
+    <div className="flex w-full max-w-md flex-col gap-2 border border-border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          Getting started
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {progress.completed}/{progress.total}
+        </span>
+      </div>
+      <ul className="flex flex-col gap-1">
+        {progress.steps.map((step) => (
+          <li key={step.key} className="flex items-center gap-2 text-xs">
+            {step.done ? (
+              <Check className="size-3 shrink-0 text-ok" />
+            ) : (
+              <Circle className="size-3 shrink-0 text-muted-foreground" />
+            )}
+            {step.href && !step.done ? (
+              <Link href={step.href} className="truncate text-primary hover:underline">
+                {step.label}
+              </Link>
+            ) : (
+              <span className={cn("truncate", step.done && "text-muted-foreground line-through")}>{step.label}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // Overview — the Dashboard's landing tab, meant to be a real place to
 // start working from rather than just a stats readout (raised
 // directly by Adrian: "more than just stats... start using the
@@ -263,12 +336,31 @@ function NoJobsYet() {
 // `items`/`onUploadCv` come from DashboardPage — reusing its
 // already-loaded evidence bank and its Upload CV dialog instead of a
 // second copy of both.
+const CV_PARSE_STAGE_LABEL: Record<CVParseStage, string> = {
+  extracting: "Extracting text…",
+  resolving_models: "Resolving models…",
+  parsing: "Parsing with AI…",
+  saving: "Saving evidence…",
+  embedding: "Embedding…",
+};
+
 function OverviewPanel({
   items,
   onUploadCv,
+  parsing,
+  activeStage,
 }: {
   items: EvidenceItem[];
   onUploadCv: () => void;
+  // Adrian, direct: "user can click upload again, this can't be
+  // happening. The cv section in the dashboard should be a loading
+  // state of parsing" — DashboardPage's own `parsing`/`activeStage`
+  // state already survives the upload dialog being closed (its own
+  // comment: "closing and reopening the modal doesn't affect it"),
+  // but this card never got told about it, so it kept showing the
+  // plain "Upload CV" prompt as if nothing was happening.
+  parsing: boolean;
+  activeStage: CVParseStage | null;
 }) {
   const router = useRouter();
   const {
@@ -435,15 +527,24 @@ function OverviewPanel({
   );
 
   // Account-wide stats — unchanged from the page this tab replaced.
-  const [summary, setSummary] = React.useState<DashboardSummary | null>(null);
-  const [loadingSummary, setLoadingSummary] = React.useState(true);
+  // Stale-while-revalidate (Adrian, direct: "why do i have to wait
+  // render everytime i check... dashboard, is it not cached") — a
+  // cached value from an earlier mount paints instantly instead of a
+  // blank loading spinner on every single visit, while this still
+  // refetches in the background right after to catch anything that
+  // actually changed. Module-level, not component state, so it
+  // survives navigating away and back.
+  const [summary, setSummary] = React.useState<DashboardSummary | null>(_dashboardSummaryCache);
+  const [loadingSummary, setLoadingSummary] = React.useState(!_dashboardSummaryCache);
 
   React.useEffect(() => {
     (async () => {
       try {
-        setSummary(await api.getDashboardSummary());
+        const fresh = await api.getDashboardSummary();
+        _dashboardSummaryCache = fresh;
+        setSummary(fresh);
       } catch (e) {
-        toast.error(String(e));
+        if (!_dashboardSummaryCache) toast.error(String(e));
       } finally {
         setLoadingSummary(false);
       }
@@ -463,32 +564,40 @@ function OverviewPanel({
 
   if (personas.length === 0) {
     return (
-      <div className="flex max-w-md flex-col items-center gap-3 border border-dashed border-input p-8 text-center">
-        <Users className="size-6 text-muted-foreground" strokeWidth={1.5} />
-        <div>
-          <div className="text-sm font-medium">Create your first persona</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            Every profile, evidence bank, saved search, and application belongs to a persona — create one to get
-            started.
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex max-w-md flex-col items-center gap-3 border border-dashed border-input p-8 text-center">
+          <Users className="size-6 text-muted-foreground" strokeWidth={1.5} />
+          <div>
+            <div className="text-sm font-medium">Create your first persona</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Every profile, evidence bank, saved search, and application belongs to a persona — create one to get
+              started.
+            </div>
+          </div>
+          <div className="flex w-full gap-2">
+            <Input
+              placeholder="e.g. Backend Engineer track"
+              value={newPersonaName}
+              onChange={(e) => setNewPersonaName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreatePersona()}
+            />
+            <Button onClick={handleCreatePersona} disabled={creatingPersona || !newPersonaName.trim()}>
+              {creatingPersona ? "Creating…" : "Create"}
+            </Button>
           </div>
         </div>
-        <div className="flex w-full gap-2">
-          <Input
-            placeholder="e.g. Backend Engineer track"
-            value={newPersonaName}
-            onChange={(e) => setNewPersonaName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleCreatePersona()}
-          />
-          <Button onClick={handleCreatePersona} disabled={creatingPersona || !newPersonaName.trim()}>
-            {creatingPersona ? "Creating…" : "Create"}
-          </Button>
-        </div>
+        <OnboardingProgressPreview />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    // Adrian, direct: "everything should be centered and fill width" —
+    // same mx-auto/max-w-6xl shape billing/page.tsx and composer's own
+    // Base CV panel already use, replacing the old per-section
+    // max-w-md/2xl/3xl values below (each independently narrow and
+    // left-hugging) with one shared, wide, centered container.
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <section className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-muted-foreground">
           Working as <span className="font-medium text-foreground">{selectedPersona?.name ?? "?"}</span>
@@ -518,6 +627,15 @@ function OverviewPanel({
         )}
       </section>
 
+      {/* Adrian, direct: "why is onboarding progression gone entirely
+          from dashboard (after creating persona, the one before
+          creating persona is still there)" — it was deliberately
+          scoped to the persona-less branch above only; genuinely
+          renders nothing once onboarding is fully complete (its own
+          `progress.completed === progress.total` check), so leaving it
+          mounted here doesn't clutter the dashboard forever. */}
+      <OnboardingProgressPreview />
+
       <section className="flex max-w-xl gap-2">
         <Input
           placeholder="e.g. Backend Engineer in Jakarta"
@@ -532,7 +650,7 @@ function OverviewPanel({
         </Button>
       </section>
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3 max-w-3xl">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="border border-border bg-card p-4 flex flex-col gap-1">
           <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
             Jobs discovered
@@ -569,7 +687,17 @@ function OverviewPanel({
             </Link>
           </div>
           <div className="flex-1 p-3">
-            {items.length === 0 ? (
+            {parsing ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
+                <Loader2 className="size-5 animate-spin text-muted-foreground" strokeWidth={1.5} />
+                <span className="text-xs text-muted-foreground">
+                  {activeStage ? CV_PARSE_STAGE_LABEL[activeStage] : "Parsing your CV…"}
+                </span>
+                <Button size="sm" variant="outline" onClick={onUploadCv}>
+                  View progress
+                </Button>
+              </div>
+            ) : items.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
                 <UploadCloud className="size-5 text-muted-foreground" strokeWidth={1.5} />
                 <span className="text-xs text-muted-foreground">
@@ -580,14 +708,23 @@ function OverviewPanel({
                 </Button>
               </div>
             ) : (
-              <div className="h-64 overflow-hidden border border-border bg-muted/30">
-                {previewUrl ? (
-                  <iframe src={previewUrl} className="w-full h-full" title="Base CV preview" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground font-mono">
-                    {renderingCv ? "Rendering…" : "—"}
-                  </div>
-                )}
+              <div className="flex flex-col gap-2">
+                <div className="h-64 overflow-hidden border border-border bg-muted/30">
+                  {previewUrl ? (
+                    <iframe src={previewUrl} className="w-full h-full" title="Base CV preview" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground font-mono">
+                      {renderingCv ? "Rendering…" : "—"}
+                    </div>
+                  )}
+                </div>
+                {/* Re-upload a fresh CV once one already exists — this
+                    card previously had no way to start a new parse at
+                    all once evidence existed (only "See more CVs",
+                    which goes to Composer, not the upload flow). */}
+                <Button size="sm" variant="ghost" className="self-start text-muted-foreground" onClick={onUploadCv}>
+                  Upload a new CV
+                </Button>
               </div>
             )}
           </div>
@@ -673,8 +810,13 @@ function OverviewPanel({
         </div>
       </section>
 
-      {/* Phase 11 (v2 plan) — recent interview-practice sessions */}
-      <section className="max-w-md">
+      {/* Adrian, direct: "pipeline by stage and daily activity should
+          be side by side with interview practice so like on the same
+          grid row" — one shared 3-column grid (same lg:grid-cols-3
+          shape as the Base CV/jobs/pipeline row above), replacing what
+          used to be three separate, independently narrow sections. */}
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-start">
+        {/* Phase 11 (v2 plan) — recent interview-practice sessions */}
         <div className="flex flex-col border border-border bg-card">
           <div className="h-9 border-b border-border bg-secondary flex items-center justify-between px-3">
             <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
@@ -725,64 +867,64 @@ function OverviewPanel({
             )}
           </div>
         </div>
-      </section>
 
-      {summary && summary.applications_by_stage.length > 0 && (
-        <section className="flex flex-col gap-2 max-w-2xl">
-          <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-            Pipeline by stage
-          </span>
-          <div className="border border-border bg-card p-4 flex flex-col gap-2">
-            {summary.applications_by_stage.map((s) => (
-              <div key={s.stage} className="flex items-center gap-3 text-xs">
-                <span className="w-40 shrink-0 truncate" title={s.display_name}>
-                  {s.display_name}
-                </span>
-                <div className="flex-1 h-2 bg-secondary overflow-hidden">
-                  <div className="h-full bg-primary" style={{ width: `${(s.count / maxStageCount) * 100}%` }} />
-                </div>
-                <span className="w-6 text-right font-mono tabular">{s.count}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {summary && (
-        <section className="flex flex-col gap-2 max-w-3xl">
-          <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-            Daily activity — last {summary.daily_activity.length} days
-          </span>
-          <div className="border border-border bg-card p-4">
-            <div className="flex items-end gap-1" style={{ height: 110 }}>
-              {summary.daily_activity.map((d) => (
-                <div key={d.date} className="flex-1 h-full flex items-end gap-0.5" title={d.date}>
-                  <div
-                    className="flex-1 bg-primary min-h-px"
-                    style={{ height: `${(d.jobs_discovered / maxDailyCount) * 100}%` }}
-                  />
-                  <div
-                    className="flex-1 bg-ok min-h-px"
-                    style={{ height: `${(d.applications_created / maxDailyCount) * 100}%` }}
-                  />
+        {summary && summary.applications_by_stage.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+              Pipeline by stage
+            </span>
+            <div className="border border-border bg-card p-4 flex flex-col gap-2">
+              {summary.applications_by_stage.map((s) => (
+                <div key={s.stage} className="flex items-center gap-3 text-xs">
+                  <span className="w-24 shrink-0 truncate" title={s.display_name}>
+                    {s.display_name}
+                  </span>
+                  <div className="flex-1 h-2 bg-secondary overflow-hidden">
+                    <div className="h-full bg-primary" style={{ width: `${(s.count / maxStageCount) * 100}%` }} />
+                  </div>
+                  <span className="w-6 text-right font-mono tabular">{s.count}</span>
                 </div>
               ))}
             </div>
-            <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground font-mono">
-              <span>{summary.daily_activity[0]?.date}</span>
-              <span>{summary.daily_activity[summary.daily_activity.length - 1]?.date}</span>
-            </div>
-            <div className="flex items-center gap-4 mt-2 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 bg-primary inline-block" /> Jobs discovered
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 bg-ok inline-block" /> Applications created
-              </span>
+          </div>
+        )}
+
+        {summary && (
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+              Daily activity — last {summary.daily_activity.length} days
+            </span>
+            <div className="border border-border bg-card p-4">
+              <div className="flex items-end gap-1" style={{ height: 110 }}>
+                {summary.daily_activity.map((d) => (
+                  <div key={d.date} className="flex-1 h-full flex items-end gap-0.5" title={d.date}>
+                    <div
+                      className="flex-1 bg-primary min-h-px"
+                      style={{ height: `${(d.jobs_discovered / maxDailyCount) * 100}%` }}
+                    />
+                    <div
+                      className="flex-1 bg-ok min-h-px"
+                      style={{ height: `${(d.applications_created / maxDailyCount) * 100}%` }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground font-mono">
+                <span>{summary.daily_activity[0]?.date}</span>
+                <span>{summary.daily_activity[summary.daily_activity.length - 1]?.date}</span>
+              </div>
+              <div className="flex items-center gap-4 mt-2 text-[10px] text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 bg-primary inline-block" /> Jobs discovered
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 bg-ok inline-block" /> Applications created
+                </span>
+              </div>
             </div>
           </div>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   );
 }
@@ -989,6 +1131,19 @@ export default function DashboardPage() {
   // Top-level section — separate from `tab` below (that one filters
   // WHICH evidence category shows inside the Experience section).
   const [studioTab, setStudioTab] = React.useState<"overview" | "preferences" | "profile" | "evidence">("overview");
+  // Lets an external link (the floating onboarding checklist's "cv"
+  // step, mounted globally now and unable to reach this page's own
+  // local dialog-open state directly) land straight on a specific tab
+  // — e.g. /console?tab=profile — instead of always opening on Overview.
+  const searchParams = useSearchParams();
+  React.useEffect(() => {
+    (() => {
+      const requested = searchParams.get("tab");
+      if (requested === "overview" || requested === "preferences" || requested === "profile" || requested === "evidence") {
+        setStudioTab(requested);
+      }
+    })();
+  }, [searchParams]);
   const [tab, setTab] = React.useState<"all" | EvidenceCategory>("all");
   const [loading, setLoading] = React.useState(true);
   // `parsing` stays the single source of truth for "a parse is in
@@ -1410,7 +1565,7 @@ export default function DashboardPage() {
       <div className="flex-1 overflow-auto flex flex-col isolate">
         {studioTab === "overview" ? (
           <div className="p-5">
-            <OverviewPanel items={items} onUploadCv={openUploadModal} />
+            <OverviewPanel items={items} onUploadCv={openUploadModal} parsing={parsing} activeStage={activeStage} />
           </div>
         ) : loading ? (
           <div className="text-sm text-muted-foreground font-mono p-5">loading…</div>

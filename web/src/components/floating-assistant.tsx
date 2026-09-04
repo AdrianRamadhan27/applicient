@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useConversation, conversationLabel } from "@/lib/conversation-provider";
 import { usePersona } from "@/components/persona-provider";
 import { ChatLog } from "@/components/chat-log";
+import { InterruptPanel } from "@/components/interrupt-panel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -33,7 +34,6 @@ export function FloatingAssistant() {
   const { selectedPersona } = usePersona();
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState("");
-  const [respondMessage, setRespondMessage] = React.useState("");
   const {
     conversations,
     conversationId,
@@ -45,7 +45,6 @@ export function FloatingAssistant() {
     selectConversation,
     newChat,
     sendMessage,
-    respond,
     cancelRun,
   } = useConversation();
 
@@ -66,12 +65,6 @@ export function FloatingAssistant() {
     const text = draft;
     setDraft("");
     await sendMessage(text);
-  }
-
-  async function handleRespond() {
-    const message = respondMessage;
-    setRespondMessage("");
-    await respond(message);
   }
 
   return (
@@ -144,30 +137,7 @@ export function FloatingAssistant() {
           </div>
         )}
 
-        {pendingInterrupt && pendingInterrupt.length > 0 && (
-          <div className="mx-3 mb-2 shrink-0 space-y-2 rounded-md border-t border-warn bg-warn/10 p-2.5 text-xs">
-            <div className="font-semibold">Needs an answer from you</div>
-            <div className="whitespace-pre-wrap text-muted-foreground">{pendingInterrupt[0].description}</div>
-            <div className="flex gap-1.5">
-              <Textarea
-                placeholder="Type your answer…"
-                value={respondMessage}
-                onChange={(e) => setRespondMessage(e.target.value)}
-                rows={2}
-                className="flex-1 text-xs"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleRespond();
-                  }
-                }}
-              />
-              <Button size="sm" onClick={handleRespond}>
-                Send
-              </Button>
-            </div>
-          </div>
-        )}
+        <InterruptPanel compact />
 
         <div className="flex shrink-0 items-center gap-2 border-t border-border p-2.5">
           <Textarea

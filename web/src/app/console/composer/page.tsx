@@ -12,16 +12,19 @@ import {
   type CoverLetterDelta,
   type CoverLetterLength,
   type CoverLetterTone,
+  type CvScore,
   type CvTemplate,
   type EvidenceItem,
   type InboxJob,
   type JobGroup,
+  type Profile,
   type SkillGapItem,
   type TailorProgressEvent,
   type TailoredDocument,
   type TailoringDelta,
 } from "@/lib/api";
 import { DeltaDiffView } from "@/components/delta-diff-view";
+import { CreditCostBadge } from "@/components/credit-cost-badge";
 import { usePersona } from "@/components/persona-provider";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -51,6 +54,7 @@ import {
   Download,
   Sparkles,
   Check,
+  ArrowRight,
   Loader2,
   Pencil,
   RotateCcw,
@@ -288,19 +292,176 @@ const COVER_LETTER_LENGTHS: { value: CoverLetterLength; label: string }[] = [
  * persists anything), so this component's own state is deliberately
  * separate from the rest of ComposerPage's tailored-per-group state
  * machine rather than woven into it. */
-function BaseCvPanel({ personaId }: { personaId: string }) {
+/** Overall/category scores come back on a 0-100 scale
+ * (cv_score_engine.py) — color bands purely for the at-a-glance read,
+ * same rough cutoffs the prompt itself was calibrated against. */
+function scoreColorClass(score: number): string {
+  if (score >= 70) return "text-ok";
+  if (score >= 40) return "text-warn";
+  return "text-crit";
+}
+
+function CvScorePanel({
+  profileId,
+  score,
+  scoredAt,
+  onScoreChanged,
+}: {
+  profileId: string;
+  score: CvScore | null;
+  scoredAt: string | null;
+  onScoreChanged: (profile: Profile) => void;
+}) {
+  const [analyzing, setAnalyzing] = React.useState(false);
+  const [fixing, setFixing] = React.useState(false);
+
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    try {
+      const profile = await api.scoreCv(profileId);
+      onScoreChanged(profile);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function handleFix() {
+    setFixing(true);
+    try {
+      const result = await api.fixCv(profileId);
+      toast.success(
+        result.updated_count > 0
+          ? `Reworded ${result.updated_count} evidence item${result.updated_count === 1 ? "" : "s"}`
+          : "Your evidence bank already reads well — nothing needed changing",
+      );
+      // Free, and the whole point is to see the improved analysis —
+      // re-score right away rather than leaving the pre-fix numbers
+      // showing next to text that no longer matches them.
+      const profile = await api.scoreCv(profileId);
+      onScoreChanged(profile);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setFixing(false);
+    }
+  }
+
+  return (
+    <div className="border border-border bg-card p-4 space-y-3 h-full overflow-y-auto">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold">CV Analysis</h3>
+          {scoredAt && (
+            <span className="text-[11px] text-muted-foreground font-mono">
+              last analyzed {new Date(scoredAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={handleAnalyze} disabled={analyzing || fixing}>
+            {analyzing ? "Analyzing…" : score ? "Re-analyze" : "Analyze my CV"}
+          </Button>
+          <div className="relative">
+            <Button size="sm" onClick={handleFix} disabled={fixing || analyzing || !score}>
+              {fixing ? "Fixing…" : "Fix my CV"}
+            </Button>
+            <CreditCostBadge featureKey="cv-fix" />
+          </div>
+        </div>
+      </div>
+
+      {!score ? (
+        <p className="text-xs text-muted-foreground">
+          Get honest, specific feedback on your evidence bank — free — before deciding what to fix.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-4">
+            <div className={cn("text-3xl font-bold font-mono tabular", scoreColorClass(score.overall_score))}>
+              {Math.round(score.overall_score)}
+            </div>
+            <p className="text-xs text-muted-foreground flex-1">{score.summary}</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {score.categories.map((c) => (
+              <div key={c.category} className="border border-border p-2" title={c.feedback}>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono truncate">
+                  {c.category}
+                </div>
+                <div className={cn("text-lg font-semibold font-mono", scoreColorClass(c.score))}>
+                  {Math.round(c.score)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {score.strengths.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold text-ok uppercase tracking-wider mb-1">Strengths</div>
+              <ul className="space-y-1">
+                {score.strengths.map((s, i) => (
+                  <li key={i} className="flex gap-1.5 text-xs">
+                    <Check className="size-3.5 shrink-0 text-ok mt-0.5" />
+                    <span>{s}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {score.improvements.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold text-warn uppercase tracking-wider mb-1">
+                Suggested improvements
+              </div>
+              <ul className="space-y-1">
+                {score.improvements.map((s, i) => (
+                  <li key={i} className="flex gap-1.5 text-xs">
+                    <ArrowRight className="size-3.5 shrink-0 text-warn mt-0.5" />
+                    <span>{s}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Shown before any job group has been created/selected — an
+ * untailored CV straight from the Dashboard's evidence bank, so
+ * there's something real to look at/export immediately rather than
+ * an empty "select a job group" screen (raised by Adrian). Fully
+ * self-contained/stateless on the server side (api.renderBaseCv never
+ * persists anything), so this component's own state is deliberately
+ * separate from the rest of ComposerPage's tailored-per-group state
+ * machine rather than woven into it.
+ *
+ * `profileId` is Phase 16 follow-up (Adrian, direct): general CV
+ * scoring + a "fix my CV" action, both shown here — CvScorePanel above
+ * owns that state, this component only owns the render/preview pane
+ * and re-renders it once a fix actually changes the underlying
+ * evidence bank. */
+function BaseCvPanel({ personaId, profileId }: { personaId: string; profileId: string }) {
   const [templates, setTemplates] = React.useState<CvTemplate[]>([]);
   const [templateId, setTemplateId] = React.useState("");
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = React.useState<Blob | null>(null);
   const [rendering, setRendering] = React.useState(false);
+  const [cvScore, setCvScore] = React.useState<CvScore | null>(null);
+  const [cvScoredAt, setCvScoredAt] = React.useState<string | null>(null);
 
   const render = React.useCallback(
-    async (tplId: string) => {
+    async (tplId: string, opts?: { force?: boolean }) => {
       if (!tplId) return;
       setRendering(true);
       try {
-        const blob = await api.renderBaseCv(personaId, tplId);
+        const blob = await api.renderBaseCv(personaId, tplId, opts);
         setPreviewUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
           return URL.createObjectURL(blob);
@@ -325,9 +486,11 @@ function BaseCvPanel({ personaId }: { personaId: string }) {
     (() => setPreviewBlob(null))();
     (async () => {
       try {
-        const tpls = await api.listTemplates();
+        const [tpls, profile] = await Promise.all([api.listTemplates(), api.getProfile(profileId)]);
         if (cancelled) return;
         setTemplates(tpls);
+        setCvScore(profile.cv_score);
+        setCvScoredAt(profile.cv_scored_at);
         const first = tpls[0]?.id ?? "";
         setTemplateId(first);
         if (first) await render(first);
@@ -339,7 +502,7 @@ function BaseCvPanel({ personaId }: { personaId: string }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personaId]);
+  }, [personaId, profileId]);
 
   function handleExport() {
     if (!previewBlob) return;
@@ -349,6 +512,15 @@ function BaseCvPanel({ personaId }: { personaId: string }) {
     a.download = "cv-base.pdf";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function handleScoreChanged(profile: Profile) {
+    setCvScore(profile.cv_score);
+    setCvScoredAt(profile.cv_scored_at);
+    // A "fix" changes the actual evidence text, not just the score —
+    // the preview pane needs a fresh render or it'd keep showing the
+    // pre-fix wording next to a post-fix analysis.
+    void render(templateId);
   }
 
   return (
@@ -361,41 +533,58 @@ function BaseCvPanel({ personaId }: { personaId: string }) {
           you have specific jobs to target.
         </p>
       </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <Select
-          value={templateId}
-          onValueChange={(v) => {
-            setTemplateId(v);
-            void render(v);
-          }}
-        >
-          <SelectTrigger className="w-56 h-8 text-xs">
-            <SelectValue placeholder="Template" />
-          </SelectTrigger>
-          <SelectContent>
-            {templates.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button size="sm" variant="secondary" onClick={() => render(templateId)} disabled={rendering || !templateId}>
-          {rendering ? "Rendering…" : "Refresh"}
-        </Button>
-        <Button size="sm" onClick={handleExport} disabled={!previewBlob}>
-          <Download className="size-4" />
-          Export
-        </Button>
-      </div>
-      <div className="border border-border rounded-md overflow-hidden bg-muted/30 max-w-2xl" style={{ height: 600 }}>
-        {previewUrl ? (
-          <iframe src={previewUrl} className="w-full h-full" title="Base CV preview" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground font-mono">
-            {rendering ? "Rendering…" : "No evidence yet — add some in the Dashboard"}
+
+      {/* Adrian, direct: "The cv and the score/analysis should be side
+          by side" — a two-column layout on wide screens (stacks on
+          narrow ones, same lg: breakpoint the rest of this app's own
+          grids use), preview on the left since that's the thing being
+          judged, analysis on the right. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              value={templateId}
+              onValueChange={(v) => {
+                setTemplateId(v);
+                void render(v);
+              }}
+            >
+              <SelectTrigger className="w-56 h-8 text-xs">
+                <SelectValue placeholder="Template" />
+              </SelectTrigger>
+              <SelectContent>
+                {templates.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => render(templateId, { force: true })}
+              disabled={rendering || !templateId}
+            >
+              {rendering ? "Rendering…" : "Refresh"}
+            </Button>
+            <Button size="sm" onClick={handleExport} disabled={!previewBlob}>
+              <Download className="size-4" />
+              Export
+            </Button>
           </div>
-        )}
+          <div className="border border-border rounded-md overflow-hidden bg-muted/30" style={{ height: 700 }}>
+            {previewUrl ? (
+              <iframe src={previewUrl} className="w-full h-full" title="Base CV preview" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground font-mono">
+                {rendering ? "Rendering…" : "No evidence yet — add some in the Dashboard"}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <CvScorePanel profileId={profileId} score={cvScore} scoredAt={cvScoredAt} onScoreChanged={handleScoreChanged} />
       </div>
     </div>
   );
@@ -608,10 +797,13 @@ function CoverLetterPanel({ groupId }: { groupId: string }) {
             </Select>
           </div>
           <div className="flex items-start gap-4">
-            <Button size="sm" onClick={handleGenerate} disabled={generating}>
-              <Sparkles className="size-4" />
-              {generating ? "Writing…" : "Generate cover letter"}
-            </Button>
+            <div className="relative">
+              <Button size="sm" onClick={handleGenerate} disabled={generating}>
+                <Sparkles className="size-4" />
+                {generating ? "Writing…" : "Generate cover letter"}
+              </Button>
+              <CreditCostBadge featureKey="cover-letter" />
+            </div>
             {steps.length > 0 && generating && (
               <div className="border border-border rounded-md p-3">
                 <Stepper steps={steps} />
@@ -851,10 +1043,13 @@ function AnswerPackPanel({ groupId }: { groupId: string }) {
           </div>
 
           <div className="flex items-start gap-4">
-            <Button size="sm" onClick={handleGenerate} disabled={generating}>
-              <Sparkles className="size-4" />
-              {generating ? "Answering…" : "Generate answers"}
-            </Button>
+            <div className="relative">
+              <Button size="sm" onClick={handleGenerate} disabled={generating}>
+                <Sparkles className="size-4" />
+                {generating ? "Answering…" : "Generate answers"}
+              </Button>
+              <CreditCostBadge featureKey="answer-pack" />
+            </div>
             {steps.length > 0 && generating && (
               <div className="border border-border rounded-md p-3">
                 <Stepper steps={steps} />
@@ -924,6 +1119,16 @@ function AnswerPackPanel({ groupId }: { groupId: string }) {
   );
 }
 
+// Module-level, not component state — survives unmount/remount (i.e.
+// navigating away and back), which is the whole point: a React state
+// reset on every mount is exactly what made this page always start
+// from a blank loading spinner. Same stale-while-revalidate shape
+// credit-cost-badge.tsx's own module-level caches already use.
+const _composerGroupsCache = new Map<
+  string,
+  { groups: JobGroup[]; jobs: InboxJob[]; evidence: EvidenceItem[] }
+>();
+
 export default function ComposerPage() {
   const router = useRouter();
   const { selectedPersonaId, selectedPersona } = usePersona();
@@ -955,6 +1160,11 @@ export default function ComposerPage() {
   const [templateId, setTemplateId] = React.useState<string>("");
 
   const [tailoring, setTailoring] = React.useState(false);
+  // Off by default (raised by Adrian) — the verify(+retry) pass roughly
+  // doubles, worst case ~4x's, an already-slow tailor call. Re-verify
+  // is still one click away on the generated draft for anyone who
+  // wants the extra safety net, just not forced up front every time.
+  const [verifyOnTailor, setVerifyOnTailor] = React.useState(false);
   const [reverifying, setReverifying] = React.useState(false);
   const [steps, setSteps] = React.useState<Step[]>([]);
   const [rendering, setRendering] = React.useState(false);
@@ -980,20 +1190,45 @@ export default function ComposerPage() {
   // between). Compared by content, not reference, since editDelta is
   // seeded from the doc's own json_delta on load/save.
   const deltaDirty = Boolean(editDelta && selectedDoc && JSON.stringify(editDelta) !== JSON.stringify(selectedDoc.json_delta));
+  // `selectedDoc.verified` alone can't tell "never checked" (verify was
+  // skipped, or hasn't run yet) apart from "checked and still flagged"
+  // — only the second one is a real reason to block export. A draft
+  // that was never verified is the whole point of making verification
+  // optional, so it exports freely; a draft the verifier actually
+  // looked at and couldn't clear stays blocked, same as before.
+  const canExportCv = Boolean(selectedDoc?.verified) || verifications.length === 0;
 
   const loadGroups = React.useCallback(async (personaId: string, profileId: string) => {
-    setLoadingGroups(true);
+    // Stale-while-revalidate (Adrian, direct: "why do i have to wait
+    // render everytime i check cv composer... is it not cached") —
+    // this fetch (job groups + up to 500 inbox jobs + the full
+    // evidence bank, three real round trips) used to re-run from a
+    // blank loading state on every single visit to this page, even
+    // seconds after the last one. A cached hit now paints instantly
+    // (no spinner) while still kicking off the same real fetch in the
+    // background to catch anything that actually changed — never
+    // permanently stale, just not blocking on a visit that's probably
+    // showing the same data as last time.
+    const cached = _composerGroupsCache.get(personaId);
+    if (cached) {
+      setGroups(cached.groups);
+      setInboxJobs(cached.jobs);
+      setEvidenceBank(cached.evidence);
+    } else {
+      setLoadingGroups(true);
+    }
     try {
       const [g, jobs, evidence] = await Promise.all([
         api.listJobGroups(personaId),
         api.listInboxJobs(personaId, { limit: 500 }),
         api.listEvidence(profileId),
       ]);
+      _composerGroupsCache.set(personaId, { groups: g, jobs, evidence });
       setGroups(g);
       setInboxJobs(jobs);
       setEvidenceBank(evidence);
     } catch (e) {
-      toast.error(String(e));
+      if (!cached) toast.error(String(e)); // a background revalidation failing silently is fine — the cached view is still shown
     } finally {
       setLoadingGroups(false);
     }
@@ -1152,10 +1387,11 @@ export default function ComposerPage() {
 
   async function handleGenerate() {
     if (!selectedGroup) return;
+    const verify = verifyOnTailor;
     setTailoring(true);
     setSteps(initialSteps());
     try {
-      for await (const event of api.streamTailorJobGroup(selectedGroup.id)) {
+      for await (const event of api.streamTailorJobGroup(selectedGroup.id, verify)) {
         if (event.type === "stage") {
           setSteps((prev) => applyStageEvent(prev, event));
         } else if (event.type === "error") {
@@ -1164,9 +1400,11 @@ export default function ComposerPage() {
           setDocuments((prev) => [event.result, ...prev]);
           setSelectedDocId(event.result.id);
           toast.success(
-            event.result.verified
-              ? "Tailored CV generated and verified"
-              : "Tailored CV generated — some claims could not be verified, export is blocked",
+            !verify
+              ? "Tailored CV generated — claims weren't checked (verification was off)"
+              : event.result.verified
+                ? "Tailored CV generated and verified"
+                : "Tailored CV generated — some claims could not be verified, export is blocked",
           );
           // Preview starts automatically — the user only needs to
           // press Preview themselves after an edit, not after every
@@ -1428,8 +1666,8 @@ export default function ComposerPage() {
 
           {/* Main panel */}
           {!selectedGroup ? (
-            selectedPersonaId ? (
-              <BaseCvPanel personaId={selectedPersonaId} />
+            selectedPersonaId && selectedPersona ? (
+              <BaseCvPanel personaId={selectedPersonaId} profileId={selectedPersona.profile_id} />
             ) : (
               <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground font-mono">
                 Select a job group
@@ -1517,26 +1755,29 @@ export default function ComposerPage() {
                                 {item.skill_text}
                               </span>
                             </label>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 px-2 text-[11px] text-muted-foreground shrink-0"
-                              disabled={generating}
-                              onClick={() =>
-                                item.syllabus
-                                  ? setExpandedSyllabusId(expanded ? null : item.id)
-                                  : handleGenerateSyllabus(item)
-                              }
-                            >
-                              {generating ? (
-                                <Loader2 className="size-3 animate-spin" />
-                              ) : item.syllabus ? (
-                                expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
-                              ) : (
-                                <GraduationCap className="size-3" />
-                              )}
-                              {generating ? "Generating…" : item.syllabus ? "Learning plan" : "Generate learning plan"}
-                            </Button>
+                            <div className="relative shrink-0">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-[11px] text-muted-foreground"
+                                disabled={generating}
+                                onClick={() =>
+                                  item.syllabus
+                                    ? setExpandedSyllabusId(expanded ? null : item.id)
+                                    : handleGenerateSyllabus(item)
+                                }
+                              >
+                                {generating ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : item.syllabus ? (
+                                  expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
+                                ) : (
+                                  <GraduationCap className="size-3" />
+                                )}
+                                {generating ? "Generating…" : item.syllabus ? "Learning plan" : "Generate learning plan"}
+                              </Button>
+                              {!item.syllabus && <CreditCostBadge featureKey="skill-gap-syllabus" />}
+                            </div>
                           </div>
 
                           {expanded && item.syllabus && (
@@ -1598,13 +1839,25 @@ export default function ComposerPage() {
 
               <div className="flex items-start gap-4">
                 <div className="flex flex-col gap-2">
-                  <Button onClick={handleGenerate} disabled={busy || selectedGroup.job_ids.length === 0}>
-                    <Sparkles className="size-4" />
-                    {tailoring ? "Generating…" : "Generate tailored CV"}
-                  </Button>
+                  <div className="relative w-fit">
+                    <Button onClick={handleGenerate} disabled={busy || selectedGroup.job_ids.length === 0}>
+                      <Sparkles className="size-4" />
+                      {tailoring ? "Generating…" : "Generate tailored CV"}
+                    </Button>
+                    <CreditCostBadge featureKey="cv-tailor" />
+                  </div>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Checkbox
+                      checked={verifyOnTailor}
+                      onCheckedChange={(v) => setVerifyOnTailor(v === true)}
+                      disabled={busy}
+                    />
+                    Verify claims against evidence bank
+                  </label>
                   <p className="text-xs text-muted-foreground max-w-52">
-                    Two real AI steps (draft, then verify), each 1-3+ minutes — plus one automatic retry if the
-                    verifier flags a claim, so a full run can take a few minutes.
+                    {verifyOnTailor
+                      ? "Two real AI steps (draft, then verify), each 1-3+ minutes — plus one automatic retry if the verifier flags a claim, so a full run can take a few minutes."
+                      : "One AI step (draft only) — faster, but claims aren't fact-checked against your evidence bank. Run Re-verify on the draft any time, or turn this on."}
                   </p>
                 </div>
                 {steps.length > 0 && busy && (
@@ -1632,8 +1885,16 @@ export default function ComposerPage() {
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <div className="space-y-4 min-w-0">
                     <div className="flex items-center gap-2">
-                      <Badge variant={selectedDoc.verified ? "default" : "destructive"}>
-                        {selectedDoc.verified ? "verified" : "unverified — export blocked"}
+                      <Badge
+                        variant={
+                          selectedDoc.verified ? "default" : verifications.length === 0 ? "outline" : "destructive"
+                        }
+                      >
+                        {selectedDoc.verified
+                          ? "verified"
+                          : verifications.length === 0
+                            ? "not verified"
+                            : "unverified — export blocked"}
                       </Badge>
                       {!selectedDoc.verified && !busy && (
                         <Button size="sm" variant="secondary" onClick={handleReverify}>
@@ -1643,8 +1904,9 @@ export default function ComposerPage() {
                     </div>
                     {!selectedDoc.verified && !busy && verifications.length === 0 && (
                       <p className="text-xs text-muted-foreground">
-                        This draft has never actually been checked yet (no verification ran) — click Re-verify to
-                        run it now, without regenerating the whole CV from scratch.
+                        This draft has never actually been checked yet (verification was off, or hasn&apos;t run) —
+                        export works either way, but click Re-verify if you want claims fact-checked against your
+                        evidence bank first.
                       </p>
                     )}
 
@@ -1687,9 +1949,12 @@ export default function ComposerPage() {
                         {editDelta && (
                           <SectionCardEditor delta={editDelta} evidenceBank={evidenceBank} onChange={setEditDelta} />
                         )}
-                        <Button size="sm" onClick={handleSaveDelta} disabled={savingDelta}>
-                          {savingDelta ? "Saving…" : "Save changes"}
-                        </Button>
+                        <div className="relative w-fit">
+                          <Button size="sm" onClick={handleSaveDelta} disabled={savingDelta}>
+                            {savingDelta ? "Saving…" : "Save changes"}
+                          </Button>
+                          <CreditCostBadge featureKey="cv-tailor" />
+                        </div>
                       </TabsContent>
                     </Tabs>
 
@@ -1746,8 +2011,8 @@ export default function ComposerPage() {
                       <Button
                         size="sm"
                         onClick={handleExport}
-                        disabled={!previewBlob || !selectedDoc.verified}
-                        title={!selectedDoc.verified ? "Export is blocked until every claim is verified" : ""}
+                        disabled={!previewBlob || !canExportCv}
+                        title={!canExportCv ? "Export is blocked until every claim is verified" : ""}
                       >
                         <Download className="size-4" />
                         Export

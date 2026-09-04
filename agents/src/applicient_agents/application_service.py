@@ -35,6 +35,7 @@ from sqlalchemy.orm import sessionmaker
 from applicient_agents.application_agent import build_application_agent
 from applicient_agents.browser_tools import build_application_tools
 from applicient_api.browser_context_service import load_storage_state, resolve_source_id, save_storage_state
+from applicient_api.credit_ledger import FEATURE_APPLICATION_APPLY, charge_credits
 from applicient_api.document_resolution import resolve_application_documents
 from applicient_api.models.agents import AgentRun, AgentStep, RunEvent
 from applicient_api.models.discovery import Job
@@ -554,6 +555,17 @@ async def _drive_graph(
                             else "awaiting_review"
                         )
                         db.commit()
+                        # Charged HERE, not only at final submission — by
+                        # design most attempts stop right here for human
+                        # review (the agent's real work, form-filled and
+                        # screenshotted, is already done); `charge_credits`'
+                        # own agent_run_id-based idempotency guard makes
+                        # the later terminal-state charge point below a
+                        # safe no-op if this already fired.
+                        charge_credits(
+                            db, user_id=state["user_id"], feature_key=FEATURE_APPLICATION_APPLY,
+                            agent_run_id=attempt.agent_run_id, label="applying to this job",
+                        )
                     reached_terminal_state = True
                     keep_active_state = True
                     # Not a close — the human's handoff/review needs the
@@ -654,6 +666,17 @@ async def _drive_graph(
                     run.status = "completed"
                     run.finished_at = datetime.now(timezone.utc)
                 db.commit()
+                # Idempotent no-op if the interrupt branch above already
+                # charged this same attempt (the common case — most
+                # attempts stop for review before reaching here). Real
+                # charge point for the fully-automatic path that never
+                # paused, or for the awaiting_email outcome (a real,
+                # useful result with no browser submit to pause on).
+                if attempt.status in ("submitted", "awaiting_email"):
+                    charge_credits(
+                        db, user_id=state["user_id"], feature_key=FEATURE_APPLICATION_APPLY,
+                        agent_run_id=attempt.agent_run_id, label="applying to this job",
+                    )
             reached_terminal_state = True
             # Nothing left to do with this run's browser — closes the
             # browser-worker session (a real, previously-leaked

@@ -87,32 +87,69 @@ class RenderResult:
 def _render_category_block(
     title: str, *, delta: TailoringOutput, evidence_by_id: dict[uuid.UUID, EvidenceItem], categories: set[str]
 ) -> str:
-    """One `\\section{...}` block for every delta section whose cited
-    evidence item falls in `categories` — same generic
-    `\\resumeSubheading` + bullet-list shape for every category
-    (experience, education, achievement, certification, project) — a
-    stated simplification (not the template's own more specific
-    `\\projectSubheading`/`\\certItem` macros), but a real one: every
-    category is now actually driven by the tailoring delta rather than
-    only Experience being dynamic and the rest silently discarded.
-    EvidenceItem has no location field, so that slot is always blank.
-    Returns "" (no heading at all) when nothing in the delta matches —
-    an empty `\\section{}` with nothing under it looks broken, not
-    just sparse."""
+    """One `\\section{...}` block, one `\\resumeSubheading` per real
+    role/degree/project — same generic `\\resumeSubheading` +
+    bullet-list shape for every category (experience, education,
+    achievement, certification, project) — a stated simplification
+    (not the template's own more specific `\\projectSubheading`/
+    `\\certItem` macros), but a real one: every category is now
+    actually driven by the tailoring delta rather than only Experience
+    being dynamic and the rest silently discarded. EvidenceItem has no
+    location field, so that slot is always blank. Returns "" (no
+    heading at all) when nothing in the delta matches — an empty
+    `\\section{}` with nothing under it looks broken, not just sparse.
 
-    entries = []
+    Grouped by (title, employer) — a real rendering fix, not a
+    parsing-time one (Adrian, direct: "not because what the model
+    parses, more so the cv rendering/template usage"). `delta.sections`
+    is one `TailoredSection` per cited evidence_id, so if the evidence
+    bank holds several separate items for the very same role (a stale
+    evidence bank from before cv_parsing.py's own merge pass existed,
+    or several items a user added by hand), each one still became its
+    own `\\resumeSubheading` here — a duplicated-looking CV regardless
+    of how clean the underlying data is. Same key EvidenceItem.title's
+    own docstring already uses to distinguish a real promotion (two
+    different titles at one employer, correctly kept as two blocks)
+    from the same role split into pieces (matched title AND employer,
+    now merged into one block with every section's bullets combined)."""
+
+    groups: dict[tuple[str, str], dict] = {}
+    order: list[tuple[str, str]] = []
     for section in delta.sections:
         item = evidence_by_id.get(section.evidence_id)
         if item is None or item.category not in categories:
             continue
-        entry_title = latex_escape(item.title or item.employer or "")
-        employer = latex_escape(item.employer or "")
-        dates = latex_escape(_format_date_range(item.date_start, item.date_end))
-        bullets = "\n".join(f"    \\item\\small{{{latex_escape(b.text)}}}" for b in section.bullets)
+        key = ((item.title or item.employer or "").strip().lower(), (item.employer or "").strip().lower())
+        group = groups.get(key)
+        if group is None:
+            group = {
+                "entry_title": latex_escape(item.title or item.employer or ""),
+                "employer": latex_escape(item.employer or ""),
+                "date_start": item.date_start,
+                "date_end": item.date_end,
+                "bullets": [],
+            }
+            groups[key] = group
+            order.append(key)
+        else:
+            # The widest date range across every merged section — real
+            # `date` objects (EvidenceItem.date_start/date_end), safe
+            # to compare directly.
+            if item.date_start and (group["date_start"] is None or item.date_start < group["date_start"]):
+                group["date_start"] = item.date_start
+            if item.date_end and (group["date_end"] is None or item.date_end > group["date_end"]):
+                group["date_end"] = item.date_end
+        group["bullets"].extend(section.bullets)
+
+    entries = []
+    for key in order:
+        group = groups[key]
+        dates = latex_escape(_format_date_range(group["date_start"], group["date_end"]))
+        bullets = "\n".join(f"    \\item\\small{{{latex_escape(b.text)}}}" for b in group["bullets"])
         entries.append(
             "  \\resumeSubheading\n"
-            f"    {{{entry_title}}}{{{dates}}}\n"
-            f"    {{{employer}}}{{}}\n"
+            f"    {{{group['entry_title']}}}{{{dates}}}\n"
+            f"    {{{group['employer']}}}{{}}\n"
             "  \\resumeBulletList\n"
             f"{bullets}\n"
             "  \\resumeBulletListEnd\n"
@@ -182,16 +219,41 @@ def _render_jakes_resume_adrian(
         raw_email = header["email"]
         contact_line += f" \\quad$|$\\quad \\cvlink{{mailto:{raw_email}}}{{{latex_escape(raw_email)}}}"
 
-    header_block = (
-        "\\begin{center}\n"
-        f"  {{\\LARGE\\bfseries {latex_escape(header.get('full_name') or '')}}} \\\\[4pt]\n"
-        "  \\large\n"
-        f"  \\textbf{{{latex_escape(header.get('headline') or '')}}} \\\\[4pt]\n"
-        "  \\small\n"
-        f"  {contact_line} \\\\[2pt]\n"
-        f"  {links}\n"
-        "\\end{center}\n"
-    )
+    # Each row is only emitted when it actually has content — the bug
+    # this guards against (confirmed live: "LaTeX Error: There's no
+    # line here to end.", intermittent — only on profiles/deltas with
+    # a blank optional field): a bare `\textbf{}`/`\large` with nothing
+    # inside doesn't put LaTeX into horizontal mode the way real text
+    # does, so the `\\[Npt]` line-break right after it has no line to
+    # end. `full_name`/`headline` are both optional (cv_parsing.py's
+    # own `headline: str | None`) and `contact_line`/`links` can
+    # legitimately be empty too (no location/phone/email, or no links)
+    # — any of the four could be the blank one, so all four are guarded
+    # the same way rather than special-casing just the one that broke.
+    name_text = latex_escape(header.get("full_name") or "")
+    headline_raw = header.get("headline") or ""
+    # A defensive backstop, not just a prompt fix (cv_parsing.py's own
+    # `headline` field description) — confirmed live: the parser has
+    # put a full multi-sentence summary paragraph into `headline`
+    # instead of a short role/title, which then rendered as a wall of
+    # bold text right under the candidate's name. A real headline is
+    # always short; anything implausibly long is almost certainly that
+    # same mistake (old parses, or a manual edit that pasted the wrong
+    # thing) — dropped from the header rather than typeset, since its
+    # actual content is never lost (the Summary section below covers
+    # it), just not duplicated in the wrong, cramped spot.
+    _MAX_HEADLINE_CHARS = 100
+    headline_text = latex_escape(headline_raw) if len(headline_raw) <= _MAX_HEADLINE_CHARS else ""
+    header_rows: list[str] = []
+    if name_text:
+        header_rows.append(f"  {{\\LARGE\\bfseries {name_text}}} \\\\[4pt]")
+    if headline_text:
+        header_rows.append(f"  \\large\n  \\textbf{{{headline_text}}} \\\\[4pt]")
+    if contact_line:
+        header_rows.append(f"  \\small\n  {contact_line} \\\\[2pt]")
+    if links:
+        header_rows.append(f"  {links}")
+    header_block = "\\begin{center}\n" + "\n".join(header_rows) + ("\n" if header_rows else "") + "\\end{center}\n"
 
     summary_block = f"\\section{{Summary}}\n{latex_escape(delta.summary)}\n"
 
@@ -257,6 +319,13 @@ def _render_simple_letter(*, delta: CoverLetterOutput, header: dict) -> str:
     greeting = latex_escape(delta.greeting)
     closing = latex_escape(delta.closing).replace("\n", r" \\" + "\n")
 
+    # Same guard as _render_jakes_resume_adrian's header_block above,
+    # same reason: `{\large\bfseries }` with an empty `name` doesn't
+    # enter horizontal mode, so the `\\` right after it would error
+    # "There's no line here to end." — only emit the name line (and
+    # its trailing `\\`) when there's real text in it.
+    name_line = f"{{\\large\\bfseries {name}}}\\\\\n" if name else ""
+
     return (
         # 10pt + `fullpage` (not 11pt + `geometry`/`parskip`) —
         # deliberately reuses only packages the resume template's own
@@ -274,7 +343,7 @@ def _render_simple_letter(*, delta: CoverLetterOutput, header: dict) -> str:
         "\\parskip 1em\n"
         "\\pagestyle{empty}\n"
         "\\begin{document}\n\n"
-        f"{{\\large\\bfseries {name}}}\\\\\n"
+        f"{name_line}"
         f"{contact_line}\n\n"
         "\\vspace{1em}\n\n"
         f"{greeting}\n\n"

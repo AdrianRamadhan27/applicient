@@ -14,9 +14,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from applicient_api.models.discovery import Job
+from applicient_api.models.calendar import CalendarEvent
+from applicient_api.models.discovery import Job, SavedSearch
 from applicient_api.models.documents import Document
+from applicient_api.models.interview import InterviewSession
 from applicient_api.models.pipeline import Application, PipelineStage
+from applicient_api.models.profile import EvidenceItem, Persona, Preference
 
 # Two weeks — enough to see a real trend without the chart getting
 # cramped; not a product-law number, just a reasonable default.
@@ -71,3 +74,71 @@ def get_dashboard_summary(db: Session, *, user_id: uuid.UUID) -> dict:
         "applications_by_stage": applications_by_stage,
         "daily_activity": daily_activity,
     }
+
+
+# New home page's onboarding checklist (raised directly by Adrian) —
+# each step is a real, independently-checkable fact about the user's
+# own data (a row exists or it doesn't), never a separately-tracked
+# "did they click through this wizard" flag — so it's correct from
+# outside this feature too: someone who e.g. added a job manually
+# skips straight to that step showing done, exactly as it should.
+# Ordered to match the actual work sequence (build a profile -> find
+# jobs -> tailor -> apply -> track), same reasoning nav.ts's own
+# ordering comment gives.
+def get_onboarding_progress(db: Session, *, user_id: uuid.UUID) -> dict:
+    def exists(query) -> bool:
+        return db.query(query.exists()).scalar() or False
+
+    steps = [
+        {
+            "key": "persona",
+            "label": "Create a persona",
+            "done": exists(db.query(Persona).filter_by(user_id=user_id)),
+            "href": None,  # handled specially client-side — opens the persona dialog, not a page
+        },
+        {
+            "key": "cv",
+            "label": "Upload your CV",
+            "done": exists(db.query(EvidenceItem).filter_by(user_id=user_id)),
+            "href": "/console?tab=profile",
+        },
+        {
+            "key": "preferences",
+            "label": "Set your preferences",
+            "done": exists(db.query(Preference).filter_by(user_id=user_id)),
+            "href": "/console?tab=preferences",
+        },
+        {
+            "key": "job_search",
+            "label": "Search for jobs",
+            "done": exists(db.query(SavedSearch).filter_by(user_id=user_id))
+            or exists(db.query(Job).filter_by(user_id=user_id)),
+            "href": "/console/radar",
+        },
+        {
+            "key": "compose_cv",
+            "label": "Tailor a CV",
+            "done": exists(db.query(Document).filter_by(user_id=user_id)),
+            "href": "/console/composer",
+        },
+        {
+            "key": "apply",
+            "label": "Apply with the pipeline",
+            "done": exists(db.query(Application).filter_by(user_id=user_id)),
+            "href": "/console/pipeline",
+        },
+        {
+            "key": "interview_practice",
+            "label": "Practice an interview",
+            "done": exists(db.query(InterviewSession).filter_by(user_id=user_id)),
+            "href": "/console/interview-practice",
+        },
+        {
+            "key": "tracking",
+            "label": "Track statuses & events",
+            "done": exists(db.query(CalendarEvent).filter_by(user_id=user_id)),
+            "href": "/console/calendar",
+        },
+    ]
+    completed = sum(1 for s in steps if s["done"])
+    return {"steps": steps, "completed": completed, "total": len(steps)}

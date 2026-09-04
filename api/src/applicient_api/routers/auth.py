@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from applicient_api import email_service, google_auth_service, pipeline_stage_service, schemas
+from applicient_api import credit_ledger, email_service, google_auth_service, pipeline_stage_service, schemas
 from applicient_api.auth import AuthError, create_access_token, decode_access_token, hash_password, verify_password
 from applicient_api.billing_service import default_plan
 from applicient_api.deps import current_user_id, get_db
@@ -67,6 +67,13 @@ def _provision_new_user(db: Session, user: User) -> None:
     plan = default_plan(db)
     if plan is not None:
         db.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
+        # One-time starting grant — for the Free plan this is the ONLY
+        # grant this user's account will ever get (see
+        # credit_ledger.grant_monthly_credits' own docstring for why
+        # that's true without a special case there: nothing else ever
+        # calls it again for an account with no real Dodo subscription
+        # behind it).
+        credit_ledger.grant_monthly_credits(db, user_id=user.id, plan=plan)
 
 
 @router.post("/signup", response_model=schemas.TokenOut, status_code=201)

@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth";
 import { PersonaProvider } from "@/components/persona-provider";
 import { ConversationProvider } from "@/lib/conversation-provider";
 import { AppShell } from "@/components/app-shell";
+import { InsufficientCreditsProvider } from "@/components/insufficient-credits-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -74,6 +75,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <PersonaProvider>
               <ConversationProvider>
                 <AppShell>{children}</AppShell>
+                <InsufficientCreditsProvider />
                 <Toaster />
               </ConversationProvider>
             </PersonaProvider>

@@ -3,16 +3,18 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Target, Settings, LogOut, MailWarning, PanelLeft, ChevronUp, Menu, X } from "lucide-react";
+import { Target, Settings, LogOut, MailWarning, PanelLeft, ChevronUp, Coins, Menu, X } from "lucide-react";
 import { TierIcon, tierColor } from "@/lib/plan-tiers";
 import { toast } from "sonner";
 import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, CREDITS_CHANGED_EVENT } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { usePersona } from "@/components/persona-provider";
 import { FloatingAssistant } from "@/components/floating-assistant";
+import { FloatingOnboarding } from "@/components/floating-onboarding";
+import { CreditChip } from "@/components/credit-chip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -184,7 +186,7 @@ const SIDEBAR_COLLAPSED_KEY = "applicient.sidebar-collapsed";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading: authLoading, logout } = useAuth();
+  const { user, loading: authLoading, connectionError, retryAuth, logout } = useAuth();
   const { personas, loading, selectedPersonaId, setSelectedPersonaId } = usePersona();
   const [manageOpen, setManageOpen] = React.useState(false);
   // The desktop rail (below) always participates in layout, sized by
@@ -200,6 +202,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [resendingVerification, setResendingVerification] = React.useState(false);
   const [planName, setPlanName] = React.useState<string | null>(null);
+  const [creditsTotal, setCreditsTotal] = React.useState<number | null>(null);
   // Lazily read localStorage in the initializer (not a plain
   // useState(false) + effect), same reasoning as pipeline/page.tsx's
   // own panel-width state — avoids a visible expanded->collapsed snap
@@ -275,33 +278,58 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [user, refreshUnreadCount, pathname]);
 
   // Drives the tier decoration next to the user's own name in the
-  // footer — best-effort, same as unreadCount above; a user with no
-  // Subscription row at all (shouldn't happen, same gap
-  // billing_service.enforce_usage_cap already tolerates) just shows no
-  // decoration rather than an error.
+  // footer, plus Phase 16's own credit balance shown right above it —
+  // best-effort, same as unreadCount above; a user with no Subscription
+  // row at all (shouldn't happen) just shows no decoration rather than
+  // an error. Refetched on route change, on api.ts's own
+  // CREDITS_CHANGED_EVENT (Adrian, direct: "why does credit in sidebar
+  // not update realtime" — that event fires right after every
+  // credit-charging generator/request in api.ts finishes, e.g. tailoring
+  // a CV without ever navigating away used to look like "my credits
+  // never went down" since nothing had a reason to refetch yet), and on
+  // a 30s poll as a fallback for anything that changes the balance
+  // without going through this app's own frontend at all (an admin
+  // grant, a period rollover) — same "good-enough freshness, not a
+  // full push mechanism" tradeoff floating-onboarding.tsx's own donut
+  // already makes.
   React.useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    (async () => {
+    const refreshCredits = async () => {
       try {
         const sub = await api.getMySubscription();
-        if (!cancelled) setPlanName(sub.plan_name);
+        if (!cancelled) {
+          setPlanName(sub.plan_name);
+          setCreditsTotal(sub.credits_total);
+        }
       } catch {
         // no decoration — not worth surfacing an error for this
       }
-    })();
+    };
+    void refreshCredits();
+    const interval = window.setInterval(() => void refreshCredits(), 30_000);
+    const onCreditsChanged = () => void refreshCredits();
+    window.addEventListener(CREDITS_CHANGED_EVENT, onCreditsChanged);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener(CREDITS_CHANGED_EVENT, onCreditsChanged);
     };
-  }, [user]);
+  }, [user, pathname]);
 
 
   React.useEffect(() => {
     if (authLoading) return;
-    if (!user && !isNoChromeRoute) router.replace("/login");
+    // connectionError means the mount-time /auth/me check couldn't get
+    // a real answer from the server — not "you're logged out". Sending
+    // someone to /login here was the actual bug: a token wiped (or, as
+    // fixed now, merely a stale `user`) purely because the API hiccuped
+    // for a moment, mid a refresh, was indistinguishable from a real
+    // logout. Stay put and let the retry UI below handle it instead.
+    if (!user && !isNoChromeRoute && !connectionError) router.replace("/login");
     else if (user && isAuthEntryRoute) router.replace(AUTHENTICATED_HOME);
     else if (user && isAdminRoute && user.role !== "admin") router.replace(AUTHENTICATED_HOME);
-  }, [authLoading, user, isNoChromeRoute, isAuthEntryRoute, isAdminRoute, pathname, router]);
+  }, [authLoading, user, connectionError, isNoChromeRoute, isAuthEntryRoute, isAdminRoute, pathname, router]);
 
   // A route change is the clearest signal navigation actually happened
   // — closing here (rather than only from each nav Link's own
@@ -318,6 +346,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // in this app, so this redirect (plus the mirrored one above) is the
   // one real auth gate.
   if (isNoChromeRoute) return <>{children}</>;
+
+  if (!authLoading && !user && connectionError) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground font-mono">
+        <div>Couldn&apos;t reach the server — your session is still saved.</div>
+        <Button size="sm" variant="outline" onClick={retryAuth}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   if (authLoading || !user) {
     return (
@@ -503,7 +542,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className={cn("mt-auto border-t border-border", iconOnly ? "px-0" : "px-2 py-1")}>
+        <div className={cn("mt-auto border-t border-border", iconOnly ? "px-0 py-1" : "px-2 py-1.5")}>
+          {/* Phase 16 — the credit balance, always visible, one click
+              from Billing (raised directly by Adrian). A gold coin
+              rather than anything $-shaped, consistent with credits
+              being the only unit ever shown anywhere in this app —
+              same CreditChip every per-feature cost badge renders
+              through, so the balance and every price tag match. */}
+          {iconOnly ? (
+            <Link
+              href="/console/billing"
+              className="flex items-center justify-center py-1.5 hover:bg-secondary/40"
+              title={creditsTotal !== null ? `${creditsTotal.toLocaleString()} credits` : "Billing"}
+            >
+              <Coins className="size-4 shrink-0 text-amber-400" strokeWidth={2} />
+            </Link>
+          ) : (
+            <Link href="/console/billing" className="flex justify-center hover:opacity-80">
+              <CreditChip>{creditsTotal !== null ? `${creditsTotal.toLocaleString()} credits` : "—"}</CreditChip>
+            </Link>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -641,6 +699,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <ManagePersonasDialog open={manageOpen} onOpenChange={setManageOpen} />
       <FloatingAssistant />
+      <FloatingOnboarding />
     </div>
   );
 }

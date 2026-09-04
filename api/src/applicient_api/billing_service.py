@@ -51,12 +51,11 @@ import uuid
 from datetime import datetime, timezone
 
 from dodopayments import AsyncDodoPayments
-from fastapi import Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from applicient_api.deps import current_user_id, get_db
-from applicient_api.models.billing import Plan, Subscription
+from applicient_api import credit_ledger
+from applicient_api.models.billing import CreditPack, Plan, Subscription
 from applicient_api.models.llm import LlmCall
 from applicient_api.models.profile import User
 
@@ -120,23 +119,35 @@ def _frontend_url() -> str:
     return os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 
-def _price_body(plan: Plan) -> dict:
-    return {
-        "type": "recurring_price",
+def _price_body(item: Plan | CreditPack, *, recurring: bool = True) -> dict:
+    """`item` is duck-typed — only `.price_idr` is read, which both
+    `Plan` and `CreditPack` have (Phase 16's `CreditPack` mirrors
+    `Plan`'s own shape deliberately). `recurring=False` is a Dodo
+    `OneTimePrice` instead (confirmed live via SDK introspection,
+    `dodopayments.types.price_param.OneTimePrice` — same
+    `type`/`currency`/`discount`/`price` fields as `RecurringPrice`,
+    just none of the subscription-period ones)."""
+
+    body = {
+        "type": "recurring_price" if recurring else "one_time_price",
         "currency": "IDR",
         # Dodo's `price` is "smallest denomination" for every currency
         # uniformly (confirmed live) — IDR isn't special-cased as
         # zero-decimal the way some processors treat it, so this needs
         # the same x100 every USD-cents example in Dodo's own docs
         # implies, or a Rp 96,000 plan renders as "IDR 960.00" instead.
-        "price": plan.price_idr * 100,
+        "price": item.price_idr * 100,
         "discount": 0,
-        "payment_frequency_count": _PAYMENT_FREQUENCY_COUNT,
-        "payment_frequency_interval": _PAYMENT_FREQUENCY_INTERVAL,
-        "subscription_period_count": _SUBSCRIPTION_PERIOD_COUNT,
-        "subscription_period_interval": _SUBSCRIPTION_PERIOD_INTERVAL,
-        "trial_period_days": 0,
     }
+    if recurring:
+        body.update(
+            payment_frequency_count=_PAYMENT_FREQUENCY_COUNT,
+            payment_frequency_interval=_PAYMENT_FREQUENCY_INTERVAL,
+            subscription_period_count=_SUBSCRIPTION_PERIOD_COUNT,
+            subscription_period_interval=_SUBSCRIPTION_PERIOD_INTERVAL,
+            trial_period_days=0,
+        )
+    return body
 
 
 def default_plan(db: Session) -> Plan | None:
@@ -211,6 +222,101 @@ async def sync_product_for_plan(db: Session, plan: Plan) -> None:
         raise DodoError(f"could not update the Dodo product for plan {plan.name!r}: {exc}") from exc
 
 
+# --- Phase 16 — CreditPack's one-time-purchase equivalents of the
+# three Plan functions just above. `pack_product_id`/`_set_pack_product_id`
+# are plain aliases (plan_product_id/_set_plan_product_id only ever read
+# or write `.dodo_product_id_test`/`_live`, which CreditPack has too —
+# no real Plan-specific logic to duplicate) kept as separate names
+# purely so call sites read naturally. ---
+
+
+def pack_product_id(pack: CreditPack) -> str | None:
+    return plan_product_id(pack)  # type: ignore[arg-type]  # duck-typed, see module note above
+
+
+def _set_pack_product_id(pack: CreditPack, product_id: str) -> None:
+    _set_plan_product_id(pack, product_id)  # type: ignore[arg-type]
+
+
+async def ensure_product_for_pack(db: Session, pack: CreditPack) -> str | None:
+    """Same find-or-create shape as ensure_product_for_plan, for a
+    CreditPack's one-time product instead of a Plan's recurring one."""
+
+    if pack.price_idr <= 0:
+        return None
+    existing = pack_product_id(pack)
+    if existing:
+        return existing
+
+    client = _client()
+    try:
+        product = await client.products.create(
+            name=pack.name, tax_category=_TAX_CATEGORY, price=_price_body(pack, recurring=False)
+        )
+    except Exception as exc:
+        raise DodoError(f"could not create a Dodo product for credit pack {pack.name!r}: {exc}") from exc
+
+    _set_pack_product_id(pack, product.product_id)
+    db.commit()
+    return pack_product_id(pack)
+
+
+async def sync_product_for_pack(db: Session, pack: CreditPack) -> None:
+    product_id = pack_product_id(pack)
+    if not product_id:
+        return
+    client = _client()
+    try:
+        await client.products.update(product_id, name=pack.name, price=_price_body(pack, recurring=False))
+    except Exception as exc:
+        raise DodoError(f"could not update the Dodo product for credit pack {pack.name!r}: {exc}") from exc
+
+
+async def start_pack_checkout(db: Session, *, user: User, subscription: Subscription, pack: CreditPack) -> str:
+    """One-time purchase — unlike start_checkout (a Plan subscription),
+    this never touches `subscription.pending_plan_id`/
+    `dodo_checkout_session_id` (subscription-lifecycle fields with no
+    meaning for a one-time buy); `subscription` is borrowed here only
+    for its cached Dodo customer id via `_ensure_customer`. Which pack
+    was bought travels in the checkout's own `metadata` instead — read
+    back by the webhook/confirm path (routers/webhooks.py,
+    confirm_credit_pack_purchase below), not stored on any row here."""
+
+    product_id = await ensure_product_for_pack(db, pack)
+    if product_id is None:
+        raise DodoError(f"credit pack {pack.name!r} has no price — nothing to check out")
+    customer_id = await _ensure_customer(db, user=user, subscription=subscription)
+
+    client = _client()
+    try:
+        session = await client.checkout_sessions.create(
+            product_cart=[{"product_id": product_id, "quantity": 1}],
+            customer={"customer_id": customer_id},
+            return_url=f"{_frontend_url()}/console/billing?dodo_return=1",
+            metadata={"user_id": str(user.id), "credit_pack_id": str(pack.id)},
+        )
+    except Exception as exc:
+        raise DodoError(f"could not start Dodo checkout: {exc}") from exc
+    if not session.checkout_url:
+        raise DodoError("Dodo checkout session was created but returned no checkout_url")
+    return session.checkout_url
+
+
+async def retrieve_payment(payment_id: str):
+    """Thin wrapper — the one-time-purchase equivalent of
+    sync_subscription_from_dodo's `subscriptions.retrieve` call, used
+    by both the webhook's `payment.succeeded` branch (as a second real
+    confirmation, not just trusting the webhook payload) and the
+    frontend-triggered manual confirm endpoint for the same "polling is
+    still the authoritative path" reason the module docstring gives."""
+
+    client = _client()
+    try:
+        return await client.payments.retrieve(payment_id)
+    except Exception as exc:
+        raise DodoError(f"could not fetch Dodo payment {payment_id}: {exc}") from exc
+
+
 def subscription_customer_id(subscription: Subscription) -> str | None:
     """Same rule as plan_product_id above, applied to the other half
     of the same bug (raised directly by Adrian) — a Dodo customer is
@@ -279,6 +385,129 @@ async def start_checkout(db: Session, *, user: User, subscription: Subscription,
     return session.checkout_url
 
 
+async def change_subscription_plan(db: Session, *, subscription: Subscription, new_plan: Plan) -> Subscription:
+    """Upgrade or downgrade an ALREADY-PAID subscription to a
+    different paid plan — confirmed directly with Adrian: takes effect
+    at the next billing cycle, never immediately, unlike the
+    free -> paid path above (a brand-new checkout, which activates as
+    soon as payment succeeds — nothing to schedule there, so that path
+    is untouched). Real Dodo call, not a local-only flag:
+    `subscriptions.change_plan(effective_at="next_billing_date")`, the
+    SDK's own documented mechanism for a scheduled change (confirmed
+    live via `inspect.signature`, same discipline as every other Dodo
+    call in this file). `proration_billing_mode="full_immediately"` —
+    the ONLY mode Dodo's real API accepts alongside
+    `effective_at="next_billing_date"` (confirmed live: `do_not_bill`
+    was rejected with a 422 `INVALID_PRORATION_MODE_WITH_NEXT_BILLING_DATE`).
+    Despite the name, nothing is charged right now — it describes how
+    the new plan is billed once the change actually takes effect at
+    the next renewal (the full new-plan price then, not a prorated
+    partial charge), not an immediate charge today.
+
+    Reuses `pending_plan_id`/`pending_plan_name` for a SCHEDULED
+    change the same way it already means "in-flight checkout" — same
+    "the plan this subscription is moving TO" concept either way.
+    `sync_subscription_from_dodo`'s existing `dodo_sub.product_id`
+    match-and-clear logic picks up the real switch once Dodo actually
+    applies it at the next billing date, no separate code path needed.
+
+    Requires an existing real Dodo subscription — raises DodoError if
+    called against a still-Free (never-subscribed) account; the
+    caller (routers/billing.py) is expected to route a Free-plan user
+    through `start_checkout` instead."""
+
+    if not subscription.dodo_subscription_id:
+        raise DodoError("no active Dodo subscription to change — start a checkout instead")
+    product_id = await ensure_product_for_plan(db, new_plan)
+    if product_id is None:
+        raise DodoError(f"plan {new_plan.name!r} has no price — nothing to change to")
+
+    client = _client()
+    try:
+        await client.subscriptions.change_plan(
+            subscription.dodo_subscription_id,
+            product_id=product_id,
+            proration_billing_mode="full_immediately",
+            quantity=1,
+            effective_at="next_billing_date",
+        )
+    except Exception as exc:
+        raise DodoError(f"could not schedule the plan change: {exc}") from exc
+
+    subscription.pending_plan_id = new_plan.id
+    # A change scheduled while a cancellation was also scheduled
+    # supersedes it — Dodo's own `change_plan` call already implies
+    # "keep this subscription running," so the local flag has to agree
+    # rather than the next sync finding a plan mismatch and a
+    # cancel-at-period-end flag that no longer describes the account's
+    # real intent.
+    subscription.cancel_at_period_end = False
+    db.commit()
+    return subscription
+
+
+async def undo_pending_plan_change(db: Session, *, subscription: Subscription) -> Subscription:
+    """Cancels a scheduled (not-yet-effective) plan change made via
+    change_subscription_plan above — `subscriptions.cancel_change_plan`,
+    confirmed live via `inspect.signature` (no body, just the
+    subscription id). A no-op, not an error, if nothing is actually
+    pending — Dodo's own call is safe to make either way, and the
+    local flag just gets cleared."""
+
+    if subscription.dodo_subscription_id and subscription.pending_plan_id is not None:
+        client = _client()
+        try:
+            await client.subscriptions.cancel_change_plan(subscription.dodo_subscription_id)
+        except Exception as exc:
+            raise DodoError(f"could not undo the scheduled plan change: {exc}") from exc
+    subscription.pending_plan_id = None
+    db.commit()
+    return subscription
+
+
+async def cancel_subscription(db: Session, *, subscription: Subscription) -> Subscription:
+    """Schedules cancellation at the end of the current billing period
+    — confirmed directly with Adrian: cancel always takes effect at
+    the next cycle, never immediately (the user keeps what they
+    already paid for until it actually ends). Real Dodo call:
+    `subscriptions.update(cancel_at_next_billing_date=True)` (confirmed
+    live via `inspect.signature`); Dodo itself will move the
+    subscription to `status="cancelled"` at that date, which
+    sync_subscription_from_dodo's existing status handling then
+    reverts `plan_id` back to the Free tier for — see that function's
+    own comment. Also clears any scheduled plan change — cancelling
+    supersedes an upgrade/downgrade that hasn't taken effect yet."""
+
+    if not subscription.dodo_subscription_id:
+        raise DodoError("no active Dodo subscription to cancel")
+    client = _client()
+    try:
+        await client.subscriptions.update(subscription.dodo_subscription_id, cancel_at_next_billing_date=True)
+    except Exception as exc:
+        raise DodoError(f"could not schedule cancellation: {exc}") from exc
+
+    subscription.cancel_at_period_end = True
+    subscription.pending_plan_id = None
+    db.commit()
+    return subscription
+
+
+async def undo_cancel_subscription(db: Session, *, subscription: Subscription) -> Subscription:
+    """Undoes a scheduled cancellation — `subscriptions.update(
+    cancel_at_next_billing_date=False)`. A no-op, not an error, if
+    nothing was actually scheduled."""
+
+    if subscription.dodo_subscription_id and subscription.cancel_at_period_end:
+        client = _client()
+        try:
+            await client.subscriptions.update(subscription.dodo_subscription_id, cancel_at_next_billing_date=False)
+        except Exception as exc:
+            raise DodoError(f"could not undo the scheduled cancellation: {exc}") from exc
+    subscription.cancel_at_period_end = False
+    db.commit()
+    return subscription
+
+
 async def sync_subscription_from_dodo(
     db: Session, subscription: Subscription, *, dodo_subscription_id: str | None = None
 ) -> Subscription:
@@ -302,11 +531,24 @@ async def sync_subscription_from_dodo(
     except Exception as exc:
         raise DodoError(f"could not fetch Dodo subscription {target_id}: {exc}") from exc
 
+    # Captured before either gets overwritten below — Phase 16's credit
+    # grant needs to tell "first activation onto this plan" and "same
+    # plan, real period rollover" apart from "just re-synced, nothing
+    # actually changed" (a plain re-sync must never re-grant).
+    previous_plan_id = subscription.plan_id
+    previous_period_start = subscription.current_period_start
+
     subscription.dodo_subscription_id = dodo_sub.subscription_id
     _set_subscription_customer_id(subscription, dodo_sub.customer.customer_id)
     subscription.status = dodo_sub.status
     subscription.current_period_start = dodo_sub.previous_billing_date
     subscription.current_period_end = dodo_sub.next_billing_date
+    # Mirrored straight from Dodo's own response field, never trusted
+    # from our own optimistic write alone (cancel_subscription/
+    # undo_cancel_subscription above set it too, but this is the real
+    # sync path that keeps it honest against whatever Dodo's dashboard
+    # or a webhook-driven change actually did).
+    subscription.cancel_at_period_end = dodo_sub.cancel_at_next_billing_date
 
     if dodo_sub.status == "active":
         # Leftover from the dodo_product_id_test/_live split — this
@@ -321,6 +563,36 @@ async def sync_subscription_from_dodo(
         if plan is not None:
             subscription.plan_id = plan.id
             subscription.pending_plan_id = None
+            # Phase 16 — grant credits exactly on a real activation or
+            # rollover event, never on a plain re-sync that changed
+            # nothing: either this subscription just moved onto a
+            # DIFFERENT plan (a brand-new subscription, or an upgrade/
+            # downgrade actually taking effect), or it's the SAME plan
+            # but the billing period genuinely advanced (a real
+            # rollover, not just calling sync again mid-period).
+            plan_changed = plan.id != previous_plan_id
+            period_advanced = (
+                subscription.current_period_start is not None
+                and subscription.current_period_start != previous_period_start
+            )
+            if plan_changed or period_advanced:
+                credit_ledger.grant_monthly_credits(db, user_id=subscription.user_id, plan=plan)
+    elif dodo_sub.status in ("cancelled", "expired"):
+        # A scheduled cancel_subscription (above) reaching its actual
+        # end date, or a subscription that lapsed some other way (a
+        # failed renewal Dodo gave up retrying) — either way, this
+        # account genuinely has no active paid subscription any more
+        # and belongs back on the Free tier, not left pointing at a
+        # plan_id it's no longer really paying for. Never re-grants
+        # credits here — falling back to Free is a downgrade, not an
+        # activation; the Free plan's own one-time grant already
+        # happened at signup (credit_ledger.grant_monthly_credits'
+        # own docstring).
+        free_plan = default_plan(db)
+        if free_plan is not None and subscription.plan_id != free_plan.id:
+            subscription.plan_id = free_plan.id
+        subscription.pending_plan_id = None
+        subscription.cancel_at_period_end = False
 
     db.commit()
     return subscription
@@ -372,24 +644,10 @@ def current_period_spend_usd(db: Session, *, user_id: uuid.UUID, subscription: S
     return float(spend or 0)
 
 
-def enforce_usage_cap(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)) -> None:
-    """FastAPI dependency, same `dependencies=[Depends(...)]` route-option
-    shape as rate_limit.py — gates the same expensive/LLM-triggering
-    routes, checked alongside (not instead of) the per-user rate limit.
-    A user with no Subscription row at all (shouldn't happen given
-    signup/seed.py both provision one, but not asserted here) is let
-    through rather than blocked by a data gap that isn't their fault."""
-
-    subscription = db.query(Subscription).filter_by(user_id=user_id).one_or_none()
-    if subscription is None:
-        return
-    plan = db.get(Plan, subscription.plan_id)
-    if plan is None:
-        return
-    spend = current_period_spend_usd(db, user_id=user_id, subscription=subscription)
-    if spend >= float(plan.monthly_usage_cap_usd):
-        raise HTTPException(
-            402,
-            f"usage cap reached for the {plan.name} plan (${float(plan.monthly_usage_cap_usd):.2f}/mo) "
-            "— upgrade to continue this month",
-        )
+# `enforce_usage_cap` (the real `$`-cap dependency this replaced) is
+# gone entirely, model column included (models/billing.py) — Adrian,
+# direct: it had zero call sites left since Phase 16's credit_ledger.py
+# (`require_credits`/`charge_credits`) took over every gate this used
+# to sit on; it was pure vestige, still showing up as "internal cap $X"
+# in the admin Plans page with nothing behind it. `current_period_spend_usd`
+# above stays — real admin-facing cost visibility, not a cap.

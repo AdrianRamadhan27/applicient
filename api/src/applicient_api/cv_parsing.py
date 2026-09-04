@@ -81,7 +81,16 @@ class ExtractedProfile(BaseModel):
     """
 
     full_name: str | None = Field(default=None, description="Candidate's name exactly as stated in the CV.")
-    headline: str | None = Field(default=None, description="Professional headline or current role, if stated.")
+    headline: str | None = Field(
+        default=None,
+        description=(
+            "A SHORT professional headline or current role/title ONLY — e.g. 'Senior Data "
+            "Scientist' or 'Machine Learning Engineer at Bank Mega'. A few words, at most one "
+            "short phrase. NEVER a multi-sentence description of skills/experience — that's what "
+            "`summary` below is for; confirmed live as a real bug otherwise (a full paragraph "
+            "landed here and rendered as a wall of text right under the candidate's name)."
+        ),
+    )
     email: str | None = Field(default=None, description="Email address exactly as stated, if present.")
     phone: str | None = Field(default=None, description="Phone number exactly as stated, if present.")
     location: str | None = Field(default=None, description="Candidate location exactly as stated, if present.")
@@ -104,9 +113,8 @@ phone prefix or an email domain.
 
 Every item gets a category: experience, education, certification, project, achievement, skill, or other.
 
-How granular to be — this is the part that most often goes wrong, so read it carefully:
-- One item per DISTINCT, SUBSTANTIVE accomplishment — not one item per bullet point or per sentence in the source. If the source has three bullets under one role that are really describing the same underlying piece of work from slightly different angles (e.g. "built X", "X served 2000 users/day", "X was containerized for deployment"), that is most often ONE accomplishment with several details — merge it into ONE item, and put every detail from all those bullets into that single item's text and metrics. Only split into separate items when the source genuinely describes separate, independent pieces of work.
-- Before finalizing, check your own output: if two items share the same employer/project and their `text` fields would look repetitive or like restatements of each other to a human reader, merge them. Near-duplicate items are a failure, not thoroughness.
+How granular to be:
+- One item per DISTINCT, SUBSTANTIVE accomplishment — not one item per bullet point or per sentence in the source.
 - experience: one item per substantive accomplishment within a role (typically 1-4 per role, not one per bullet).
 - education: one item per degree/program — combine institution, degree, field, and dates into that single item. Do not create a separate item per course or transcript line.
 - certification: one item per certificate/credential.
@@ -122,7 +130,47 @@ Other rules:
 
 
 def parse_cv_text(model: BaseChatModel, cv_text: str) -> ExtractedCV:
-    structured_model = model.with_structured_output(ExtractedCV)
+    # No dedup/merge pass over `result.evidence_items` here on purpose
+    # — an earlier version of this function DID collapse same-role
+    # items by concatenating their `text` fields into one, which
+    # fixed the "5 duplicated CV entries for one role" symptom but
+    # broke something worse: EvidenceItem.text is documented as ONE
+    # standalone sentence, so smashing 5 sentences into one field
+    # produced a single run-on paragraph with no bullet structure at
+    # all — confirmed live (Adrian: "the issue is in the parser not
+    # just the renderer") once the tailoring engine echoed that merged
+    # blob back as one oversized bullet instead of several. The real,
+    # correct fix lives at the RENDER layer instead — see
+    # latex_rendering.py's `_render_category_block`, which groups
+    # `TailoredSection`s by (title, employer) at render time and keeps
+    # every section's own bullets as separate `\item`s under one
+    # shared heading. Leaving each bullet as its OWN EvidenceItem here
+    # is what makes that possible — it's also strictly better for
+    # everything downstream that treats an EvidenceItem as one atomic,
+    # independently citable claim (scoring, verification, tailoring
+    # selection), which a pre-merged paragraph is not.
+    #
+    # method="function_calling" rather than the default (which
+    # auto-selects strict json_schema mode for models that advertise
+    # support) — the real fix for CV parsing's own reported latency.
+    # Root-caused live, not guessed: against the actual deployed
+    # "deep"-tier model, the default json_schema path made it reason
+    # heavily before answering (one real call: 3413 of 4193 output
+    # tokens were hidden reasoning, ~37s wall time) even though nothing
+    # about this task benefits from chain-of-thought. Forcing
+    # `reasoning: {enabled: false}` via extra_body also cut latency,
+    # but repeated live runs showed it made THIS model's output
+    # actively less reliable — a stray mid-generation "wait, the source
+    # says…" fragment leaking straight into a structured field more
+    # than once, presumably the model's own reasoning habit spilling
+    # into the answer channel once the dedicated one is switched off.
+    # method="function_calling" alone sidesteps the json_schema path
+    # entirely: same tool-calling shape this codebase's other
+    # structured-output calls already use, consistently ~5s across
+    # repeated runs with reasoning_tokens=0 (confirmed via real
+    # LlmCall rows) and no reasoning-channel default to fight with, so
+    # nothing needed changing in tier_resolution.py at all.
+    structured_model = model.with_structured_output(ExtractedCV, method="function_calling")
     result = structured_model.invoke(
         [
             ("system", _SYSTEM_PROMPT),

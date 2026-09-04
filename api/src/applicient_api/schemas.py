@@ -192,6 +192,29 @@ class ParsedProfile(BaseModel):
     skills: list[str] = Field(default_factory=list)
 
 
+class CvScoreCategoryOut(BaseModel):
+    category: str
+    score: float
+    feedback: str
+
+
+class CvScoreOut(BaseModel):
+    """Mirrors cv_score_engine.CvScoreOutput exactly — Profile.cv_score
+    is that model dumped as-is, so this schema is what round-trips it
+    back out through the API without re-validating field-by-field."""
+
+    overall_score: float
+    summary: str
+    strengths: list[str]
+    improvements: list[str]
+    categories: list[CvScoreCategoryOut]
+
+
+class CvFixResultOut(BaseModel):
+    updated_count: int
+    notes: str
+
+
 class ProfileOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -203,6 +226,8 @@ class ProfileOut(BaseModel):
     parsed_at: datetime | None
     visa_status: str | None
     notice_period_days: int | None
+    cv_score: CvScoreOut | None = None
+    cv_scored_at: datetime | None = None
 
 
 class ProfileUpdate(BaseModel):
@@ -906,6 +931,19 @@ class DashboardSummaryOut(BaseModel):
     daily_activity: list[DashboardDailyActivity]
 
 
+class OnboardingStepOut(BaseModel):
+    key: str
+    label: str
+    done: bool
+    href: str | None
+
+
+class OnboardingProgressOut(BaseModel):
+    steps: list[OnboardingStepOut]
+    completed: int
+    total: int
+
+
 class SkillGapItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -1057,6 +1095,12 @@ class InterviewSessionOut(BaseModel):
     feedback: dict | None
     created_at: datetime
     ended_at: datetime | None
+    # Adrian, direct: "the item/cards should have a preview of the
+    # last message spoken by the ai from the transcript" — computed by
+    # the LIST route only (routers/interview_sessions.py), never a
+    # real ORM attribute, so this stays None from GET /{id} (the full
+    # transcript is what that page shows instead).
+    last_message_preview: str | None = None
 
 
 class InterviewSessionCreate(BaseModel):
@@ -1136,12 +1180,17 @@ class MarkAppliedIn(BaseModel):
 
 
 class PlanOut(BaseModel):
+    """Public shape — credits are the only usage figure a user is ever
+    shown, never a `$` equivalent. No `monthly_usage_cap_usd` field
+    exists anywhere any more, `AdminPlanOut` included — see that
+    schema's own comment for why it was removed entirely."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     name: str
     price_idr: int
-    monthly_usage_cap_usd: float
+    monthly_credits: int
     is_active: bool
 
 
@@ -1150,7 +1199,17 @@ class AdminPlanOut(PlanOut):
     test/live (see models/billing.py) since they're never the same
     object and shouldn't be shown to (or editable by) anyone but an
     admin managing the actual Dodo setup. The public /billing/plans
-    listing stays on plain PlanOut."""
+    listing stays on plain PlanOut.
+
+    No `$` usage cap here any more — `monthly_usage_cap_usd` was
+    removed entirely (Adrian, direct: it was genuinely vestigial, not
+    just hidden from users — `enforce_usage_cap`, the only thing that
+    ever read it, has had zero call sites since Phase 16 replaced it
+    with `require_credits`/`charge_credits`; it just kept showing up
+    in the admin Plans page as "internal cap $X" with nothing behind
+    it). Real per-user cost visibility for admins is still
+    `current_period_spend_usd` (AdminUserOut) — that's a live rollup
+    of actual `LlmCall` spend, not a static cap column, and stays."""
 
     dodo_product_id_test: str | None = None
     dodo_product_id_live: str | None = None
@@ -1159,7 +1218,7 @@ class AdminPlanOut(PlanOut):
 class PlanCreate(BaseModel):
     name: str
     price_idr: int = Field(ge=0)
-    monthly_usage_cap_usd: float = Field(gt=0)
+    monthly_credits: int = Field(ge=0)
     is_active: bool = True
     dodo_product_id_test: str | None = None
     dodo_product_id_live: str | None = None
@@ -1168,22 +1227,39 @@ class PlanCreate(BaseModel):
 class PlanUpdate(BaseModel):
     name: str | None = None
     price_idr: int | None = Field(default=None, ge=0)
-    monthly_usage_cap_usd: float | None = Field(default=None, gt=0)
+    monthly_credits: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
     dodo_product_id_test: str | None = None
     dodo_product_id_live: str | None = None
 
 
 class SubscriptionOut(BaseModel):
+    """Phase 16 — no `$` field anywhere on this (the old
+    `monthly_usage_cap_usd`/`current_period_spend_usd` pair is gone from
+    the public shape; `AdminUserOut`/`AdminPlanOut` are the only places
+    that still carry real `$`). `credits_monthly`/`credits_purchased`
+    split mirrors `credit_ledger.get_balance`'s own two buckets — shown
+    separately since the Billing page explains the "purchased credits
+    never expire" distinction, not just a single opaque total."""
+
     plan_id: uuid.UUID
     plan_name: str
     price_idr: int
-    monthly_usage_cap_usd: float
+    monthly_credits: int
+    credits_monthly: int
+    credits_purchased: int
+    credits_total: int
     status: str
-    current_period_spend_usd: float
     current_period_end: datetime | None
     pending_plan_id: uuid.UUID | None
     pending_plan_name: str | None
+    # Upgrade/downgrade/cancel (Adrian, direct) — pending_plan_id/name
+    # above doubles as "a plan CHANGE is scheduled for next billing
+    # cycle" (billing_service.change_subscription_plan); this is
+    # specifically "cancellation down to Free is scheduled" — the two
+    # are mutually exclusive by construction (each service function
+    # clears the other).
+    cancel_at_period_end: bool
 
 
 class CheckoutOut(BaseModel):
@@ -1194,6 +1270,72 @@ class CheckoutIn(BaseModel):
     plan_id: uuid.UUID
 
 
+class FeatureCreditCostOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    key: str
+    display_name: str
+    credit_cost: int
+    is_active: bool
+
+
+class FeatureCreditCostUpdate(BaseModel):
+    display_name: str | None = None
+    credit_cost: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+
+
+class CreditPackOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    price_idr: int
+    credits: int
+    is_active: bool
+
+
+class AdminCreditPackOut(CreditPackOut):
+    dodo_product_id_test: str | None = None
+    dodo_product_id_live: str | None = None
+
+
+class CreditPackCreate(BaseModel):
+    name: str
+    price_idr: int = Field(gt=0)
+    credits: int = Field(gt=0)
+    is_active: bool = True
+    dodo_product_id_test: str | None = None
+    dodo_product_id_live: str | None = None
+
+
+class CreditPackUpdate(BaseModel):
+    name: str | None = None
+    price_idr: int | None = Field(default=None, gt=0)
+    credits: int | None = Field(default=None, gt=0)
+    is_active: bool | None = None
+    dodo_product_id_test: str | None = None
+    dodo_product_id_live: str | None = None
+
+
+class CreditTransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    type: str
+    bucket: str
+    amount: int
+    balance_after: int
+    description: str
+    created_at: datetime
+
+
+class CreditAdjustIn(BaseModel):
+    amount: int
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class AdminUserOut(BaseModel):
     id: uuid.UUID
     email: str
@@ -1202,4 +1344,5 @@ class AdminUserOut(BaseModel):
     created_at: datetime
     plan_name: str | None
     subscription_status: str | None
-    current_period_spend_usd: float
+    current_period_spend_usd: float  # admin/internal-only real $ cost — never shown to the user themselves
+    credits_total: int  # Phase 16 — the actual balance a grant/deduct decision needs to see

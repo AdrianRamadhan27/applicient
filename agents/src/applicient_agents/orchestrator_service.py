@@ -49,9 +49,75 @@ from sqlalchemy.orm import sessionmaker
 from applicient_agents.orchestrator_agent import build_orchestrator_agent
 from applicient_agents.orchestrator_tools import build_orchestrator_tools
 
+from applicient_api.credit_ledger import (
+    FEATURE_APPLICATION_APPLY,
+    FEATURE_COVER_LETTER,
+    FEATURE_CV_TAILOR,
+    FEATURE_RADAR_RUN,
+    get_balance,
+    get_feature_cost_row,
+    has_used_feature_before,
+)
 from applicient_api.db import get_database_url
 from applicient_api.models.agents import AgentRun, OrchestratorConversation, RunEvent
 from applicient_api.tier_resolution import TierResolutionError, resolve_tier
+
+# Phase 16 follow-up (Adrian, direct): "for each feature it tries to
+# call that requires credits it should ask confirmation" wasn't
+# actually enforced — the system prompt just asked the model to call
+# ask_user first, which it could (and did) skip. This is the real
+# enforcement: which orchestrator tool names map to which credit-ledger
+# feature, wired into build_orchestrator_agent's `interrupt_on` below
+# so the platform itself pauses before any of them actually runs, not
+# the model's own good behavior. start_interview_practice is
+# deliberately excluded — see ORCHESTRATOR_SYSTEM_PROMPT's own comment
+# on why (the real charge/consent happens later, on the dedicated
+# practice page).
+_CREDIT_GATED_TOOLS: dict[str, tuple[str, str]] = {
+    "run_discovery": (FEATURE_RADAR_RUN, "Running a job search"),
+    "tailor_cv": (FEATURE_CV_TAILOR, "Tailoring a CV"),
+    "generate_cover_letter_tool": (FEATURE_COVER_LETTER, "Generating a cover letter"),
+    "run_application_agent": (FEATURE_APPLICATION_APPLY, "Applying with the agent"),
+}
+
+# A plain string sentinel, not a structured field on the interrupt
+# payload — action_requests only carries {tool, args, description}
+# (langgraph's own ActionRequest shape), so there's no room for a real
+# `insufficient: bool` flag without forking that shape. The frontend
+# (interrupt-panel.tsx) checks for this exact prefix and renders the
+# "go to Billing" treatment instead of Approve/Reject when it's there.
+INSUFFICIENT_CREDITS_SENTINEL = "INSUFFICIENT_CREDITS|"
+
+
+def _build_credit_interrupt_descriptions(session_factory: sessionmaker, *, user_id: uuid.UUID) -> dict[str, str]:
+    with session_factory() as db:
+        balance = get_balance(db, user_id=user_id)["total"]
+        descriptions: dict[str, str] = {}
+        for tool_name, (feature_key, label) in _CREDIT_GATED_TOOLS.items():
+            row = get_feature_cost_row(db, feature_key)
+            if row is None or row.credit_cost <= 0:
+                continue  # free or deactivated — nothing to confirm, tool stays auto-approved
+            # A genuinely first-ever use of this feature is free
+            # (credit_ledger.py's own has_used_feature_before/
+            # charge_credits) regardless of balance — skipping the
+            # confirmation entirely here, not just showing a $0
+            # description, matches how start_interview_practice/CV
+            # parsing are already exempted (ORCHESTRATOR_SYSTEM_PROMPT):
+            # nothing is actually being spent, so there's nothing to
+            # confirm. Without this, a brand-new account with 0
+            # purchased credits would see the "not enough credits"
+            # treatment on their very first Assistant-driven action —
+            # exactly the onboarding-blocking outcome this exists to
+            # prevent.
+            if not has_used_feature_before(db, user_id=user_id, feature_key=feature_key):
+                continue
+            if balance < row.credit_cost:
+                descriptions[tool_name] = f"{INSUFFICIENT_CREDITS_SENTINEL}{label}|{row.credit_cost}|{balance}"
+            else:
+                descriptions[tool_name] = (
+                    f"{label} costs {row.credit_cost} credits. You currently have {balance} credits. Proceed?"
+                )
+        return descriptions
 
 _checkpointer: AsyncPostgresSaver | None = None
 _checkpointer_cm = None
@@ -353,9 +419,11 @@ async def _drive_turn(
         user_id=user_id, persona_id=persona_id, agent_run_id=run_id,
         session_factory=session_factory, emit_progress=emit_progress, emit_card=emit_card,
     )
+    credit_interrupt_descriptions = _build_credit_interrupt_descriptions(session_factory, user_id=user_id)
     agent = build_orchestrator_agent(
         model=model, discovery_model=discovery_model, tailoring_model=tailoring_model,
         tools=tools, checkpointer=_checkpointer,
+        credit_interrupt_descriptions=credit_interrupt_descriptions,
     )
     config = {"configurable": {"thread_id": thread_id}}
 
