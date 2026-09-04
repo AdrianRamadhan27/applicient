@@ -48,23 +48,23 @@ import { ParticleField } from "@/components/particle-field";
 const FEATURES = [
   {
     icon: Search,
-    title: "Discovery across every board",
-    body: "Search Greenhouse, Lever, Ashby, Workable and more from one plain list of target roles — deduplicated across sources automatically.",
+    title: "AI job search across every board",
+    body: "Search Greenhouse, Lever, Ashby, Workable and more from one plain list of target roles — AI-ranked and deduplicated across sources automatically.",
   },
   {
     icon: ShieldCheck,
-    title: "Honest, legible scoring",
-    body: "Every posting ranked dimension by dimension against your real profile, with the exact reasoning and evidence spans shown — never a bare number.",
+    title: "Honest, legible AI scoring",
+    body: "Every posting AI-scored dimension by dimension against your real profile, with the exact reasoning and evidence spans shown — never a bare number.",
   },
   {
     icon: FileCheck2,
-    title: "Zero-fabrication CVs",
-    body: "An adversarial verifier checks every generated claim against your evidence bank before anything is shown to you. Unsupported claims block export.",
+    title: "Zero-fabrication AI CV tailoring",
+    body: "An adversarial AI verifier checks every generated claim against your evidence bank before anything is shown to you. Unsupported claims block export.",
   },
   {
     icon: MousePointerClick,
-    title: "Guided execution",
-    body: "The agent fills the form and stops at the submit button for your review. A captcha or login wall hands the live browser back to you.",
+    title: "Guided AI auto-apply",
+    body: "Applicient's AI agent fills the form and stops at the submit button for your review. A captcha or login wall hands the live browser back to you.",
   },
   {
     icon: KanbanSquare,
@@ -73,7 +73,7 @@ const FEATURES = [
   },
   {
     icon: Mic,
-    title: "Practice interviews out loud",
+    title: "Practice interviews with AI",
     body: "A real spoken back-and-forth with an AI interviewer — or a full group discussion round — scored with structured feedback right after every session.",
   },
 ];
@@ -101,34 +101,50 @@ const FAQ = [
   },
 ];
 
-// Same five stages Features elaborates on below, teased here as a
-// literal diagram rather than a generic hero image — deliberately
-// built from this app's own bordered-box-plus-icon language (same
-// shape as a Features card, an admin table row, a badge) rather than
-// a stock illustration, so the "front door" doesn't look like a
-// different, less-finished product bolted onto everything behind it.
-const FLOW_STEPS = [
-  { icon: Search, label: "Discover" },
-  { icon: ShieldCheck, label: "Score" },
-  { icon: FileCheck2, label: "Tailor" },
-  { icon: MousePointerClick, label: "Apply" },
-  { icon: KanbanSquare, label: "Track" },
-];
-
-function FlowDiagram() {
+// A real product screenshot, framed in this app's own mock-browser
+// chrome (same three-dot bar language ApplyDiagram already draws in
+// pure CSS) so a real PNG reads as "a window onto the actual app"
+// rather than a bare image dropped onto the page. Used for the hero's
+// dashboard shot and, smaller, above each carousel slide's own
+// animated diagram — one component, two sizes, not two copies of the
+// frame markup. Plain `<img>` (not next/image) — this codebase has
+// never used the Next image optimizer (would need `sharp` added to
+// the Docker image for zero benefit here, since every screenshot is
+// already pre-resized to its real display width before being checked
+// in, see web/public/screenshots/ — nothing left for a runtime
+// optimizer to do).
+function ScreenshotFrame({
+  src,
+  alt,
+  width,
+  height,
+  priority = false,
+  className,
+}: {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  priority?: boolean;
+  className?: string;
+}) {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2">
-      {FLOW_STEPS.map((step, i) => (
-        <React.Fragment key={step.label}>
-          <div className="flex w-24 flex-col items-center gap-2 border border-border bg-card px-3 py-3">
-            <step.icon className="size-5 text-primary" strokeWidth={1.5} />
-            <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{step.label}</span>
-          </div>
-          {i < FLOW_STEPS.length - 1 && (
-            <ArrowRight className="size-4 shrink-0 text-muted-foreground max-sm:rotate-90" strokeWidth={1.5} />
-          )}
-        </React.Fragment>
-      ))}
+    <div className={cn("overflow-hidden border border-border bg-card", className)}>
+      <div className="flex items-center gap-1 border-b border-border px-2.5 py-2">
+        <span className="size-1.5 shrink-0 bg-border" />
+        <span className="size-1.5 shrink-0 bg-border" />
+        <span className="size-1.5 shrink-0 bg-border" />
+      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        width={width}
+        height={height}
+        loading={priority ? "eager" : "lazy"}
+        fetchPriority={priority ? "high" : "auto"}
+        className="block h-auto w-full"
+      />
     </div>
   );
 }
@@ -287,16 +303,23 @@ function InterviewPracticeDiagram() {
 // stacking four of these tall panels vertically.
 const HIGHLIGHTS = [
   {
-    eyebrow: "Job search",
-    title: "Every board, one honest score",
-    body: "Search Greenhouse, Lever, Ashby, Workable and more from one plain list of target roles — deduplicated across sources automatically. Every posting found gets ranked dimension by dimension against your real profile, with the exact reasoning shown, never a bare number.",
+    eyebrow: "AI job search",
+    title: "Every board, one honest AI score",
+    body: "Search Greenhouse, Lever, Ashby, Workable and more from one plain list of target roles — deduplicated across sources automatically. Every posting found gets AI-ranked dimension by dimension against your real profile, with the exact reasoning shown, never a bare number.",
+    // The Job Search page mid-run alongside the Assistant chat that
+    // kicked it off — one real screenshot standing in for two of the
+    // pages this whole highlight strip previously had no shot of.
+    screenshot: { src: "/screenshots/job-search.png", width: 1400, height: 694 },
     diagram: <DiscoveryDiagram />,
     badges: null as React.ReactNode,
   },
   {
     eyebrow: "The hard guarantee",
     title: "Zero fabricated claims — enforced technically, not just promised",
-    body: "Every tailored bullet point is generated with a link back to a real, atomic piece of your evidence bank. A separate, adversarial verifier agent then checks each claim — and it never sees the job description, so it can't rationalize inflating something to fit what a role wants. Anything unsupported or inflated blocks export until it's fixed.",
+    body: "Every AI-tailored bullet point is generated with a link back to a real, atomic piece of your evidence bank. A separate, adversarial AI verifier agent then checks each claim — and it never sees the job description, so it can't rationalize inflating something to fit what a role wants. Anything unsupported or inflated blocks export until it's fixed.",
+    // CV Composer's real "What changed" diff view — the literal
+    // struck-through/inserted text the verifier's pass produces.
+    screenshot: { src: "/screenshots/cv-compose.png", width: 1400, height: 645 },
     diagram: <VerifierDiagram />,
     badges: (
       <>
@@ -308,9 +331,10 @@ const HIGHLIGHTS = [
     ) as React.ReactNode,
   },
   {
-    eyebrow: "Apply",
-    title: "The agent applies. You approve the submit.",
-    body: "The agent opens the real application form and fills every field — resume, cover letter, screening questions — then stops right before the submit button for your review. A captcha or login wall hands the live browser back to you directly, mid-run.",
+    eyebrow: "AI auto-apply",
+    title: "The AI agent applies. You approve the submit.",
+    body: "Applicient's AI agent opens the real application form and fills every field — resume, cover letter, screening questions — then stops right before the submit button for your review. A captcha or login wall hands the live browser back to you directly, mid-run.",
+    screenshot: { src: "/screenshots/pipeline.png", width: 1400, height: 695 },
     diagram: <ApplyDiagram />,
     badges: null as React.ReactNode,
   },
@@ -318,13 +342,15 @@ const HIGHLIGHTS = [
     eyebrow: "Email analyze",
     title: "Your pipeline updates itself",
     body: "Interview invites, rejections and assessment requests are detected straight from your inbox and reflected on the pipeline board automatically — no manual status updates after you hit apply.",
+    screenshot: { src: "/screenshots/track-status.png", width: 1400, height: 745 },
     diagram: <EmailDiagram />,
     badges: null as React.ReactNode,
   },
   {
-    eyebrow: "Interview practice",
-    title: "A real spoken interview, not a script",
+    eyebrow: "AI interview practice",
+    title: "A real spoken AI interview, not a script",
     body: "Practice out loud with an AI interviewer grounded in the actual role and your real experience — or a full group discussion where it plays every other participant. Every session ends with structured, scored feedback.",
+    screenshot: { src: "/screenshots/interview.png", width: 1400, height: 770 },
     diagram: <InterviewPracticeDiagram />,
     badges: null as React.ReactNode,
   },
@@ -398,8 +424,16 @@ function HighlightCarousel() {
                 <p className="mt-3 text-sm text-muted-foreground">{h.body}</p>
                 {h.badges && <div className="mt-4 flex flex-wrap gap-2">{h.badges}</div>}
               </div>
-              <div className="flex aspect-square items-center justify-center border border-dashed border-input bg-secondary/40">
-                {h.diagram}
+              <div className="flex flex-col gap-3">
+                <ScreenshotFrame
+                  src={h.screenshot.src}
+                  alt={`${h.eyebrow} in Applicient`}
+                  width={h.screenshot.width}
+                  height={h.screenshot.height}
+                />
+                <div className="flex aspect-[3/1] items-center justify-center border border-dashed border-input bg-secondary/40">
+                  {h.diagram}
+                </div>
               </div>
             </div>
           </div>
@@ -563,7 +597,7 @@ function ScrollParticleField() {
 
 function Section({ id, className, children }: { id?: string; className?: string; children: React.ReactNode }) {
   return (
-    <section id={id} className={cn("mx-auto w-full max-w-5xl px-5 py-16 sm:py-20", className)}>
+    <section id={id} className={cn("mx-auto w-full max-w-7xl px-5 py-16 sm:py-20", className)}>
       {children}
     </section>
   );
@@ -615,7 +649,7 @@ export default function LandingPage() {
             applicationCategory: "BusinessApplication",
             operatingSystem: "Web",
             description:
-              "Applicient discovers job openings across boards and ATS sites, scores them honestly against your real experience, drafts a tailored CV it can prove is truthful, fills the application, and keeps your pipeline updated from your inbox.",
+              "AI-powered job search, honest scoring, verified CV tailoring, guided auto-apply, and realistic AI interview practice — everything grounded in your real experience, never fabricated. Applicient discovers openings across job boards and ATS sites, drafts a tailored CV it can prove is truthful, fills the application, and keeps your pipeline updated from your inbox.",
             ...(plans.length > 0
               ? {
                   offers: plans.map((p) => ({
@@ -639,7 +673,7 @@ export default function LandingPage() {
       )}
 
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-6 px-5">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-5">
           <Link href="/" className="flex items-center gap-2">
             <Target className="size-4 text-primary" strokeWidth={1.5} />
             <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>
@@ -670,8 +704,13 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* Hero */}
-      <Section className="relative z-0 overflow-hidden pt-20 pb-16 text-center sm:pt-28">
+      {/* Hero — text stacks above the dashboard screenshot on small
+          screens (plain DOM order, no classes needed); at `lg` it
+          becomes a real two-column layout with the screenshot on the
+          left and the text on the right (`lg:order-*` swap), raised
+          directly by Adrian so the app's actual UI is the very first
+          thing a visitor sees instead of a centered wall of text. */}
+      <Section className="relative z-0 overflow-hidden pt-20 pb-16 sm:pt-28">
         <ParticleField />
         {/* Explicit position+z-index on BOTH this wrapper and
             ParticleField, as direct siblings under Section — Section's
@@ -682,32 +721,41 @@ export default function LandingPage() {
             entirely, several ancestors up. Two siblings with their own
             explicit z-index (0 vs 10) stack correctly against each
             other regardless of that ambiguity. */}
-        <div className="relative z-10 flex flex-col items-center gap-6">
-          <Badge variant="secondary" className="font-mono text-[10px] tracking-wide uppercase">
-            Honest scoring · Verified CVs · Human in control
-          </Badge>
-          <p className="text-base font-medium sm:text-lg">
-            Make your job <span className="text-primary">appli</span>cations effi<span className="text-primary">cient</span>.
-          </p>
-          <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Find the right jobs.<br />Apply with proof, not padding.
-          </h1>
-          <p className="max-w-xl text-base text-muted-foreground sm:text-lg">
-            Applicient discovers openings across job boards and ATS sites, scores them honestly against
-            your real experience, drafts a tailored CV it can prove is truthful, fills the application,
-            and keeps your pipeline updated from your inbox.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button asChild size="lg">
-              <Link href={primaryHref}>{primaryLabel}</Link>
-            </Button>
-            <Button asChild variant="outline" size="lg">
-              <a href="#demo">See how it works</a>
-            </Button>
+        <div className="relative z-10 grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-14">
+          <div className="flex flex-col items-center gap-6 text-center lg:order-2 lg:items-start lg:text-left">
+            <Badge variant="secondary" className="font-mono text-[10px] tracking-wide uppercase">
+              Honest scoring · Verified CVs · Human in control
+            </Badge>
+            <p className="text-base font-medium sm:text-lg">
+              Make your job <span className="text-primary">appli</span>cations effi<span className="text-primary">cient</span>.
+            </p>
+            <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+              Find the right jobs with AI.<br />Apply with proof, not padding.
+            </h1>
+            <p className="text-base text-muted-foreground sm:text-lg">
+              Applicient&apos;s AI agent discovers openings across job boards and ATS sites, scores them honestly
+              against your real experience, drafts a tailored CV it can prove is truthful, fills the
+              application, and keeps your pipeline updated from your inbox — plus realistic AI interview
+              practice once you land one.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+              <Button asChild size="lg">
+                <Link href={primaryHref}>{primaryLabel}</Link>
+              </Button>
+              <Button asChild variant="outline" size="lg">
+                <a href="#demo">See how it works</a>
+              </Button>
+            </div>
+            <span className="text-xs text-muted-foreground">No credit card required for the Free plan.</span>
           </div>
-          <span className="text-xs text-muted-foreground">No credit card required for the Free plan.</span>
-          <div className="mt-6 w-full max-w-3xl border border-border bg-card/50 px-4 py-8 sm:px-8">
-            <FlowDiagram />
+          <div className="lg:order-1">
+            <ScreenshotFrame
+              src="/screenshots/dashboard.png"
+              alt="The Applicient dashboard — jobs discovered, applications tracked, and your base CV in one view"
+              width={1400}
+              height={673}
+              priority
+            />
           </div>
         </div>
       </Section>
@@ -726,12 +774,25 @@ export default function LandingPage() {
       <Section id="features">
         <Eyebrow>What it does</Eyebrow>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-          The whole loop, agent-driven
+          The whole loop, driven by AI agents
         </h2>
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
-            <div key={f.title} className="border border-border bg-card p-5">
-              <f.icon className="size-5 text-primary" strokeWidth={1.5} />
+            // Adrian, direct: "the 'what it does' cards to be
+            // interactable like moves when hovered on" — a real
+            // transform (lift + slight scale), not just a color swap,
+            // so it reads as physically responding to the cursor. No
+            // shadow utility (Terminal Ledger's own no-shadow rule) —
+            // the border switching to primary is what sells the
+            // "lifted" state instead.
+            <div
+              key={f.title}
+              className="group border border-border bg-card p-5 transition-[transform,border-color] duration-200 ease-out will-change-transform hover:-translate-y-1 hover:scale-[1.02] hover:border-primary"
+            >
+              <f.icon
+                className="size-5 text-primary transition-transform duration-200 ease-out group-hover:scale-110"
+                strokeWidth={1.5}
+              />
               <h3 className="mt-3 text-sm font-semibold">{f.title}</h3>
               <p className="mt-1.5 text-sm text-muted-foreground">{f.body}</p>
             </div>
@@ -837,7 +898,7 @@ export default function LandingPage() {
       </div>
 
       <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 px-5 py-10 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-10 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Target className="size-4 text-primary" strokeWidth={1.5} />
             <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>

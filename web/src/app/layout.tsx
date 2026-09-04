@@ -22,34 +22,52 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 const SITE_URL = process.env.SITE_URL ?? "https://applicient.my.id";
+// Front-loads the exact keyword clusters Adrian wants findable (AI job
+// search, AI CV tailoring, AI interview practice, auto-apply) within
+// Google's ~155-char SERP snippet window, while staying strictly
+// accurate to what the product does — no overclaiming beyond what the
+// real pipeline (discovery -> score -> tailor -> apply -> track ->
+// interview practice) actually delivers. Shared across meta
+// description/OG/Twitter/JSON-LD (single source of truth) — a longer
+// tail after the keyword-dense opening is fine for those surfaces,
+// which don't truncate as aggressively as a Google snippet does.
 const DESCRIPTION =
-  "Applicient discovers job openings across boards and ATS sites, scores them honestly against your real experience, drafts a tailored CV it can prove is truthful, fills the application, and keeps your pipeline updated from your inbox.";
+  "AI-powered job search, honest scoring, verified CV tailoring, guided auto-apply, and realistic AI interview practice — everything grounded in your real experience, never fabricated. Applicient discovers openings across job boards and ATS sites, drafts a tailored CV it can prove is truthful, fills the application, and keeps your pipeline updated from your inbox.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Applicient — Make your job applications efficient",
+    default: "Applicient — AI Job Search, CV Tailoring & Auto-Apply Agent",
     template: "%s · Applicient",
   },
   description: DESCRIPTION,
   keywords: [
-    "job application agent",
     "AI job search",
+    "AI job apply",
+    "job application agent",
+    "AI CV tailoring",
     "CV tailoring",
+    "AI resume builder",
+    "AI interview practice",
+    "interview AI",
+    "auto apply jobs AI",
     "job board aggregator",
     "ATS application tracker",
     "resume verification",
   ],
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
     type: "website",
     url: "/",
     siteName: "Applicient",
-    title: "Applicient — Make your job applications efficient",
+    title: "Applicient — AI Job Search, CV Tailoring & Auto-Apply Agent",
     description: DESCRIPTION,
   },
   twitter: {
     card: "summary_large_image",
-    title: "Applicient — Make your job applications efficient",
+    title: "Applicient — AI Job Search, CV Tailoring & Auto-Apply Agent",
     description: DESCRIPTION,
   },
   robots: { index: true, follow: true },
