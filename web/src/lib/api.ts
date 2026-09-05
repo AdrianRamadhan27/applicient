@@ -932,6 +932,158 @@ export const INTERVIEW_CATEGORY_LABEL: Record<InterviewCategory, string> = {
   all: "All of the above",
 };
 
+// Adrian, direct: "option to select language that will be spoken
+// during the interview... default language to be based on the
+// location of the job." The value IS the plain, human-readable
+// language name — sent straight to the backend and interpolated
+// directly into the agent's task instructions (interview_service.py's
+// _session_context_block), so there's no separate code<->label map to
+// keep in sync on either side, same "free text, no vocabulary drift"
+// reasoning topic_hint already follows.
+export const INTERVIEW_LANGUAGES = [
+  "English",
+  "Indonesian",
+  "Spanish",
+  "Portuguese",
+  "French",
+  "German",
+  "Italian",
+  "Dutch",
+  "Russian",
+  "Ukrainian",
+  "Polish",
+  "Romanian",
+  "Greek",
+  "Swedish",
+  "Norwegian",
+  "Danish",
+  "Finnish",
+  "Czech",
+  "Hungarian",
+  "Turkish",
+  "Persian (Farsi)",
+  "Hebrew",
+  "Arabic",
+  "Mandarin Chinese",
+  "Japanese",
+  "Korean",
+  "Hindi",
+  "Bengali",
+  "Urdu",
+  "Punjabi",
+  "Tamil",
+  "Telugu",
+  "Marathi",
+  "Gujarati",
+  "Vietnamese",
+  "Thai",
+  "Tagalog (Filipino)",
+  "Malay",
+  "Burmese",
+  "Khmer",
+  "Lao",
+  "Swahili",
+] as const;
+export type InterviewLanguage = (typeof INTERVIEW_LANGUAGES)[number];
+
+// Adrian, direct: "add flags to the list of languages" — display-only,
+// never sent to the backend (the plain name above still is — a flag
+// isn't a language, and several of these languages are official/widely
+// spoken across more than one country regardless). Picked one
+// representative, widely-recognized flag per language purely for the
+// Select's own visual scan-ability.
+export const INTERVIEW_LANGUAGE_FLAG: Record<InterviewLanguage, string> = {
+  English: "🇺🇸",
+  Indonesian: "🇮🇩",
+  Spanish: "🇪🇸",
+  Portuguese: "🇵🇹",
+  French: "🇫🇷",
+  German: "🇩🇪",
+  Italian: "🇮🇹",
+  Dutch: "🇳🇱",
+  Russian: "🇷🇺",
+  Ukrainian: "🇺🇦",
+  Polish: "🇵🇱",
+  Romanian: "🇷🇴",
+  Greek: "🇬🇷",
+  Swedish: "🇸🇪",
+  Norwegian: "🇳🇴",
+  Danish: "🇩🇰",
+  Finnish: "🇫🇮",
+  Czech: "🇨🇿",
+  Hungarian: "🇭🇺",
+  Turkish: "🇹🇷",
+  "Persian (Farsi)": "🇮🇷",
+  Hebrew: "🇮🇱",
+  Arabic: "🇸🇦",
+  "Mandarin Chinese": "🇨🇳",
+  Japanese: "🇯🇵",
+  Korean: "🇰🇷",
+  Hindi: "🇮🇳",
+  Bengali: "🇧🇩",
+  Urdu: "🇵🇰",
+  Punjabi: "🇮🇳",
+  Tamil: "🇮🇳",
+  Telugu: "🇮🇳",
+  Marathi: "🇮🇳",
+  Gujarati: "🇮🇳",
+  Vietnamese: "🇻🇳",
+  Thai: "🇹🇭",
+  "Tagalog (Filipino)": "🇵🇭",
+  Malay: "🇲🇾",
+  Burmese: "🇲🇲",
+  Khmer: "🇰🇭",
+  Lao: "🇱🇦",
+  Swahili: "🇰🇪",
+};
+
+/** Guesses a spoken language from a job's free-text location string —
+ * the DEFAULT only, always overridable via the language Select. Not
+ * exhaustive; anything unrecognized (including "Remote", US/UK/AU/SG
+ * locations, etc.) falls back to English, same as manual-target
+ * sessions with no location at all. */
+export function inferLanguageFromLocation(location: string | null | undefined): InterviewLanguage {
+  const l = (location ?? "").toLowerCase();
+  const hit = (...needles: string[]) => needles.some((n) => l.includes(n));
+  if (hit("indonesia", "jakarta", "bandung", "surabaya", "bali", "medan", "yogyakarta", "semarang")) return "Indonesian";
+  if (hit("mexico", "spain", "argentina", "colombia", "chile", "peru", "madrid", "barcelona", "bogot")) return "Spanish";
+  if (hit("brazil", "portugal", "lisbon", "sao paulo", "são paulo", "rio de janeiro")) return "Portuguese";
+  if (hit("france", "paris")) return "French";
+  if (hit("germany", "berlin", "munich", "frankfurt")) return "German";
+  if (hit("italy", "rome", "milan", "milano")) return "Italian";
+  if (hit("netherlands", "amsterdam", "rotterdam", "the hague")) return "Dutch";
+  if (hit("russia", "moscow", "saint petersburg")) return "Russian";
+  if (hit("ukraine", "kyiv", "kiev")) return "Ukrainian";
+  if (hit("poland", "warsaw", "krakow", "kraków")) return "Polish";
+  if (hit("romania", "bucharest")) return "Romanian";
+  if (hit("greece", "athens")) return "Greek";
+  if (hit("sweden", "stockholm")) return "Swedish";
+  if (hit("norway", "oslo")) return "Norwegian";
+  if (hit("denmark", "copenhagen")) return "Danish";
+  if (hit("finland", "helsinki")) return "Finnish";
+  if (hit("czech", "prague")) return "Czech";
+  if (hit("hungary", "budapest")) return "Hungarian";
+  if (hit("turkey", "istanbul", "ankara")) return "Turkish";
+  if (hit("iran", "tehran")) return "Persian (Farsi)";
+  if (hit("israel", "tel aviv", "jerusalem")) return "Hebrew";
+  if (hit("saudi", "uae", "dubai", "abu dhabi", "riyadh", "egypt", "qatar", "kuwait", "cairo", "jordan", "lebanon")) return "Arabic";
+  if (hit("china", "beijing", "shanghai", "shenzhen", "guangzhou", "taiwan", "taipei")) return "Mandarin Chinese";
+  if (hit("japan", "tokyo", "osaka", "yokohama")) return "Japanese";
+  if (hit("korea", "seoul")) return "Korean";
+  if (hit("bangladesh", "dhaka")) return "Bengali";
+  if (hit("pakistan", "karachi", "lahore", "islamabad")) return "Urdu";
+  if (hit("india", "delhi", "mumbai", "bangalore", "bengaluru", "hyderabad", "pune", "chennai", "kolkata")) return "Hindi";
+  if (hit("vietnam", "hanoi", "ho chi minh")) return "Vietnamese";
+  if (hit("thailand", "bangkok")) return "Thai";
+  if (hit("philippines", "manila", "cebu", "quezon city")) return "Tagalog (Filipino)";
+  if (hit("malaysia", "kuala lumpur")) return "Malay";
+  if (hit("myanmar", "yangon")) return "Burmese";
+  if (hit("cambodia", "phnom penh")) return "Khmer";
+  if (hit(" laos", "vientiane")) return "Lao";
+  if (hit("kenya", "tanzania", "nairobi", "dar es salaam")) return "Swahili";
+  return "English";
+}
+
 export type InterviewFeedback = {
   overall_score: number;
   summary: string;
@@ -950,6 +1102,8 @@ export type InterviewSession = {
   seniority: string | null;
   practice_type: InterviewPracticeType;
   category: InterviewCategory | null;
+  topic_hint: string | null;
+  language: string | null;
   status: "in_progress" | "completed" | "cancelled";
   overall_score: number | null;
   feedback: InterviewFeedback | null;
@@ -1029,6 +1183,12 @@ export type ApplicationAttempt = {
 export type ApplicationDetail = Application & {
   events: ApplicationEvent[];
   attempts: ApplicationAttempt[];
+  // "cv" and/or "cover_letter" — whichever this application actually
+  // resolves to (an explicit primary document, this job_group's
+  // tailored ones, or the persona's own originally-uploaded CV). Lets
+  // the Pipeline panel show a real "View CV" action regardless of
+  // whether there's an apply-by-email draft.
+  available_documents: ("cv" | "cover_letter" | "answer_pack")[];
 };
 
 export type InterruptRequest = { tool: string; args: Record<string, unknown>; description: string };
@@ -1966,7 +2126,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ note }),
     }),
-  exportApplications: (format: "csv" | "json" = "csv") =>
+  /** Blocked server-side (409) while an attempt is actively holding a
+   * live browser-worker session or a pending human decision — cancel
+   * the run first. */
+  deleteApplication: (id: string) => request<void>(`/applications/${id}`, { method: "DELETE" }),
+  // Real .xlsx now (Adrian, direct: "I dont want it to be csv") —
+  // json stays for API/debug parity only, never surfaced as a UI option.
+  exportApplications: (format: "xlsx" | "json" = "xlsx") =>
     fetch(`${API_BASE_URL}/applications/export?format=${format}`, { headers: authHeader() }).then((r) => r.blob()),
 
   /** Starts a real application-agent run. An `interrupt` event pauses
@@ -2365,6 +2531,8 @@ export const api = {
     seniority?: string | null;
     practice_type: InterviewPracticeType;
     category?: InterviewCategory | null;
+    topic_hint?: string | null;
+    language?: string | null;
   }): Promise<{ sessionId: string; events: AsyncGenerator<InterviewTurnEvent> }> {
     const res = await fetch(`${API_BASE_URL}/interview-sessions`, {
       method: "POST",

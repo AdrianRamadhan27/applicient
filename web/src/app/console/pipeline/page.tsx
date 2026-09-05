@@ -8,10 +8,12 @@ import {
   type Application,
   type ApplicationDetail,
   type ApplicationStreamEvent,
+  type InboxJobDetail,
   type InterruptDecision,
   type InterruptRequest,
   type PipelineStage,
 } from "@/lib/api";
+import { RECOMMENDATION_LABEL, recommendationColor } from "@/lib/recommendation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +37,7 @@ import { CreditCostBadge } from "@/components/credit-cost-badge";
 import { AddToPipelineDialog } from "@/components/add-to-pipeline-dialog";
 import { usePersona } from "@/components/persona-provider";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, ChevronUp, Plus, Settings, Square } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, ExternalLink, Plus, Settings, Square, Trash2 } from "lucide-react";
 
 // Detail panel width — draggable, persisted per-browser (first use of
 // localStorage in this file; persona-provider.tsx's selectedPersonaId
@@ -66,10 +68,32 @@ function timestamp(iso: string) {
   });
 }
 
+// Same shape as inbox/page.tsx's own salaryLabel — small enough that
+// duplicating it here beats exporting/importing across pages for one
+// three-line helper (same call this codebase already makes for
+// `_frontend_url()` on the backend).
+function salaryLabel(job: Pick<InboxJobDetail, "salary_min" | "salary_max" | "salary_currency">) {
+  if (job.salary_min === null && job.salary_max === null) return "not stated";
+  const currency = job.salary_currency ?? "";
+  if (job.salary_min !== null && job.salary_max !== null && job.salary_min !== job.salary_max) {
+    return `${currency} ${job.salary_min.toLocaleString()}–${job.salary_max.toLocaleString()}`;
+  }
+  const one = job.salary_min ?? job.salary_max;
+  return `${currency} ${one!.toLocaleString()}`;
+}
+
 export default function PipelinePage() {
   const router = useRouter();
   const { selectedPersonaId } = usePersona();
   const [addToPipelineOpen, setAddToPipelineOpen] = React.useState(false);
+  // Adrian, direct: "not just add to pipeline via the button at the
+  // top but if i hover on a stage there would be like a button to add
+  // job to the pipeline to that stage" — null means the top-of-header
+  // button was used (lands on the user's first stage, the existing
+  // default); a real stage key means a column's own hover "+" was
+  // clicked, and onAdded below follows the creation with one PATCH to
+  // move it straight there.
+  const [addToPipelineTargetStage, setAddToPipelineTargetStage] = React.useState<string | null>(null);
   const [applications, setApplications] = React.useState<Application[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -181,11 +205,11 @@ export default function PipelinePage() {
   }
 
   async function handleExport() {
-    const blob = await api.exportApplications("csv");
+    const blob = await api.exportApplications("xlsx");
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "applications.csv";
+    a.download = "applications.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -198,7 +222,13 @@ export default function PipelinePage() {
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground font-mono">{applications.length} applications</span>
             {selectedPersonaId && (
-              <Button size="sm" onClick={() => setAddToPipelineOpen(true)}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setAddToPipelineTargetStage(null);
+                  setAddToPipelineOpen(true);
+                }}
+              >
                 <Plus className="size-3.5" />
                 Add to pipeline
               </Button>
@@ -208,7 +238,7 @@ export default function PipelinePage() {
               Manage Stages
             </Button>
             <Button size="sm" variant="outline" onClick={handleExport}>
-              Export CSV
+              Export spreadsheet
             </Button>
           </div>
         </header>
@@ -225,28 +255,48 @@ export default function PipelinePage() {
           // it, same as Calendar's own "the board/grid is always there,
           // add an event into it" convention.
           <div className="flex-1 overflow-x-auto">
-            <div className="flex gap-3 p-4 h-full min-w-max">
-              {boardColumns.map(({ key: col, label }) => (
-                <div
-                  key={col}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOverCol(col);
-                  }}
-                  onDragLeave={() => setDragOverCol((cur) => (cur === col ? null : cur))}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    handleDrop(col);
-                  }}
-                  className={cn(
-                    "flex flex-col w-64 shrink-0 rounded-md transition-colors",
-                    dragOverCol === col && "bg-primary/5 ring-1 ring-primary/40",
+            <div className="flex p-4 h-full min-w-max">
+              {boardColumns.map(({ key: col, label }, i) => (
+                <React.Fragment key={col}>
+                  {i > 0 && (
+                    // Adrian, direct: "i want like a separator or like
+                    // anything separating the stages" — a real vertical
+                    // rule between columns, not just flex gap spacing.
+                    <div className="w-px shrink-0 bg-border mx-3" aria-hidden="true" />
                   )}
-                >
-                  <div className="text-xs font-mono font-semibold text-muted-foreground mb-2 px-1">
-                    {label} ({byColumn.get(col)?.length ?? 0})
-                  </div>
-                  <div className="flex flex-col gap-2 overflow-y-auto min-h-8">
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverCol(col);
+                    }}
+                    onDragLeave={() => setDragOverCol((cur) => (cur === col ? null : cur))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleDrop(col);
+                    }}
+                    className={cn(
+                      "group/col flex flex-col w-64 shrink-0 rounded-md transition-colors",
+                      dragOverCol === col && "bg-primary/5 ring-1 ring-primary/40",
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <span className="text-xs font-mono font-semibold text-muted-foreground">
+                        {label} ({byColumn.get(col)?.length ?? 0})
+                      </span>
+                      {selectedPersonaId && col !== UNASSIGNED_COLUMN_KEY && (
+                        <button
+                          onClick={() => {
+                            setAddToPipelineTargetStage(col);
+                            setAddToPipelineOpen(true);
+                          }}
+                          title={`Add a job directly to ${label}`}
+                          className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover/col:opacity-100"
+                        >
+                          <Plus className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2 overflow-y-auto min-h-8">
                     {(byColumn.get(col) ?? []).map((app) => (
                       <button
                         key={app.id}
@@ -277,7 +327,8 @@ export default function PipelinePage() {
                       </button>
                     ))}
                   </div>
-                </div>
+                  </div>
+                </React.Fragment>
               ))}
             </div>
           </div>
@@ -299,14 +350,23 @@ export default function PipelinePage() {
           onOpenChange={setAddToPipelineOpen}
           personaId={selectedPersonaId}
           existingJobIds={new Set(applications.map((a) => a.job_id))}
-          onAdded={() => {
+          onAdded={(application) => {
             // Deliberately doesn't close the dialog or jump to the new
             // application's detail panel — the "From Job Inbox" tab is
             // a browsable list meant for adding several jobs in one
             // sitting (each row's own "Add" button already confirms
             // via toast), not a single-pick-and-done flow. Closing here
             // would fight that.
-            void refresh();
+            (async () => {
+              if (addToPipelineTargetStage && application.state !== addToPipelineTargetStage) {
+                try {
+                  await api.updateApplication(application.id, { state: addToPipelineTargetStage });
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Added, but couldn't move it to that stage");
+                }
+              }
+              await refresh();
+            })();
           }}
         />
       )}
@@ -600,6 +660,69 @@ function ApplicationDetailPanel({
     }
   }, [applicationId]);
 
+  // Adrian, direct: "the only option is to run pipeline. I want there
+  // to be more of the detailed info like from job inbox" — the exact
+  // same detail endpoint Job Inbox's own drawer calls, keyed off this
+  // application's job_id/persona_id rather than a second copy of the
+  // scoring/salary/location rendering logic.
+  const [jobDetail, setJobDetail] = React.useState<InboxJobDetail | null>(null);
+  const [loadingJobDetail, setLoadingJobDetail] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setJobDetail(null);
+      if (!detail?.job_id || !detail?.persona_id) return;
+      setLoadingJobDetail(true);
+      try {
+        const jd = await api.getInboxJob(detail.job_id, detail.persona_id);
+        if (!cancelled) setJobDetail(jd);
+      } catch {
+        // Best-effort — a job removed from the Inbox after this
+        // application was created shouldn't block the rest of the
+        // panel from working.
+        if (!cancelled) setJobDetail(null);
+      } finally {
+        if (!cancelled) setLoadingJobDetail(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.job_id, detail?.persona_id]);
+
+  async function handleViewDocument(docType: "cv" | "cover_letter") {
+    try {
+      const result = await api.getApplicationDocument(applicationId, docType);
+      if (result === null) {
+        toast.error(`No ${docType === "cv" ? "CV" : "cover letter"} available for this application`);
+        return;
+      }
+      // Opened in a new tab, not downloaded — most browsers render a
+      // PDF inline, which is what "the CV attached to it is shown"
+      // actually calls for, versus a forced save-to-disk.
+      window.open(URL.createObjectURL(result.blob), "_blank", "noopener,noreferrer");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to open document");
+    }
+  }
+
+  async function handleDeleteApplication() {
+    if (!window.confirm("Delete this application from the pipeline? This can't be undone.")) return;
+    setDeleting(true);
+    try {
+      await api.deleteApplication(applicationId);
+      toast.success("Removed from pipeline");
+      onChanged();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete — cancel the running agent first if one is active");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -864,17 +987,6 @@ function ApplicationDetailPanel({
     }
   }
 
-  async function handleMarkApplied() {
-    try {
-      await api.markApplied(applicationId);
-      await load();
-      onChanged();
-      toast.success("Marked as applied");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed");
-    }
-  }
-
   if (!detail) {
     return (
       <div
@@ -915,9 +1027,21 @@ function ApplicationDetailPanel({
           <div className="text-sm font-medium truncate">{detail.job_title || "(untitled job)"}</div>
           <div className="text-[11px] text-muted-foreground truncate">{detail.company_name || "—"}</div>
         </div>
-        <Button size="sm" variant="ghost" onClick={onClose} className="shrink-0">
-          Close
-        </Button>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={handleDeleteApplication}
+            disabled={deleting}
+            title="Delete from pipeline"
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
       </div>
 
       <div className="p-4 flex flex-col gap-4 overflow-y-auto flex-1">
@@ -937,6 +1061,93 @@ function ApplicationDetailPanel({
           </Select>
         </div>
 
+        {/* Job details — the same fields Job Inbox's own drawer shows,
+            raised directly by Adrian: "I want there to be more of the
+            detailed info like from job inbox" instead of just a
+            run-agent button. Best-effort: absent entirely (not an
+            error state) if the job was removed from the Inbox since
+            this application was created. */}
+        {loadingJobDetail ? (
+          <div className="text-xs text-muted-foreground font-mono">loading job details…</div>
+        ) : jobDetail ? (
+          <div className="border border-border p-3 space-y-2 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              {jobDetail.fit_score ? (
+                <>
+                  <Badge className={cn("text-[10px] font-mono", recommendationColor(jobDetail.fit_score.recommendation))}>
+                    {RECOMMENDATION_LABEL[jobDetail.fit_score.recommendation]}
+                  </Badge>
+                  <span className="font-mono font-semibold tabular">{jobDetail.fit_score.overall_score}</span>
+                  <span className="text-muted-foreground">/ 100</span>
+                </>
+              ) : (
+                <Badge variant="secondary" className="text-[10px] font-mono">unscored</Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground">
+              <div>
+                <span className="text-foreground">Location: </span>
+                {jobDetail.location ?? "not stated"}
+              </div>
+              <div>
+                <span className="text-foreground">Remote: </span>
+                {jobDetail.remote_policy ?? "not stated"}
+              </div>
+              <div>
+                <span className="text-foreground">Type: </span>
+                {jobDetail.employment_type ?? "not stated"}
+              </div>
+              <div>
+                <span className="text-foreground">Seniority: </span>
+                {jobDetail.seniority ?? "not stated"}
+              </div>
+              <div className="col-span-2">
+                <span className="text-foreground">Salary: </span>
+                {salaryLabel(jobDetail)}
+              </div>
+            </div>
+            {jobDetail.source_names.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {jobDetail.source_names.map((s) => (
+                  <Badge key={s} variant="outline" className="text-[9px] font-mono">
+                    {s}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {jobDetail.apply_url && (
+              <a
+                href={jobDetail.apply_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary hover:underline"
+              >
+                Open apply page <ExternalLink className="size-3" />
+              </a>
+            )}
+          </div>
+        ) : null}
+
+        {/* Documents — unconditional on any email-draft/apply-by-email
+            scenario (unlike the block further down), so a normal
+            online-form application still shows whatever CV/cover
+            letter it resolves to, including a job group's own tailored
+            CV from Composer. */}
+        {detail.available_documents.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {detail.available_documents.includes("cv") && (
+              <Button size="sm" variant="outline" onClick={() => handleViewDocument("cv")}>
+                View CV <ExternalLink className="size-3" />
+              </Button>
+            )}
+            {detail.available_documents.includes("cover_letter") && (
+              <Button size="sm" variant="outline" onClick={() => handleViewDocument("cover_letter")}>
+                View cover letter <ExternalLink className="size-3" />
+              </Button>
+            )}
+          </div>
+        )}
+
         <div className="flex gap-2 flex-wrap">
           {running ? (
             <Button size="sm" variant="destructive" onClick={handleCancelRun} disabled={cancelling || !currentAttemptId}>
@@ -951,9 +1162,6 @@ function ApplicationDetailPanel({
               <CreditCostBadge featureKey="application-apply" />
             </div>
           )}
-          <Button size="sm" variant="outline" onClick={handleMarkApplied}>
-            Mark applied
-          </Button>
           {liveBrowser && (running || !!pendingInterrupt) && (
             <Button size="sm" variant="outline" asChild>
               <a

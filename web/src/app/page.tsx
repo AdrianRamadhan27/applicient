@@ -30,6 +30,7 @@ import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { CreditChip } from "@/components/credit-chip";
 import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 import { ParticleField } from "@/components/particle-field";
@@ -838,8 +839,9 @@ export default function LandingPage() {
                       {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
                       {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                     </div>
-                    <span className="mt-1 block text-xs text-muted-foreground font-mono">
-                      {p.monthly_credits.toLocaleString()} credits{p.price_idr === 0 ? " to start" : " / mo"}
+                    <span className="mt-2 flex items-center gap-1.5">
+                      <CreditChip size="xs">{p.monthly_credits.toLocaleString()} credits</CreditChip>
+                      <span className="text-xs text-muted-foreground">{p.price_idr === 0 ? "to start" : "/ mo"}</span>
                     </span>
                   </div>
                   <Button asChild className="mt-auto">

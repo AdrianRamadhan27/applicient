@@ -85,6 +85,7 @@ def _session_context_block(db: Session, session: InterviewSession) -> str:
     already follows (not a tool, since it never changes mid-session)."""
 
     lines: list[str] = [f"Practice type: {session.practice_type}"]
+    lines.append(f"Language to conduct this ENTIRE session in: {session.language or 'English'}")
     if session.category:
         lines.append(f"Category focus: {session.category}")
     if session.seniority:
@@ -103,6 +104,12 @@ def _session_context_block(db: Session, session: InterviewSession) -> str:
             lines.append(f"Target role: {session.role_title}")
         if session.company_name:
             lines.append(f"Target company: {session.company_name}")
+
+    if session.topic_hint:
+        lines.append(
+            f"The candidate specifically asked this session steer toward: {session.topic_hint}. "
+            "Respect this — ground your questions/topic in it rather than ignoring it."
+        )
 
     persona = db.get(Persona, session.persona_id)
     if persona is not None:
@@ -670,7 +677,21 @@ async def end_interview_session(
         except TierResolutionError as exc:
             raise InterviewServiceError(f"model routing not configured: {exc}") from exc
 
-        feedback = run_interview_feedback(model, transcript=transcript, practice_type=session_row.practice_type)
+        # Adrian, direct: ending via the agent's own end_interview tool
+        # showed no loading screen at all — just froze, then jumped
+        # straight to the results screen. Root cause, confirmed live
+        # (a real curl trace of the raw SSE bytes): run_interview_feedback
+        # is a plain synchronous `.invoke()` call (llm_retry.py) — called
+        # bare here, it blocked the ENTIRE asyncio event loop for the
+        # whole real LLM round trip (~20-30s), which also froze delivery
+        # of the "stage: scoring: started" SSE frame that's supposed to
+        # flip the frontend to its loading screen — that frame and
+        # "session_ended" both only reached the client the instant the
+        # block finally released. to_thread moves the blocking call off
+        # the event loop so already-queued SSE frames flush immediately.
+        feedback = await to_thread(
+            run_interview_feedback, model, transcript=transcript, practice_type=session_row.practice_type,
+        )
         session_row.overall_score = feedback.overall_score
         session_row.feedback = feedback.model_dump()
         session_row.status = "completed"

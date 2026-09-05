@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import csv
 import io
 import json
 import uuid
@@ -17,6 +16,9 @@ from datetime import datetime, timezone
 import httpx
 import websockets
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 from sse_starlette.sse import EventSourceResponse
@@ -30,17 +32,26 @@ from applicient_agents.application_service import (
 
 from applicient_api import pipeline_stage_service, schemas
 from applicient_api.deps import current_user_id, get_db, get_session_factory
-from applicient_api.document_resolution import resolve_application_documents
+from applicient_api.document_resolution import available_document_types, resolve_application_documents
 from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.discovery import Job
 from applicient_api.models.enums import EventActor
 from applicient_api.models.pipeline import Application, ApplicationAttempt, ApplicationEvent
 from applicient_api.models.profile import Persona
+from applicient_api.models.scoring import FitScore
 from applicient_api.object_storage import get_object
 from applicient_api.credit_ledger import FEATURE_APPLICATION_APPLY, require_credits
 from applicient_api.pipeline_service import MarkAppliedError, TransitionError, is_ghosted, latest_event_times, transition
 from applicient_api.rate_limit import rate_limit
 from applicient_api.pipeline_service import mark_applied as mark_applied_service
+
+# An attempt in any of these statuses is actively holding a real
+# browser-worker session or awaiting a human decision — deleting the
+# application out from under it would orphan that session with nothing
+# left to ever resolve it. Blocks the delete instead (Adrian's own new
+# "delete from pipeline" ask still needs this guard, same discipline
+# `cancel_attempt`'s own two-branch shape already applies elsewhere).
+_ACTIVE_ATTEMPT_STATUSES = ("in_progress", "awaiting_review", "awaiting_handoff", "awaiting_email")
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -59,6 +70,125 @@ def _jobs_by_id(db: Session, applications: list[Application]) -> dict[uuid.UUID,
     if not job_ids:
         return {}
     return {j.id: j for j in db.query(Job).filter(Job.id.in_(job_ids)).all()}
+
+
+def _latest_fit_scores(
+    db: Session, applications: list[Application]
+) -> dict[tuple[uuid.UUID, uuid.UUID], FitScore]:
+    """Keyed by (job_id, persona_id) — FitScore is append-only history
+    (rescored whenever the profile/persona changes), so this is the
+    latest row per pair, not the only one. Used by the export below to
+    show each application's real fit score/recommendation, not just
+    its pipeline stage."""
+
+    pairs = {(a.job_id, a.persona_id) for a in applications}
+    if not pairs:
+        return {}
+    job_ids = {p[0] for p in pairs}
+    persona_ids = {p[1] for p in pairs}
+    rows = (
+        db.query(FitScore)
+        .filter(FitScore.job_id.in_(job_ids), FitScore.persona_id.in_(persona_ids))
+        .order_by(FitScore.created_at.desc())
+        .all()
+    )
+    latest: dict[tuple[uuid.UUID, uuid.UUID], FitScore] = {}
+    for fs in rows:
+        key = (fs.job_id, fs.persona_id)
+        if key in pairs and key not in latest:
+            latest[key] = fs
+    return latest
+
+
+def _build_applications_workbook(
+    applications: list[Application],
+    jobs: dict[uuid.UUID, Job],
+    fit_scores: dict[tuple[uuid.UUID, uuid.UUID], FitScore],
+    latest_events: dict[uuid.UUID, datetime],
+) -> Response:
+    """Adrian, direct: "I dont want it to be csv. I want it to be
+    spreadsheet instead. The tables created must be formatted nicely
+    easy to read. And the exported table should like have the info
+    like the salary, etc." — real openpyxl formatting (a colored bold
+    header row, frozen header + autofilter, zebra striping, real
+    numeric types for salary/score so a spreadsheet's own SUM/AVERAGE
+    work on them) rather than a bare CSV dump, plus every column Job
+    Inbox itself shows, not just the pipeline-specific fields the old
+    export had."""
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Applications"
+
+    headers = [
+        "Job title", "Company", "Location", "Remote policy", "Employment type",
+        "Salary min", "Salary max", "Salary currency", "Recommendation", "Fit score",
+        "Stage", "Autonomy level", "Ghosted", "Applied at", "Discovered at", "Apply URL",
+    ]
+    ws.append(headers)
+    header_fill = PatternFill(start_color="0F62FE", end_color="0F62FE", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(vertical="center")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    for a in applications:
+        job = jobs.get(a.job_id)
+        fs = fit_scores.get((a.job_id, a.persona_id))
+        ghosted = is_ghosted(a, latest_event_at=latest_events.get(a.id))
+        ws.append([
+            job.title if job else "",
+            job.company_name_raw if job else "",
+            job.location if job else "",
+            job.remote_policy if job else "",
+            job.employment_type if job else "",
+            float(job.salary_min) if job and job.salary_min is not None else None,
+            float(job.salary_max) if job and job.salary_max is not None else None,
+            job.salary_currency if job else "",
+            fs.recommendation if fs else "",
+            float(fs.overall_score) if fs else None,
+            a.state,
+            a.autonomy_level or "",
+            "Yes" if ghosted else "No",
+            a.applied_at.replace(tzinfo=None) if a.applied_at else None,
+            a.created_at.replace(tzinfo=None),
+            job.apply_url if job else "",
+        ])
+
+    # Real date formatting (not the raw ISO-ish default openpyxl would
+    # otherwise show) for the two datetime columns.
+    for row in ws.iter_rows(min_row=2, min_col=14, max_col=15):
+        for cell in row:
+            if cell.value is not None:
+                cell.number_format = "yyyy-mm-dd hh:mm"
+
+    # Zebra striping — real readability, not just a header/body split.
+    stripe_fill = PatternFill(start_color="F4F4F4", end_color="F4F4F4", fill_type="solid")
+    for row_idx in range(2, ws.max_row + 1):
+        if row_idx % 2 == 0:
+            for cell in ws[row_idx]:
+                cell.fill = stripe_fill
+
+    for col_idx, header in enumerate(headers, start=1):
+        col_letter = get_column_letter(col_idx)
+        max_len = len(header)
+        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, min_row=2):
+            for cell in row:
+                if cell.value is not None:
+                    max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=applications.xlsx"},
+    )
 
 
 @router.post("", response_model=schemas.ApplicationOut, status_code=201)
@@ -127,38 +257,45 @@ def list_applications(
 
 @router.get("/export")
 def export_applications(
-    format: str = "csv",
+    format: str = "xlsx",
     db: Session = Depends(get_db),
     user_id: uuid.UUID = Depends(current_user_id),
 ) -> Response:
-    """F7.6."""
+    """F7.6. `format=json` stays for API/debug parity; the real export
+    surface is `xlsx` now (Adrian, direct — "I dont want it to be
+    csv") — see _build_applications_workbook's own docstring."""
 
     applications = db.query(Application).filter_by(user_id=user_id).order_by(Application.created_at.desc()).all()
     latest = latest_event_times(db, [a.id for a in applications])
     jobs = _jobs_by_id(db, applications)
-    rows = [
-        {
-            "id": str(a.id),
-            "job_id": str(a.job_id),
-            "job_title": jobs[a.job_id].title if a.job_id in jobs else "",
-            "company_name": jobs[a.job_id].company_name_raw if a.job_id in jobs else "",
-            "state": a.state,
-            "ghosted": is_ghosted(a, latest_event_at=latest.get(a.id)),
-            "autonomy_level": a.autonomy_level,
-            "applied_at": a.applied_at.isoformat() if a.applied_at else None,
-            "created_at": a.created_at.isoformat(),
-        }
-        for a in applications
-    ]
 
     if format == "json":
+        fit_scores = _latest_fit_scores(db, applications)
+        rows = [
+            {
+                "id": str(a.id),
+                "job_id": str(a.job_id),
+                "job_title": jobs[a.job_id].title if a.job_id in jobs else "",
+                "company_name": jobs[a.job_id].company_name_raw if a.job_id in jobs else "",
+                "location": jobs[a.job_id].location if a.job_id in jobs else None,
+                "salary_min": float(jobs[a.job_id].salary_min) if a.job_id in jobs and jobs[a.job_id].salary_min is not None else None,
+                "salary_max": float(jobs[a.job_id].salary_max) if a.job_id in jobs and jobs[a.job_id].salary_max is not None else None,
+                "salary_currency": jobs[a.job_id].salary_currency if a.job_id in jobs else None,
+                "recommendation": fit_scores[(a.job_id, a.persona_id)].recommendation
+                if (a.job_id, a.persona_id) in fit_scores
+                else None,
+                "state": a.state,
+                "ghosted": is_ghosted(a, latest_event_at=latest.get(a.id)),
+                "autonomy_level": a.autonomy_level,
+                "applied_at": a.applied_at.isoformat() if a.applied_at else None,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in applications
+        ]
         return Response(content=json.dumps(rows, indent=2), media_type="application/json")
 
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()) if rows else ["id"])
-    writer.writeheader()
-    writer.writerows(rows)
-    return Response(content=buf.getvalue(), media_type="text/csv")
+    fit_scores = _latest_fit_scores(db, applications)
+    return _build_applications_workbook(applications, jobs, fit_scores, latest)
 
 
 @router.get("/{application_id}", response_model=schemas.ApplicationDetailOut)
@@ -192,7 +329,40 @@ def get_application(
         out.company_name = job.company_name_raw
     out.events = [schemas.ApplicationEventOut.model_validate(e) for e in events]
     out.attempts = [schemas.ApplicationAttemptOut.model_validate(a) for a in attempts]
+    out.available_documents = available_document_types(db, application=application)
     return out
+
+
+@router.delete("/{application_id}", status_code=204)
+def delete_application(
+    application_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
+):
+    """Adrian, direct: "I want to also be able to delete from
+    pipeline." Blocked while an attempt is actively holding a live
+    browser-worker session or a pending human decision — see
+    _ACTIVE_ATTEMPT_STATUSES above — so this can't silently orphan a
+    running agent. `ApplicationEvent`/`ApplicationAttempt` cascade-
+    delete at the DB level (ondelete="CASCADE", models/pipeline.py);
+    CalendarEvent/InterviewSession's own application_id just goes
+    null (ondelete="SET NULL"), never deleted."""
+
+    application = db.query(Application).filter_by(id=application_id, user_id=user_id).one_or_none()
+    if application is None:
+        raise HTTPException(404, "application not found")
+    active_attempt = (
+        db.query(ApplicationAttempt.id)
+        .filter(
+            ApplicationAttempt.application_id == application_id,
+            ApplicationAttempt.status.in_(_ACTIVE_ATTEMPT_STATUSES),
+        )
+        .first()
+    )
+    if active_attempt is not None:
+        raise HTTPException(409, "cancel the running agent before deleting this application")
+    db.delete(application)
+    db.commit()
 
 
 @router.get("/{application_id}/documents/{doc_type}")

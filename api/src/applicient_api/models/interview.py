@@ -47,6 +47,23 @@ class InterviewSession(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     # (schemas.INTERVIEW_CATEGORIES). Null for fgd/lgd: the agent picks
     # its own case/topic there instead of a user-chosen category.
     category: Mapped[str | None] = mapped_column(String(20))
+    # Free-text steering, independent of category/job/role (Adrian,
+    # direct: "an optional 'Describe what its going to talk about'
+    # regardless of from job listing or manual filling") — folded into
+    # the agent's opening task message (interview_service.py's own
+    # _session_context_block), never validated/parsed, just handed to
+    # the model as the candidate's own request.
+    topic_hint: Mapped[str | None] = mapped_column(String(500))
+    # The spoken/written language for the whole session (Adrian, direct:
+    # "option to select language... default based on the location of
+    # the job"). A plain human-readable name ("Indonesian", "English",
+    # ...), not a code — the frontend's own curated list IS the
+    # vocabulary (web/src/lib/api.ts's INTERVIEW_LANGUAGES), same
+    # free-text-but-constrained-by-the-UI shape topic_hint already
+    # uses. Folded into _session_context_block below, never validated
+    # server-side — the models already handle arbitrary language names
+    # fine (confirmed: no model/TTS voice changes needed for this).
+    language: Mapped[str | None] = mapped_column(String(30))
 
     # LangGraph checkpointer key — mirrors OrchestratorConversation.thread_id
     # exactly (models/agents.py), including reusing the SAME shared

@@ -37,6 +37,7 @@ dependencies = [
     "sse-starlette>=3.4.8",
     "uvicorn[standard]>=0.52.4",
     "websockets>=13.1",
+    "openpyxl>=3.1.5",
 ]
 
 [project.scripts]

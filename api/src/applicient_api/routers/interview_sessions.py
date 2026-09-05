@@ -100,6 +100,8 @@ def create_interview_session(
         seniority=body.seniority,
         practice_type=body.practice_type,
         category=body.category,
+        topic_hint=body.topic_hint.strip() if body.topic_hint and body.topic_hint.strip() else None,
+        language=body.language.strip() if body.language and body.language.strip() else None,
         thread_id=str(uuid.uuid4()),
         status="in_progress",
     )

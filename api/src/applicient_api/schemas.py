@@ -1115,6 +1115,8 @@ class InterviewSessionOut(BaseModel):
     seniority: str | None
     practice_type: str
     category: str | None
+    topic_hint: str | None
+    language: str | None
     status: str
     overall_score: float | None
     feedback: dict | None
@@ -1141,6 +1143,8 @@ class InterviewSessionCreate(BaseModel):
     seniority: str | None = None
     practice_type: str
     category: str | None = None
+    topic_hint: str | None = None
+    language: str | None = None
 
 
 class InterviewSessionEventOut(BaseModel):
@@ -1176,6 +1180,13 @@ class ApplicationAttemptOut(BaseModel):
 class ApplicationDetailOut(ApplicationOut):
     events: list[ApplicationEventOut] = []
     attempts: list[ApplicationAttemptOut] = []
+    # "cv" and/or "cover_letter" — whichever document_resolution.
+    # available_document_types finds resolvable for this application
+    # (an explicit primary document, this job_group's tailored ones, or
+    # the persona's own originally-uploaded CV). Lets the Pipeline
+    # panel show a real "View CV" action regardless of whether this
+    # application has an apply-by-email draft or a normal online form.
+    available_documents: list[str] = []
 
 
 class InterruptDecisionIn(BaseModel):

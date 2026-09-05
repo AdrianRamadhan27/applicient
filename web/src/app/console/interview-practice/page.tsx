@@ -33,8 +33,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   api,
+  inferLanguageFromLocation,
   INTERVIEW_CATEGORIES,
   INTERVIEW_CATEGORY_LABEL,
+  INTERVIEW_LANGUAGE_FLAG,
+  INTERVIEW_LANGUAGES,
   INTERVIEW_PRACTICE_TYPES,
   INTERVIEW_PRACTICE_TYPE_LABEL,
   type InboxJob,
@@ -49,6 +52,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { Loader2, Mic, MicOff, Pause, PhoneOff, Play, Trash2, Video, VideoOff, Volume2 } from "lucide-react";
@@ -459,6 +463,13 @@ export default function InterviewPracticePage() {
   const [loadingJobs, setLoadingJobs] = React.useState(false);
   const [roleTitle, setRoleTitle] = React.useState("");
   const [companyName, setCompanyName] = React.useState("");
+  const [topicHint, setTopicHint] = React.useState("");
+  // Adrian, direct: "option to select language... default language to
+  // be based on the location of the job." Defaulted whenever a job is
+  // picked below (inferLanguageFromLocation); manual-target sessions
+  // have no location to go on, so this just stays "English" until the
+  // user changes it themselves.
+  const [language, setLanguage] = React.useState<string>("English");
   const [creating, setCreating] = React.useState(false);
 
   const refreshList = React.useCallback(async () => {
@@ -672,7 +683,12 @@ export default function InterviewPracticePage() {
 
   function handleTargetModeChange(mode: "job" | "manual") {
     setTargetMode(mode);
-    if (mode === "manual") setJobId(null);
+    if (mode === "manual") {
+      setJobId(null);
+      // No location to infer from in manual mode — back to the plain
+      // default; still overridable via the Select either way.
+      setLanguage("English");
+    }
   }
 
   async function handleCreateSession() {
@@ -693,6 +709,8 @@ export default function InterviewPracticePage() {
         seniority: seniority || undefined,
         practice_type: practiceType,
         category: practiceType === "interview" && category ? category : undefined,
+        topic_hint: topicHint.trim() || undefined,
+        language,
       });
       setActiveSessionId(sessionId);
       setActivePracticeType(practiceType);
@@ -715,6 +733,8 @@ export default function InterviewPracticePage() {
         seniority: seniority || null,
         practice_type: practiceType,
         category: practiceType === "interview" && category ? category : null,
+        topic_hint: topicHint.trim() || null,
+        language,
         status: "in_progress",
         overall_score: null,
         feedback: null,
@@ -822,6 +842,8 @@ export default function InterviewPracticePage() {
     setJobSearch("");
     setRoleTitle("");
     setCompanyName("");
+    setTopicHint("");
+    setLanguage("English");
     router.replace("/console/interview-practice", { scroll: false });
     setPhase("new");
   }
@@ -1502,12 +1524,16 @@ export default function InterviewPracticePage() {
         )}
 
         {phase === "new" && (
-          <div className="flex flex-col gap-4 max-w-xl">
+          // Adrian, direct: "Improve the UI on interview practice form.
+          // Make it like centered and width filling" — same
+          // mx-auto/wide-max-w shape the list/billing/composer pages
+          // already use, replacing the old left-hugging max-w-xl column.
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
             <Button variant="ghost" size="sm" className="self-start" onClick={() => setPhase("list")}>
               ← Back
             </Button>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Practice type</Label>
                 <Select value={practiceType} onValueChange={(v) => setPracticeType(v as InterviewPracticeType)}>
@@ -1533,6 +1559,21 @@ export default function InterviewPracticePage() {
                     {SENIORITY_OPTIONS.map((s) => (
                       <SelectItem key={s} value={s}>
                         {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Language</Label>
+                <Select value={language} onValueChange={setLanguage}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INTERVIEW_LANGUAGES.map((l) => (
+                      <SelectItem key={l} value={l}>
+                        {INTERVIEW_LANGUAGE_FLAG[l]} {l}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1583,7 +1624,10 @@ export default function InterviewPracticePage() {
                       <button
                         key={job.id}
                         type="button"
-                        onClick={() => setJobId(job.id)}
+                        onClick={() => {
+                          setJobId(job.id);
+                          setLanguage(inferLanguageFromLocation(job.location));
+                        }}
                         className={cn(
                           "text-left border px-2.5 py-2 text-xs transition-colors",
                           jobId === job.id ? "border-primary bg-primary/5" : "border-border hover:border-primary",
@@ -1608,6 +1652,17 @@ export default function InterviewPracticePage() {
                 </div>
               </div>
             )}
+
+            <div className="flex flex-col gap-1.5">
+              <Label>Describe what it&apos;s going to talk about (optional)</Label>
+              <Textarea
+                placeholder="e.g. focus on system design and my time leading the payments migration"
+                value={topicHint}
+                onChange={(e) => setTopicHint(e.target.value)}
+                rows={3}
+                maxLength={500}
+              />
+            </div>
 
             <div className="relative w-fit">
               <Button onClick={handleCreateSession} disabled={creating}>
@@ -1753,74 +1808,91 @@ export default function InterviewPracticePage() {
         )}
 
         {phase === "results" && session && (
-          <div className="flex flex-col gap-4 max-w-2xl">
-            <div className="border border-border bg-card p-4 flex flex-col gap-1">
-              <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">Overall score</span>
-              <span className="font-mono text-3xl font-semibold">
-                {session.overall_score !== null
-                  ? `${session.overall_score.toFixed(0)}/100`
-                  : session.status === "cancelled"
-                    ? "No answers recorded"
-                    : "—"}
-              </span>
-            </div>
+          // Adrian, direct: "the page of the interview score. Currently
+          // its not width filling. the transcript should be on the
+          // right side of the score not top to bottom" — same
+          // mx-auto/max-w-6xl width-filling shape the rest of this page
+          // (and billing/composer/etc.) already use; the transcript
+          // becomes a second, narrower column alongside the score
+          // instead of stacking below it, only when there's actually a
+          // transcript to show.
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
+            <div
+              className={cn(
+                "grid grid-cols-1 items-start gap-4",
+                transcript.length > 0 && "lg:grid-cols-[1.6fr_1fr]",
+              )}
+            >
+              <div className="flex flex-col gap-4">
+                <div className="border border-border bg-card p-4 flex flex-col gap-1">
+                  <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">Overall score</span>
+                  <span className="font-mono text-3xl font-semibold">
+                    {session.overall_score !== null
+                      ? `${session.overall_score.toFixed(0)}/100`
+                      : session.status === "cancelled"
+                        ? "No answers recorded"
+                        : "—"}
+                  </span>
+                </div>
 
-            {session.feedback && (
-              <>
-                <p className="text-sm">{session.feedback.summary}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {session.feedback.categories.map((c, i) => (
-                    <div key={i} className="border border-border p-3 text-xs space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{c.category}</span>
-                        <Badge variant="outline" className="font-mono">
-                          {c.score.toFixed(0)}
-                        </Badge>
+                {session.feedback && (
+                  <>
+                    <p className="text-sm">{session.feedback.summary}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {session.feedback.categories.map((c, i) => (
+                        <div key={i} className="border border-border p-3 text-xs space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{c.category}</span>
+                            <Badge variant="outline" className="font-mono">
+                              {c.score.toFixed(0)}
+                            </Badge>
+                          </div>
+                          <p className="text-muted-foreground">{c.notes}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      <div>
+                        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Strengths</div>
+                        <ul className="list-disc pl-4 space-y-1">
+                          {session.feedback.strengths.map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ul>
                       </div>
-                      <p className="text-muted-foreground">{c.notes}</p>
+                      <div>
+                        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+                          Areas to improve
+                        </div>
+                        <ul className="list-disc pl-4 space-y-1">
+                          {session.feedback.areas_to_improve.map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Strengths</div>
-                    <ul className="list-disc pl-4 space-y-1">
-                      {session.feedback.strengths.map((s, i) => (
-                        <li key={i}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
-                      Areas to improve
-                    </div>
-                    <ul className="list-disc pl-4 space-y-1">
-                      {session.feedback.areas_to_improve.map((s, i) => (
-                        <li key={i}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {transcript.length > 0 && (
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Transcript</div>
-                <TranscriptView
-                  items={transcript}
-                  running={false}
-                  stageMessage={null}
-                  activeAudioFilename={activeAudioFilename}
-                  isPlaying={isPlaying}
-                  audioCurrentTime={audioCurrentTime}
-                  audioDuration={audioDuration}
-                  onReplay={handleReplay}
-                  onTogglePause={handleTogglePause}
-                  onSeek={handleSeek}
-                />
+                  </>
+                )}
               </div>
-            )}
+
+              {transcript.length > 0 && (
+                <div className="flex flex-col gap-1.5 lg:sticky lg:top-5">
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Transcript</div>
+                  <TranscriptView
+                    items={transcript}
+                    running={false}
+                    stageMessage={null}
+                    activeAudioFilename={activeAudioFilename}
+                    isPlaying={isPlaying}
+                    audioCurrentTime={audioCurrentTime}
+                    audioDuration={audioDuration}
+                    onReplay={handleReplay}
+                    onTogglePause={handleTogglePause}
+                    onSeek={handleSeek}
+                  />
+                </div>
+              )}
+            </div>
 
             <div className="flex gap-2">
               <Button onClick={startNewFromScratch}>Practice again</Button>

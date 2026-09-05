@@ -6,6 +6,15 @@ import { DodoPayments, type CheckoutEvent } from "dodopayments-checkout";
 import { api, type CreditPack, type CreditTransaction, type Plan, type Subscription } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { CreditChip } from "@/components/credit-chip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +51,11 @@ export default function BillingPage() {
   const [undoingChange, setUndoingChange] = React.useState(false);
   const [cancelling, setCancelling] = React.useState(false);
   const [undoingCancel, setUndoingCancel] = React.useState(false);
+  // Adrian, direct: "Add confirmation dialog to cancelling subscription.
+  // with info that you will keep benefits until what date" — a plain
+  // click used to fire handleCancel immediately with no way back except
+  // the separate "Undo cancellation" button that appears afterward.
+  const [cancelConfirmOpen, setCancelConfirmOpen] = React.useState(false);
   // Which kind of checkout is currently open — the shared onEvent
   // callback below needs this to know whether a success event means
   // "sync the subscription" or "confirm a credit-pack purchase";
@@ -213,6 +227,7 @@ export default function BillingPage() {
       toast.error(String(e));
     } finally {
       setCancelling(false);
+      setCancelConfirmOpen(false);
     }
   }
 
@@ -245,6 +260,14 @@ export default function BillingPage() {
     ? Math.min(100, (subscription.credits_monthly / subscription.monthly_credits) * 100)
     : 0;
 
+  const periodEndLabel = subscription?.current_period_end
+    ? new Date(subscription.current_period_end).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "the end of this period";
+
   return (
     <div className="flex flex-col h-full">
       <header className="h-12 shrink-0 border-b border-border bg-card flex items-center gap-3 px-5">
@@ -266,13 +289,6 @@ export default function BillingPage() {
               // unpaid checkout still waiting on the overlay.
               const isScheduledChange = subscription.status === "active" && !!subscription.pending_plan_name;
               const isAwaitingPayment = subscription.status !== "active" && !!subscription.pending_plan_name;
-              const periodEndLabel = subscription.current_period_end
-                ? new Date(subscription.current_period_end).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })
-                : "the end of this period";
               return (
                 <div className="border border-border bg-card p-4 flex flex-col gap-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -313,8 +329,10 @@ export default function BillingPage() {
                       />
                     </div>
                     {subscription.credits_purchased > 0 && (
-                      <span className="text-[11px] text-muted-foreground font-mono">
-                        + {subscription.credits_purchased.toLocaleString()} purchased credits (never expire)
+                      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        +
+                        <CreditChip size="xs">{subscription.credits_purchased.toLocaleString()}</CreditChip>
+                        purchased credits (never expire)
                       </span>
                     )}
                   </div>
@@ -337,7 +355,7 @@ export default function BillingPage() {
                       subscription.price_idr > 0 &&
                       !isScheduledChange &&
                       !isAwaitingPayment && (
-                        <Button size="sm" variant="outline" disabled={cancelling} onClick={handleCancel}>
+                        <Button size="sm" variant="outline" disabled={cancelling} onClick={() => setCancelConfirmOpen(true)}>
                           {cancelling ? "Cancelling…" : "Cancel subscription"}
                         </Button>
                       )
@@ -391,8 +409,9 @@ export default function BillingPage() {
                           {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
                           {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                         </div>
-                        <span className="mt-1 block text-sm font-mono text-primary">
-                          {p.monthly_credits.toLocaleString()} credits{p.price_idr === 0 ? " to start" : "/mo"}
+                        <span className="mt-1.5 flex items-center gap-1.5">
+                          <CreditChip>{p.monthly_credits.toLocaleString()} credits</CreditChip>
+                          <span className="text-xs text-muted-foreground">{p.price_idr === 0 ? "to start" : "/mo"}</span>
                         </span>
                         {PLAN_BLURB[p.name] && (
                           <p className="mt-3 text-xs text-muted-foreground">{PLAN_BLURB[p.name]}</p>
@@ -407,7 +426,7 @@ export default function BillingPage() {
                           scheduled — see above to undo
                         </Badge>
                       ) : isDowngradeToFree ? (
-                        <Button className="mt-auto" variant="outline" disabled={cancelling} onClick={handleCancel}>
+                        <Button className="mt-auto" variant="outline" disabled={cancelling} onClick={() => setCancelConfirmOpen(true)}>
                           {cancelling ? "Cancelling…" : "Downgrade to Free"}
                         </Button>
                       ) : isSwitch ? (
@@ -452,9 +471,7 @@ export default function BillingPage() {
                   return (
                     <div key={pack.id} className="flex flex-col gap-2 border border-border bg-card p-4">
                       <span className="text-sm font-medium">{pack.name}</span>
-                      <span className="text-lg font-semibold font-mono text-primary">
-                        {pack.credits.toLocaleString()} credits
-                      </span>
+                      <CreditChip className="w-fit text-xs">{pack.credits.toLocaleString()} credits</CreditChip>
                       <span className="text-xs text-muted-foreground font-mono">
                         Rp {pack.price_idr.toLocaleString("id-ID")}
                       </span>
@@ -520,6 +537,27 @@ export default function BillingPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel your subscription?</DialogTitle>
+            <DialogDescription>
+              You&apos;ll keep every plan benefit — including remaining credits — until{" "}
+              <span className="font-medium text-foreground">{periodEndLabel}</span>, then drop to the Free plan.
+              You can undo this any time before then.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelConfirmOpen(false)} disabled={cancelling}>
+              Keep subscription
+            </Button>
+            <Button variant="destructive" onClick={handleCancel} disabled={cancelling}>
+              {cancelling ? "Cancelling…" : "Cancel subscription"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

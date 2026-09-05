@@ -93,7 +93,7 @@ export function AddToPipelineDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-full max-w-[min(92vw,36rem)] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-full max-w-[min(92vw,48rem)] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add to pipeline</DialogTitle>
             <DialogDescription>

@@ -1141,7 +1141,6 @@ export default function RadarPage() {
                 {rowRun && (
                   <div className="border-t border-border bg-secondary/40 px-4 py-3 flex flex-col gap-2">
                     {Object.entries(rowRun.sourceProgress).map(([id, p]) => {
-                      const companies = Object.entries(p.companyBreakdown ?? {});
                       return (
                         <div key={id} className="flex flex-col gap-1">
                           <div className="flex items-center gap-2 text-xs">
@@ -1163,18 +1162,6 @@ export default function RadarPage() {
                             )}
                             {p.status === "failed" && <span className="text-crit">{p.message}</span>}
                           </div>
-                          {/* M2 §6 — a scan-list source covers many companies at
-                              once; only worth its own breakdown when there's more
-                              than one to distinguish. */}
-                          {companies.length > 1 && (
-                            <div className="ml-3.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-                              {companies.map(([company, stats]) => (
-                                <span key={company} className="font-mono">
-                                  {company}: {stats.seen}/{stats.new}n/{stats.deduped}d
-                                </span>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       );
                     })}

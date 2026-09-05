@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from applicient_api.models.agents import OrchestratorConversation
 from applicient_api.models.calendar import CalendarEvent
 from applicient_api.models.discovery import Job, SavedSearch
 from applicient_api.models.documents import Document
@@ -132,6 +133,12 @@ def get_onboarding_progress(db: Session, *, user_id: uuid.UUID) -> dict:
             "label": "Practice an interview",
             "done": exists(db.query(InterviewSession).filter_by(user_id=user_id)),
             "href": "/console/interview-practice",
+        },
+        {
+            "key": "chat_assistant",
+            "label": "Chat with the assistant",
+            "done": exists(db.query(OrchestratorConversation).filter_by(user_id=user_id)),
+            "href": "/console/assistant",
         },
         {
             "key": "tracking",

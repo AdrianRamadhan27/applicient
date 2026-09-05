@@ -14,24 +14,26 @@ from sqlalchemy.orm import Session
 
 from applicient_api.models.pipeline import Application, PipelineStage
 
-# Frozen at the moment this feature was built — the same 13 states
-# every existing user already had. New users get exactly this list;
-# existing users got it via the migration's own frozen copy (not
-# imported from here — see that migration's own docstring for why).
+# Adrian, direct: "right now theres too many. Even though user can
+# edit the stages the default one is too many. There should only be
+# Discovered, Applied, Screening, Interview, Offer, Rejected as
+# default." Trimmed from the original 13 down to these 6 — every stage
+# key this codebase references elsewhere (STATE_APPLIED in
+# pipeline_service.py, email_ingestion.py's classification->state
+# map) already tolerates a stage it expects not existing for a given
+# user (a plain "skip that auto-transition" no-op, not an error), so
+# dropping shortlisted/preparing/ready/acknowledged/assessment/
+# withdrawn/ghosted from the DEFAULT list is safe — a user who wants
+# any of them back can still add them via Manage Stages. Existing
+# users' own stage lists are NOT retroactively touched by this change —
+# only what a brand-new signup gets provisioned with.
 DEFAULT_STAGES: list[tuple[str, str]] = [
     ("discovered", "Discovered"),
-    ("shortlisted", "Shortlisted"),
-    ("preparing", "Preparing"),
-    ("ready", "Ready"),
     ("applied", "Applied"),
-    ("acknowledged", "Acknowledged"),
     ("screening", "Screening"),
-    ("assessment", "Assessment"),
     ("interview", "Interview"),
     ("offer", "Offer"),
     ("rejected", "Rejected"),
-    ("withdrawn", "Withdrawn"),
-    ("ghosted", "Ghosted"),
 ]
 
 _KEY_MAX_LEN = 20

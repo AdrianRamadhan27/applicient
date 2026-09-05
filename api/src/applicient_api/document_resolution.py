@@ -28,7 +28,7 @@ import mimetypes
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from applicient_api.models.documents import Document
 from applicient_api.models.pipeline import Application
@@ -109,3 +109,41 @@ def resolve_application_documents(
                 resolved["cv"] = ResolvedDocument(key=key, filename=f"cv.{ext}", content_type=content_type)
 
     return resolved
+
+
+def available_document_types(db: Session, *, application: Application) -> list[str]:
+    """A cheap existence check only — same priority source as
+    resolve_application_documents (explicit primary_document_id, then
+    the job_group's own Documents, then the persona's raw uploaded CV)
+    but never calls _add_rendered's render fallback, so checking "does
+    this application have a CV/cover letter to show" never pays a real
+    Tectonic compile just to draw the Pipeline detail panel. The actual
+    PDF is still rendered on demand, only when a caller follows through
+    via GET /applications/{id}/documents/{doc_type}."""
+
+    types: set[str] = set()
+    if application.primary_document_id is not None:
+        doc = (
+            db.query(Document)
+            .filter_by(id=application.primary_document_id, user_id=application.user_id)
+            .one_or_none()
+        )
+        if doc is not None:
+            types.add(doc.doc_type)
+
+    if application.job_group_id is not None:
+        rows = (
+            db.query(Document.doc_type)
+            .filter_by(job_group_id=application.job_group_id, user_id=application.user_id)
+            .distinct()
+            .all()
+        )
+        types.update(row[0] for row in rows)
+
+    if "cv" not in types:
+        persona = db.query(Persona).filter_by(id=application.persona_id, user_id=application.user_id).one_or_none()
+        profile = db.get(Profile, persona.profile_id) if persona is not None else None
+        if profile is not None and profile.raw_cv_object_key:
+            types.add("cv")
+
+    return sorted(types)
