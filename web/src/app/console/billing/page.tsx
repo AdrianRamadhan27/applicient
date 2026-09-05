@@ -7,6 +7,7 @@ import { api, type CreditPack, type CreditTransaction, type Plan, type Subscript
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditChip } from "@/components/credit-chip";
+import { formatConvertedPrice, type LocalizedCurrency } from "@/lib/currency";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +40,12 @@ export default function BillingPage() {
   const [plans, setPlans] = React.useState<Plan[]>([]);
   const [packs, setPacks] = React.useState<CreditPack[]>([]);
   const [transactions, setTransactions] = React.useState<CreditTransaction[]>([]);
+  // Adrian, direct: "show in the currency of wherever the user is" —
+  // a real geo-IP + real live FX rate (currency_service.py); both null
+  // means "couldn't resolve one, just show the real Rp price," never a
+  // guess. Passed straight through to checkout too, so what's shown
+  // here matches what the Dodo overlay actually charges.
+  const [localCurrency, setLocalCurrency] = React.useState<LocalizedCurrency>({ currency: null, rate: null });
   const [showHistory, setShowHistory] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [checkingOutPlanId, setCheckingOutPlanId] = React.useState<string | null>(null);
@@ -67,16 +74,18 @@ export default function BillingPage() {
 
   const load = React.useCallback(async () => {
     try {
-      const [sub, planList, packList, txns] = await Promise.all([
+      const [sub, planList, packList, txns, localized] = await Promise.all([
         api.getMySubscription(),
         api.listBillingPlans(),
         api.listCreditPacks(),
         api.listCreditTransactions(),
+        api.getLocalizedCurrency().catch(() => ({ currency: null, rate: null })),
       ]);
       setSubscription(sub);
       setPlans(planList);
       setPacks(packList);
       setTransactions(txns);
+      setLocalCurrency(localized);
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -175,7 +184,7 @@ export default function BillingPage() {
     checkoutKindRef.current = "plan";
     setCheckingOutPlanId(plan.id);
     try {
-      const { checkout_url } = await api.startCheckout(plan.id);
+      const { checkout_url } = await api.startCheckout(plan.id, localCurrency.currency);
       DodoPayments.Checkout.open({ checkoutUrl: checkout_url });
     } catch (e) {
       toast.error(String(e));
@@ -248,7 +257,7 @@ export default function BillingPage() {
     checkoutKindRef.current = "pack";
     setCheckingOutPackId(pack.id);
     try {
-      const { checkout_url } = await api.startPackCheckout(pack.id);
+      const { checkout_url } = await api.startPackCheckout(pack.id, localCurrency.currency);
       DodoPayments.Checkout.open({ checkoutUrl: checkout_url });
     } catch (e) {
       toast.error(String(e));
@@ -409,6 +418,11 @@ export default function BillingPage() {
                           {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
                           {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                         </div>
+                        {p.price_idr > 0 && formatConvertedPrice(p.price_idr, localCurrency) && (
+                          <span className="text-xs text-muted-foreground">
+                            ≈ {formatConvertedPrice(p.price_idr, localCurrency)}/mo
+                          </span>
+                        )}
                         <span className="mt-1.5 flex items-center gap-1.5">
                           <CreditChip>{p.monthly_credits.toLocaleString()} credits</CreditChip>
                           <span className="text-xs text-muted-foreground">{p.price_idr === 0 ? "to start" : "/mo"}</span>
@@ -474,6 +488,9 @@ export default function BillingPage() {
                       <CreditChip className="w-fit text-xs">{pack.credits.toLocaleString()} credits</CreditChip>
                       <span className="text-xs text-muted-foreground font-mono">
                         Rp {pack.price_idr.toLocaleString("id-ID")}
+                        {formatConvertedPrice(pack.price_idr, localCurrency) && (
+                          <> · ≈ {formatConvertedPrice(pack.price_idr, localCurrency)}</>
+                        )}
                       </span>
                       <Button
                         size="sm"

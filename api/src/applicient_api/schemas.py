@@ -1304,6 +1304,17 @@ class CheckoutOut(BaseModel):
 
 class CheckoutIn(BaseModel):
     plan_id: uuid.UUID
+    # The visitor's own client-detected currency (currency_service.py /
+    # GET /billing/currency), passed straight through as Dodo's
+    # `billing_currency` — best-effort, silently dropped server-side if
+    # Dodo rejects it (Adaptive Currency not enabled on the merchant
+    # dashboard, or an unrecognized code) rather than failing checkout.
+    currency: str | None = None
+
+
+class LocalizedCurrencyOut(BaseModel):
+    currency: str | None
+    rate: float | None
 
 
 class FeatureCreditCostOut(BaseModel):

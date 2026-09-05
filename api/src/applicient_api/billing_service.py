@@ -54,7 +54,7 @@ from dodopayments import AsyncDodoPayments
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from applicient_api import credit_ledger, email_service
+from applicient_api import credit_ledger, currency_service, email_service
 from applicient_api.models.billing import CreditPack, Plan, Subscription
 from applicient_api.models.llm import LlmCall
 from applicient_api.models.profile import User
@@ -272,7 +272,30 @@ async def sync_product_for_pack(db: Session, pack: CreditPack) -> None:
         raise DodoError(f"could not update the Dodo product for credit pack {pack.name!r}: {exc}") from exc
 
 
-async def start_pack_checkout(db: Session, *, user: User, subscription: Subscription, pack: CreditPack) -> str:
+async def _create_checkout_session(client, *, preferred_currency: str | None, **kwargs):
+    """Adrian, direct: "show in the currency of wherever the user is."
+    `preferred_currency` is this visitor's own client-detected currency
+    (currency_service.py) — passed through as Dodo's real `billing_currency`
+    checkout param (confirmed live: `dodopayments==1.115.0`'s
+    `checkout_sessions.create` genuinely accepts it). This only takes
+    effect once Adaptive Currency is turned on in the merchant's own
+    Dodo dashboard (Settings -> Business) — a one-time toggle outside
+    this codebase, not something an API call can flip. Rather than
+    guess whether that's enabled, this just tries it and falls back to
+    a plain (base-currency) session on ANY Dodo error — a currency
+    nicety must never be the reason a real checkout fails."""
+
+    if preferred_currency and preferred_currency in currency_service.SUPPORTED_DODO_CURRENCIES:
+        try:
+            return await client.checkout_sessions.create(**kwargs, billing_currency=preferred_currency)
+        except Exception:
+            pass
+    return await client.checkout_sessions.create(**kwargs)
+
+
+async def start_pack_checkout(
+    db: Session, *, user: User, subscription: Subscription, pack: CreditPack, preferred_currency: str | None = None,
+) -> str:
     """One-time purchase — unlike start_checkout (a Plan subscription),
     this never touches `subscription.pending_plan_id`/
     `dodo_checkout_session_id` (subscription-lifecycle fields with no
@@ -289,7 +312,9 @@ async def start_pack_checkout(db: Session, *, user: User, subscription: Subscrip
 
     client = _client()
     try:
-        session = await client.checkout_sessions.create(
+        session = await _create_checkout_session(
+            client,
+            preferred_currency=preferred_currency,
             product_cart=[{"product_id": product_id, "quantity": 1}],
             customer={"customer_id": customer_id},
             return_url=f"{_frontend_url()}/console/billing?dodo_return=1",
@@ -351,7 +376,9 @@ async def _ensure_customer(db: Session, *, user: User, subscription: Subscriptio
     return customer.customer_id
 
 
-async def start_checkout(db: Session, *, user: User, subscription: Subscription, plan: Plan) -> str:
+async def start_checkout(
+    db: Session, *, user: User, subscription: Subscription, plan: Plan, preferred_currency: str | None = None,
+) -> str:
     """Creates a Dodo checkout session for `plan` and returns its
     checkout_url — the frontend opens this in the embedded overlay
     (dodopayments-checkout), it does not redirect the browser away.
@@ -368,7 +395,9 @@ async def start_checkout(db: Session, *, user: User, subscription: Subscription,
 
     client = _client()
     try:
-        session = await client.checkout_sessions.create(
+        session = await _create_checkout_session(
+            client,
+            preferred_currency=preferred_currency,
             product_cart=[{"product_id": product_id, "quantity": 1}],
             customer={"customer_id": customer_id},
             return_url=f"{_frontend_url()}/console/billing?dodo_return=1",

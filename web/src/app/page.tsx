@@ -31,6 +31,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditChip } from "@/components/credit-chip";
+import { formatConvertedPrice, type LocalizedCurrency } from "@/lib/currency";
 import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 import { ParticleField } from "@/components/particle-field";
@@ -616,6 +617,10 @@ export default function LandingPage() {
   const [plans, setPlans] = React.useState<Plan[]>([]);
   const [plansLoading, setPlansLoading] = React.useState(true);
   const [openFaq, setOpenFaq] = React.useState<number | null>(0);
+  // Adrian, direct: "show in the currency of wherever the user is" —
+  // a real geo-IP + real live FX rate (currency_service.py); both null
+  // means "couldn't resolve one, just show the real Rp price."
+  const [localCurrency, setLocalCurrency] = React.useState<LocalizedCurrency>({ currency: null, rate: null });
 
   React.useEffect(() => {
     (async () => {
@@ -627,6 +632,7 @@ export default function LandingPage() {
         setPlansLoading(false);
       }
     })();
+    api.getLocalizedCurrency().then(setLocalCurrency).catch(() => {});
   }, []);
 
   const primaryHref = user ? "/console" : "/signup";
@@ -839,6 +845,11 @@ export default function LandingPage() {
                       {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
                       {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                     </div>
+                    {p.price_idr > 0 && formatConvertedPrice(p.price_idr, localCurrency) && (
+                      <span className="block text-xs text-muted-foreground">
+                        ≈ {formatConvertedPrice(p.price_idr, localCurrency)}/mo
+                      </span>
+                    )}
                     <span className="mt-2 flex items-center gap-1.5">
                       <CreditChip size="xs">{p.monthly_credits.toLocaleString()} credits</CreditChip>
                       <span className="text-xs text-muted-foreground">{p.price_idr === 0 ? "to start" : "/ mo"}</span>

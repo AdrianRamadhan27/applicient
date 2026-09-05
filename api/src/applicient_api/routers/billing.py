@@ -14,15 +14,30 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from applicient_api import billing_service, credit_ledger, schemas
+from applicient_api import billing_service, credit_ledger, currency_service, schemas
 from applicient_api.deps import current_user_id, get_db
 from applicient_api.models.billing import CreditPack, CreditTransaction, FeatureCreditCost, Plan, Subscription
 from applicient_api.models.profile import User
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+
+@router.get("/currency", response_model=schemas.LocalizedCurrencyOut)
+async def get_localized_currency(request: Request):
+    """Adrian, direct: "cost of purchase... show in the currency of
+    wherever the user is... also convert prices on our own pages" —
+    public, same reasoning as /plans below (a signed-out visitor on the
+    landing page needs this too). Real geo-IP + a real live FX rate
+    (currency_service.py), never a guess — {"currency": null, "rate":
+    null} means "just show the real IDR price," not "assume English/US."""
+
+    result = await currency_service.resolve_display_currency(request)
+    if result is None:
+        return schemas.LocalizedCurrencyOut(currency=None, rate=None)
+    return schemas.LocalizedCurrencyOut(currency=str(result["currency"]), rate=float(result["rate"]))
 
 
 @router.get("/plans", response_model=list[schemas.PlanOut])
@@ -123,7 +138,9 @@ async def start_checkout(
     if current_plan is not None and current_plan.price_idr > 0:
         raise HTTPException(409, "already on a paid plan — use change-plan to switch, not a new checkout")
     try:
-        checkout_url = await billing_service.start_checkout(db, user=user, subscription=subscription, plan=plan)
+        checkout_url = await billing_service.start_checkout(
+            db, user=user, subscription=subscription, plan=plan, preferred_currency=body.currency,
+        )
     except billing_service.DodoError as exc:
         raise HTTPException(502, f"Dodo checkout could not be started: {exc}")
     return schemas.CheckoutOut(checkout_url=checkout_url)
@@ -243,7 +260,10 @@ async def sync_subscription(
 
 @router.post("/credit-packs/{pack_id}/checkout", response_model=schemas.CheckoutOut)
 async def start_pack_checkout(
-    pack_id: uuid.UUID, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+    pack_id: uuid.UUID,
+    currency: str | None = None,
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(current_user_id),
 ):
     user = db.get(User, user_id)
     subscription = db.query(Subscription).filter_by(user_id=user_id).one_or_none()
@@ -253,7 +273,9 @@ async def start_pack_checkout(
     if pack is None:
         raise HTTPException(404, "credit pack not found or no longer offered")
     try:
-        checkout_url = await billing_service.start_pack_checkout(db, user=user, subscription=subscription, pack=pack)
+        checkout_url = await billing_service.start_pack_checkout(
+            db, user=user, subscription=subscription, pack=pack, preferred_currency=currency,
+        )
     except billing_service.DodoError as exc:
         raise HTTPException(502, f"Dodo checkout could not be started: {exc}")
     return schemas.CheckoutOut(checkout_url=checkout_url)

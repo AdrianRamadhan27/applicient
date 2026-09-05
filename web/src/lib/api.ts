@@ -2401,9 +2401,18 @@ export const api = {
   getOnboardingProgress: () => request<OnboardingProgress>("/dashboard/onboarding"),
 
   listBillingPlans: () => request<Plan[]>("/billing/plans"),
+  /** Public — a real geo-IP + a real live FX rate (currency_service.py),
+   * both currency and rate null means "couldn't resolve one, just show
+   * the real IDR price." Never cache this client-side across page
+   * loads — it's cheap, and a VPN/location change should show up on
+   * the next visit, not need a hard refresh to notice. */
+  getLocalizedCurrency: () => request<{ currency: string | null; rate: number | null }>("/billing/currency"),
   getMySubscription: () => request<Subscription>("/billing/subscription"),
-  startCheckout: (planId: string) =>
-    request<{ checkout_url: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ plan_id: planId }) }),
+  startCheckout: (planId: string, currency?: string | null) =>
+    request<{ checkout_url: string }>("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan_id: planId, currency: currency ?? null }),
+    }),
   syncSubscription: (dodoSubscriptionId?: string) =>
     request<Subscription>(
       `/billing/sync${dodoSubscriptionId ? `?dodo_subscription_id=${encodeURIComponent(dodoSubscriptionId)}` : ""}`,
@@ -2431,8 +2440,11 @@ export const api = {
    * unlike listFeatureCosts above this needs auth and can't be cached
    * forever the same way. */
   getFirstUseStatus: () => request<Record<string, boolean>>("/billing/credits/first-use-status"),
-  startPackCheckout: (packId: string) =>
-    request<{ checkout_url: string }>(`/billing/credit-packs/${packId}/checkout`, { method: "POST" }),
+  startPackCheckout: (packId: string, currency?: string | null) =>
+    request<{ checkout_url: string }>(
+      `/billing/credit-packs/${packId}/checkout${currency ? `?currency=${encodeURIComponent(currency)}` : ""}`,
+      { method: "POST" },
+    ),
   confirmPackPurchase: (dodoPaymentId: string) =>
     request<{ credits: number }>(`/billing/credit-packs/confirm?dodo_payment_id=${encodeURIComponent(dodoPaymentId)}`, {
       method: "POST",
