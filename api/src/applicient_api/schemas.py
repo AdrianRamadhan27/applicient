@@ -1313,8 +1313,9 @@ class CheckoutIn(BaseModel):
 
 
 class LocalizedCurrencyOut(BaseModel):
-    currency: str | None
+    currency: str | None  # visitor's own real local currency — the "≈" estimate
     rate: float | None
+    usd_rate: float | None  # location-independent — the primary displayed price
 
 
 class FeatureCreditCostOut(BaseModel):

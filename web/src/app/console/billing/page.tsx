@@ -7,7 +7,7 @@ import { api, type CreditPack, type CreditTransaction, type Plan, type Subscript
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditChip } from "@/components/credit-chip";
-import { formatConvertedPrice, type LocalizedCurrency } from "@/lib/currency";
+import { localEstimateLabel, primaryPriceLabel, type LocalizedCurrency } from "@/lib/currency";
 import {
   Dialog,
   DialogContent,
@@ -45,7 +45,11 @@ export default function BillingPage() {
   // means "couldn't resolve one, just show the real Rp price," never a
   // guess. Passed straight through to checkout too, so what's shown
   // here matches what the Dodo overlay actually charges.
-  const [localCurrency, setLocalCurrency] = React.useState<LocalizedCurrency>({ currency: null, rate: null });
+  const [localCurrency, setLocalCurrency] = React.useState<LocalizedCurrency>({
+    currency: null,
+    rate: null,
+    usd_rate: null,
+  });
   const [showHistory, setShowHistory] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [checkingOutPlanId, setCheckingOutPlanId] = React.useState<string | null>(null);
@@ -79,7 +83,7 @@ export default function BillingPage() {
         api.listBillingPlans(),
         api.listCreditPacks(),
         api.listCreditTransactions(),
-        api.getLocalizedCurrency().catch(() => ({ currency: null, rate: null })),
+        api.getLocalizedCurrency().catch(() => ({ currency: null, rate: null, usd_rate: null })),
       ]);
       setSubscription(sub);
       setPlans(planList);
@@ -415,12 +419,12 @@ export default function BillingPage() {
                       <div>
                         <TierLabel planName={p.name} className="text-sm font-medium" iconClassName="size-4" />
                         <div className="mt-2 text-2xl font-semibold tracking-tight">
-                          {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
+                          {primaryPriceLabel(p.price_idr, localCurrency)}
                           {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                         </div>
-                        {p.price_idr > 0 && formatConvertedPrice(p.price_idr, localCurrency) && (
+                        {localEstimateLabel(p.price_idr, localCurrency) && (
                           <span className="text-xs text-muted-foreground">
-                            ≈ {formatConvertedPrice(p.price_idr, localCurrency)}/mo
+                            ≈ {localEstimateLabel(p.price_idr, localCurrency)}/mo
                           </span>
                         )}
                         <span className="mt-1.5 flex items-center gap-1.5">
@@ -486,12 +490,12 @@ export default function BillingPage() {
                     <div key={pack.id} className="flex flex-col gap-2 border border-border bg-card p-4">
                       <span className="text-sm font-medium">{pack.name}</span>
                       <CreditChip className="w-fit text-xs">{pack.credits.toLocaleString()} credits</CreditChip>
-                      <span className="text-xs text-muted-foreground font-mono">
-                        Rp {pack.price_idr.toLocaleString("id-ID")}
-                        {formatConvertedPrice(pack.price_idr, localCurrency) && (
-                          <> · ≈ {formatConvertedPrice(pack.price_idr, localCurrency)}</>
-                        )}
-                      </span>
+                      <span className="text-sm font-medium">{primaryPriceLabel(pack.price_idr, localCurrency)}</span>
+                      {localEstimateLabel(pack.price_idr, localCurrency) && (
+                        <span className="text-xs text-muted-foreground font-mono">
+                          ≈ {localEstimateLabel(pack.price_idr, localCurrency)}
+                        </span>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"

@@ -126,14 +126,18 @@ async def _fx_rate_idr_to(target: str) -> float | None:
     return _fx_cache.get(target)
 
 
-async def resolve_display_currency(request: Request) -> dict[str, str | float] | None:
-    """Returns {"currency": "USD", "rate": 0.000057} (multiply an IDR
+async def resolve_local_currency(request: Request) -> dict[str, str | float] | None:
+    """Returns {"currency": "NOK", "rate": 0.00072} (multiply an IDR
     amount by `rate` to get that currency's amount) for a visitor whose
-    IP resolves to a non-Indonesian country with a currency Dodo
-    Payments actually supports (SUPPORTED_DODO_CURRENCIES) and a real
-    FX rate this process could fetch — None the moment ANY step in
-    that chain doesn't cleanly resolve, meaning "just show/charge the
-    real IDR price, no conversion" to the caller."""
+    IP resolves to a country with a currency Dodo Payments actually
+    supports (SUPPORTED_DODO_CURRENCIES) and a real FX rate this
+    process could fetch — None the moment ANY step in that chain
+    doesn't cleanly resolve. Unlike an earlier version of this
+    function, IDR itself is a valid result here (Adrian, direct: the
+    page's own PRIMARY price is USD now, not IDR — see resolve_usd_rate
+    below — so an Indonesian visitor still needs their own real "≈ Rp
+    ..." estimate, the same as anyone else, rather than that case being
+    silently skipped as "already the base currency")."""
 
     ip = get_client_ip(request)
     if not ip:
@@ -142,9 +146,20 @@ async def resolve_display_currency(request: Request) -> dict[str, str | float] |
     if not country:
         return None
     currency = _COUNTRY_CURRENCY.get(country)
-    if not currency or currency == "IDR" or currency not in SUPPORTED_DODO_CURRENCIES:
+    if not currency or currency not in SUPPORTED_DODO_CURRENCIES:
         return None
     rate = await _fx_rate_idr_to(currency)
     if rate is None:
         return None
     return {"currency": currency, "rate": rate}
+
+
+async def resolve_usd_rate() -> float | None:
+    """Adrian, direct: "I want the main number displayed to be USD" —
+    location-independent (every visitor sees the same USD price), so
+    this is just the FX cache, no geo-IP involved. None means "the FX
+    source is unreachable," in which case the caller falls back to
+    showing the real Rp price as the primary number instead of
+    guessing a USD figure."""
+
+    return await _fx_rate_idr_to("USD")

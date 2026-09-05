@@ -31,7 +31,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditChip } from "@/components/credit-chip";
-import { formatConvertedPrice, type LocalizedCurrency } from "@/lib/currency";
+import { localEstimateLabel, primaryPriceLabel, type LocalizedCurrency } from "@/lib/currency";
 import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 import { ParticleField } from "@/components/particle-field";
@@ -620,7 +620,11 @@ export default function LandingPage() {
   // Adrian, direct: "show in the currency of wherever the user is" —
   // a real geo-IP + real live FX rate (currency_service.py); both null
   // means "couldn't resolve one, just show the real Rp price."
-  const [localCurrency, setLocalCurrency] = React.useState<LocalizedCurrency>({ currency: null, rate: null });
+  const [localCurrency, setLocalCurrency] = React.useState<LocalizedCurrency>({
+    currency: null,
+    rate: null,
+    usd_rate: null,
+  });
 
   React.useEffect(() => {
     (async () => {
@@ -842,12 +846,12 @@ export default function LandingPage() {
                   <div>
                     <TierLabel planName={p.name} className="text-sm font-medium" iconClassName="size-4" />
                     <div className="mt-1 text-2xl font-semibold tracking-tight">
-                      {p.price_idr === 0 ? "Free" : `Rp ${p.price_idr.toLocaleString("id-ID")}`}
+                      {primaryPriceLabel(p.price_idr, localCurrency)}
                       {p.price_idr > 0 && <span className="text-sm font-normal text-muted-foreground">/mo</span>}
                     </div>
-                    {p.price_idr > 0 && formatConvertedPrice(p.price_idr, localCurrency) && (
+                    {localEstimateLabel(p.price_idr, localCurrency) && (
                       <span className="block text-xs text-muted-foreground">
-                        ≈ {formatConvertedPrice(p.price_idr, localCurrency)}/mo
+                        ≈ {localEstimateLabel(p.price_idr, localCurrency)}/mo
                       </span>
                     )}
                     <span className="mt-2 flex items-center gap-1.5">

@@ -28,16 +28,25 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 @router.get("/currency", response_model=schemas.LocalizedCurrencyOut)
 async def get_localized_currency(request: Request):
     """Adrian, direct: "cost of purchase... show in the currency of
-    wherever the user is... also convert prices on our own pages" —
-    public, same reasoning as /plans below (a signed-out visitor on the
-    landing page needs this too). Real geo-IP + a real live FX rate
-    (currency_service.py), never a guess — {"currency": null, "rate":
-    null} means "just show the real IDR price," not "assume English/US."""
+    wherever the user is... also convert prices on our own pages,"
+    then: "I want the main number displayed to be USD" — public, same
+    reasoning as /plans below (a signed-out visitor on the landing
+    page needs this too). Two independent real lookups, never a guess:
+    `usd_rate` (location-independent, the PRIMARY price every visitor
+    sees) and `currency`/`rate` (this specific visitor's real local
+    currency, the secondary "≈" estimate — can be IDR, can even be USD
+    itself if they're actually in the US). Either half can be null on
+    its own if that half's lookup didn't resolve; a null half means
+    "fall back to the real Rp price for that half," never a guessed
+    number."""
 
-    result = await currency_service.resolve_display_currency(request)
-    if result is None:
-        return schemas.LocalizedCurrencyOut(currency=None, rate=None)
-    return schemas.LocalizedCurrencyOut(currency=str(result["currency"]), rate=float(result["rate"]))
+    local = await currency_service.resolve_local_currency(request)
+    usd_rate = await currency_service.resolve_usd_rate()
+    return schemas.LocalizedCurrencyOut(
+        currency=str(local["currency"]) if local else None,
+        rate=float(local["rate"]) if local else None,
+        usd_rate=usd_rate,
+    )
 
 
 @router.get("/plans", response_model=list[schemas.PlanOut])

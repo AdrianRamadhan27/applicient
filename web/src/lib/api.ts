@@ -2406,7 +2406,8 @@ export const api = {
    * the real IDR price." Never cache this client-side across page
    * loads — it's cheap, and a VPN/location change should show up on
    * the next visit, not need a hard refresh to notice. */
-  getLocalizedCurrency: () => request<{ currency: string | null; rate: number | null }>("/billing/currency"),
+  getLocalizedCurrency: () =>
+    request<{ currency: string | null; rate: number | null; usd_rate: number | null }>("/billing/currency"),
   getMySubscription: () => request<Subscription>("/billing/subscription"),
   startCheckout: (planId: string, currency?: string | null) =>
     request<{ checkout_url: string }>("/billing/checkout", {
