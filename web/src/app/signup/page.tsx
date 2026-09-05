@@ -24,9 +24,8 @@ export default function SignupPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await signup(email.trim(), password);
-      toast.success("Account created — check your email to verify it.");
-      router.replace("/console");
+      const signedUpEmail = await signup(email.trim(), password);
+      router.replace(`/verify-email-pending?email=${encodeURIComponent(signedUpEmail)}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Signup failed");
     } finally {

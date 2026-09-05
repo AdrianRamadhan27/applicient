@@ -14,7 +14,10 @@ type AuthContextValue = {
   connectionError: boolean;
   retryAuth: () => void;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  // Resolves to the email address, not void — signup no longer signs
+  // the caller in (see api.signup's own comment), so the signup page
+  // needs the email back to route to the "check your inbox" page.
+  signup: (email: string, password: string) => Promise<string>;
   loginWithToken: (token: string) => Promise<void>;
   logout: () => void;
 };
@@ -96,9 +99,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signup(email: string, password: string) {
-    const { access_token, user: newUser } = await api.signup(email, password);
-    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, access_token);
-    setUser(newUser);
+    const { email: signedUpEmail } = await api.signup(email, password);
+    return signedUpEmail;
   }
 
   // v2 Phase 1 (Google OAuth) — the callback page already has a real

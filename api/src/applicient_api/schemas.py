@@ -35,6 +35,20 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+class SignupOut(BaseModel):
+    """Adrian, direct: verification must happen before a new account can
+    ever sign in — so signup() no longer hands back a usable
+    access_token the way it used to. This is deliberately just the
+    email, for the "check your inbox" waiting page to display and to
+    pass along to /auth/resend-verification."""
+
+    email: str
+
+
+class ResendVerificationIn(BaseModel):
+    email: str
+
+
 class ProviderConnectionCreate(BaseModel):
     provider: str
     api_key: str

@@ -12,12 +12,20 @@ for the same lookup used at upgrade time).
 v2 Phase 1 — email verification reuses create_access_token/
 decode_access_token with a 24h TTL as the verification link's token,
 same trick gmail.py's OAuth `state` param already uses — no separate
-token table. Verification is NOT a login gate (see login()) — a
-support-burden judgment call, not an oversight; unverified users can
-still use the app, just see a resend-verification banner. Google login
-(google_login/google_callback) is a separate flow from Gmail's connect
-OAuth — see google_auth_service.py's own docstring for why it isn't a
-reuse of that one."""
+token table.
+
+Adrian, direct: verification MUST happen before a new account can sign
+in — reversing this module's original "not a login gate" design.
+signup() no longer returns a usable access_token (schemas.SignupOut is
+just the email — see its own docstring); login() rejects an unverified
+account with a 403 instead of letting it through; resend-verification
+is now unauthenticated (by email, rate-limited by
+rate_limit.check_rate_limit keyed on the email itself) since a
+just-signed-up user has no token to authenticate with anymore. Google
+login (google_login/google_callback) already sets email_verified=True
+unconditionally (Google already proved the email) so this gate never
+applies to that path — a Google user's very first login already
+succeeds normally."""
 
 import os
 import secrets
@@ -34,10 +42,17 @@ from applicient_api.billing_service import default_plan
 from applicient_api.deps import current_user_id, get_db
 from applicient_api.models.billing import Subscription
 from applicient_api.models.profile import User
+from applicient_api.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _VERIFY_TOKEN_TTL = timedelta(hours=24)
+# Matches the frontend's own client-side cooldown timer (raised
+# directly by Adrian) — this is the real enforcement, the frontend
+# timer is just UX; a resend attempt inside the cooldown either way
+# gets a 429 with Retry-After, never a silent no-op.
+_RESEND_LIMIT = 1
+_RESEND_WINDOW_SECONDS = 60
 
 
 def _api_base_url() -> str:
@@ -76,7 +91,7 @@ def _provision_new_user(db: Session, user: User) -> None:
         credit_ledger.grant_monthly_credits(db, user_id=user.id, plan=plan)
 
 
-@router.post("/signup", response_model=schemas.TokenOut, status_code=201)
+@router.post("/signup", response_model=schemas.SignupOut, status_code=201)
 async def signup(body: schemas.SignupIn, db: Session = Depends(get_db)):
     email = body.email.strip().lower()
     if db.query(User).filter_by(email=email).one_or_none() is not None:
@@ -90,7 +105,10 @@ async def signup(body: schemas.SignupIn, db: Session = Depends(get_db)):
     _provision_new_user(db, user)
     db.commit()
     await _send_verification_email(user)
-    return schemas.TokenOut(access_token=create_access_token(user.id), user=user)
+    # No access_token — the account exists but can't sign in yet (see
+    # login() below). The frontend takes this response straight to the
+    # "check your email" waiting page, never to /console.
+    return schemas.SignupOut(email=user.email)
 
 
 @router.post("/login", response_model=schemas.TokenOut)
@@ -101,6 +119,8 @@ def login(body: schemas.LoginIn, db: Session = Depends(get_db)):
         raise HTTPException(401, 'this account uses Google sign-in — use "Continue with Google" instead')
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "incorrect email or password")
+    if not user.email_verified:
+        raise HTTPException(403, "please verify your email before signing in — check your inbox for the verification link")
     if not user.is_active:
         raise HTTPException(403, "this account has been suspended")
     return schemas.TokenOut(access_token=create_access_token(user.id), user=user)
@@ -129,13 +149,21 @@ def verify_email(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/resend-verification", status_code=204)
-async def resend_verification(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)):
-    user = db.query(User).filter_by(id=user_id).one_or_none()
-    if user is None:
-        raise HTTPException(404, "user not found")
-    if user.email_verified:
-        return
-    await _send_verification_email(user)
+async def resend_verification(body: schemas.ResendVerificationIn, db: Session = Depends(get_db)):
+    """Unauthenticated by necessity — a just-signed-up user waiting on
+    the "check your email" page has no access_token to authenticate
+    with anymore (signup() stopped issuing one). Keyed and rate-limited
+    by the email address itself rather than a user_id; always returns
+    204 regardless of whether the address is registered/already
+    verified/Google-only, so this can't be used to enumerate accounts."""
+
+    email = body.email.strip().lower()
+    check_rate_limit(
+        f"resend-verification:{email}", limit=_RESEND_LIMIT, window_seconds=_RESEND_WINDOW_SECONDS
+    )
+    user = db.query(User).filter_by(email=email).one_or_none()
+    if user is not None and not user.email_verified and user.password_hash is not None:
+        await _send_verification_email(user)
 
 
 @router.get("/google/login")

@@ -158,6 +158,22 @@ async def _parse_cv_stream(
             # in a buffer instead of reaching the client — confirmed via
             # a raw-byte timing trace, not assumed.
             extracted = await to_thread(parse_cv_text, chat_model, cv_text)
+            if not extracted.evidence_items:
+                # A real, previously-hit bug: the "saving" step below
+                # deletes every existing EvidenceItem NOT in this
+                # parse's new set — with zero new items, that exclusion
+                # filter is a no-op and the delete wipes the entire
+                # bank clean, silently destroying a previously-confirmed
+                # profile over one bad/empty extraction (a flaky model
+                # response, an unusual layout, whatever). Raising here,
+                # before "saving" ever touches `old_items`, means a
+                # zero-item parse fails loudly and changes nothing,
+                # instead of "succeeding" into an empty evidence bank.
+                raise ExtractionError(
+                    "the AI parser found no extractable accomplishments in this file — this can happen "
+                    "with an unusual layout or scanned/image-only content. Nothing was changed; try a "
+                    "different file, or add evidence manually instead."
+                )
             emit_step("parsing", t0, {"evidence_items": len(extracted.evidence_items)})
             yield _event("parsing", "done", f"Extracted {len(extracted.evidence_items)} evidence items")
 
@@ -192,11 +208,12 @@ async def _parse_cv_stream(
             # A new CV is a new profile revision. Keep the old evidence out
             # of the active bank only after the new parse succeeded, so a
             # failed retry cannot destroy a previously confirmed profile.
+            # `created` is guaranteed non-empty here — a zero-item parse
+            # already raised above, before either of these queries ran.
             new_ids = [item.id for item in created]
-            old_items = db.query(EvidenceItem).filter(EvidenceItem.profile_id == profile_id)
-            if new_ids:
-                old_items = old_items.filter(~EvidenceItem.id.in_(new_ids))
-            old_items.delete(synchronize_session=False)
+            db.query(EvidenceItem).filter(
+                EvidenceItem.profile_id == profile_id, ~EvidenceItem.id.in_(new_ids)
+            ).delete(synchronize_session=False)
             emit_step("saving", t0, {"count": len(created)})
             yield _event("saving", "done", f"Saved {len(created)} evidence items")
 

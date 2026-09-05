@@ -19,9 +19,10 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
-from applicient_api import billing_service, credit_ledger, email_ingestion
+from applicient_api import billing_service, credit_ledger, email_ingestion, email_service
 from applicient_api.deps import get_session_factory
 from applicient_api.models.billing import CreditPack
+from applicient_api.models.profile import User
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
@@ -144,3 +145,21 @@ async def _handle_payment_succeeded(payment) -> None:
         if confirmed.status != "succeeded":
             return
         credit_ledger.record_purchase(db, user_id=user_id, pack=pack, dodo_payment_id=payment.payment_id)
+
+        # Adrian, direct: "email notification for any purchase whether
+        # its subscription or buy credits" — best-effort, same
+        # non-blocking treatment every other email in this codebase
+        # gets; the real ledger row above already landed regardless.
+        user = db.get(User, user_id)
+        if user is not None:
+            frontend_url = os.environ.get("FRONTEND_URL") or "http://localhost:3000"
+            try:
+                await email_service.send_credit_pack_purchase_email(
+                    to=user.email,
+                    pack_name=pack.name,
+                    price_idr=pack.price_idr,
+                    credits=pack.credits,
+                    billing_url=f"{frontend_url}/console/billing",
+                )
+            except (RuntimeError, email_service.EmailSendError):
+                pass

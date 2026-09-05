@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { AuthLayout } from "@/components/auth-layout";
 import { GoogleIcon } from "@/components/icons/google-icon";
+import { ResendVerificationButton } from "@/components/resend-verification-button";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -19,6 +20,12 @@ export default function LoginPage() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  // Set only when login rejects specifically because the account
+  // isn't verified yet (routers/auth.py's login(), a 403) — matched by
+  // message text rather than a dedicated status/error code, same
+  // "one distinctive backend string, matched on the frontend" pattern
+  // radar/page.tsx already uses for its own profile-confirmation link.
+  const [unverifiedEmail, setUnverifiedEmail] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (new URLSearchParams(window.location.search).get("verified") === "1") {
@@ -29,11 +36,17 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setUnverifiedEmail(null);
     try {
       await login(email.trim(), password);
       router.replace("/console");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Login failed");
+      const message = err instanceof Error ? err.message : "Login failed";
+      if (err instanceof ApiError && err.status === 403 && message.toLowerCase().includes("verify your email")) {
+        setUnverifiedEmail(email.trim());
+      } else {
+        toast.error(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -49,6 +62,15 @@ export default function LoginPage() {
         </Link>
         , it&apos;s free.
       </p>
+
+      {unverifiedEmail && (
+        <div className="mt-6 flex flex-col gap-2 border border-warn bg-warn/10 p-3">
+          <p className="text-sm text-warn">
+            Please verify your email before signing in — check your inbox for the verification link.
+          </p>
+          <ResendVerificationButton email={unverifiedEmail} className="self-start" />
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">

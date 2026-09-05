@@ -54,7 +54,7 @@ from dodopayments import AsyncDodoPayments
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from applicient_api import credit_ledger
+from applicient_api import credit_ledger, email_service
 from applicient_api.models.billing import CreditPack, Plan, Subscription
 from applicient_api.models.llm import LlmCall
 from applicient_api.models.profile import User
@@ -577,6 +577,18 @@ async def sync_subscription_from_dodo(
             )
             if plan_changed or period_advanced:
                 credit_ledger.grant_monthly_credits(db, user_id=subscription.user_id, plan=plan)
+                # Adrian, direct: "email notification for any purchase
+                # whether its subscription or buy credits" — fires on
+                # exactly the same activation/rollover condition the
+                # credit grant above just did, `renewed` distinguishing
+                # a same-plan rollover from a first activation/plan
+                # change so the copy doesn't say "renewed" for a brand
+                # new subscription. Best-effort, same non-blocking
+                # treatment as every other email in this codebase — a
+                # flaky provider must never break the real billing sync.
+                await _send_purchase_email_best_effort(
+                    db, subscription=subscription, plan=plan, renewed=(not plan_changed and period_advanced)
+                )
     elif dodo_sub.status in ("cancelled", "expired"):
         # A scheduled cancel_subscription (above) reaching its actual
         # end date, or a subscription that lapsed some other way (a
@@ -590,12 +602,51 @@ async def sync_subscription_from_dodo(
         # own docstring).
         free_plan = default_plan(db)
         if free_plan is not None and subscription.plan_id != free_plan.id:
+            # Adrian, direct: "notification if their subscription runs
+            # out to ask to renew" — the plan that just ended, looked
+            # up by `previous_plan_id` (captured above, before this
+            # line overwrites `subscription.plan_id` to Free) so the
+            # email names the real plan, not "Free".
+            ended_plan = db.get(Plan, previous_plan_id)
+            if ended_plan is not None:
+                await _send_subscription_ended_email_best_effort(db, subscription=subscription, plan=ended_plan)
             subscription.plan_id = free_plan.id
         subscription.pending_plan_id = None
         subscription.cancel_at_period_end = False
 
     db.commit()
     return subscription
+
+
+async def _send_purchase_email_best_effort(
+    db: Session, *, subscription: Subscription, plan: Plan, renewed: bool
+) -> None:
+    user = db.get(User, subscription.user_id)
+    if user is None:
+        return
+    try:
+        await email_service.send_subscription_purchase_email(
+            to=user.email,
+            plan_name=plan.name,
+            price_idr=plan.price_idr,
+            monthly_credits=plan.monthly_credits,
+            renewed=renewed,
+            billing_url=f"{_frontend_url()}/console/billing",
+        )
+    except (RuntimeError, email_service.EmailSendError):
+        pass
+
+
+async def _send_subscription_ended_email_best_effort(db: Session, *, subscription: Subscription, plan: Plan) -> None:
+    user = db.get(User, subscription.user_id)
+    if user is None:
+        return
+    try:
+        await email_service.send_subscription_ended_email(
+            to=user.email, plan_name=plan.name, billing_url=f"{_frontend_url()}/console/billing"
+        )
+    except (RuntimeError, email_service.EmailSendError):
+        pass
 
 
 def unwrap_webhook_event(payload: bytes, headers: dict[str, str]):

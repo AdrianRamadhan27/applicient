@@ -1333,8 +1333,12 @@ export type OnboardingStep = {
 export type OnboardingProgress = { steps: OnboardingStep[]; completed: number; total: number };
 
 export const api = {
+  /** No access_token in the response anymore — a new account can't
+   * sign in until its email is verified (Adrian, direct), so signup()
+   * only ever returns the email for the "check your inbox" waiting
+   * page to display. */
   signup: (email: string, password: string) =>
-    request<{ access_token: string; user: User }>("/auth/signup", {
+    request<{ email: string }>("/auth/signup", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
@@ -1350,7 +1354,12 @@ export const api = {
   googleLoginUrl(): string {
     return `${API_BASE_URL}/auth/google/login`;
   },
-  resendVerification: () => request<void>("/auth/resend-verification", { method: "POST" }),
+  /** Unauthenticated by necessity — a just-signed-up user waiting on
+   * the verification page has no token. Server-side rate-limited to
+   * one send per 60s per email regardless of what the caller does
+   * client-side (see resend-verification-button.tsx's own cooldown). */
+  resendVerification: (email: string) =>
+    request<void>("/auth/resend-verification", { method: "POST", body: JSON.stringify({ email }) }),
 
   listConnections: () => request<ProviderConnection[]>("/provider-connections"),
   createConnection: (body: {

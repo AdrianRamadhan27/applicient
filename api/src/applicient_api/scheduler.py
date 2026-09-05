@@ -166,6 +166,31 @@ async def run_scheduled_search(saved_search_id: uuid.UUID, user_id: uuid.UUID) -
         session.commit()
         user = session.get(User, user_id)
 
+        # v2 — Adrian, direct: "for scheduled search if there are any
+        # new jobs can you make it preview top 3 scored ones". Only
+        # this run's own new jobs (created_at >= run_started_at), by
+        # FitScore.overall_score desc — a job scored but not newly
+        # discovered this run isn't "new" from this email's own framing.
+        top_jobs: list[dict] = []
+        if new_jobs:
+            rows = (
+                session.query(FitScore, Job)
+                .join(Job, Job.id == FitScore.job_id)
+                .filter(FitScore.user_id == user_id, FitScore.created_at >= run_started_at)
+                .order_by(FitScore.overall_score.desc())
+                .limit(3)
+                .all()
+            )
+            top_jobs = [
+                {
+                    "title": job.title,
+                    "company": job.company_name_raw,
+                    "score": float(fit_score.overall_score),
+                    "recommendation": fit_score.recommendation,
+                }
+                for fit_score, job in rows
+            ]
+
     if user is None:
         return
     radar_url = f"{os.environ.get('FRONTEND_URL') or 'http://localhost:3000'}/console/radar"
@@ -175,6 +200,7 @@ async def run_scheduled_search(saved_search_id: uuid.UUID, user_id: uuid.UUID) -
             saved_search_name=saved_search_name,
             new_jobs_count=new_jobs,
             strong_matches_count=strong,
+            top_jobs=top_jobs,
             radar_url=radar_url,
         )
     except (RuntimeError, email_service.EmailSendError):
