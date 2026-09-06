@@ -196,14 +196,51 @@ def parse_cv_text(model: BaseChatModel, cv_text: str) -> ExtractedCV:
     # worth one retry before accepting it, same "retry once, let the
     # caller decide" discipline invoke_structured_with_retry itself
     # already follows for its own two shapes.
+    #
+    # A second, real-world variant of the same flakiness (Adrian, direct,
+    # a different account's own CV): evidence_items came back genuinely
+    # populated (30 real items, saved fine) while `profile` came back
+    # with EVERY field null — cv.py's own save step (`profile.
+    # parsed_profile = extracted.profile.model_dump(..., exclude_none=True)`)
+    # then persists a bare `{}`, discarding a name/email/phone the same
+    # source text plainly contains (confirmed live: re-parsing the exact
+    # same stored file moments later returned a fully populated profile).
+    # `_completeness` below scores both halves independently so a retry
+    # gets credit for fixing EITHER dimension, and the two attempts are
+    # compared rather than blindly preferring the second — a retry that
+    # regresses (e.g. gains a profile but loses the evidence items) must
+    # never overwrite a first attempt that already got the harder half
+    # right.
     result = invoke_structured_with_retry(structured_model, messages)
     if not isinstance(result, ExtractedCV):
         raise ExtractionError(f"structured output call returned unexpected type: {type(result)}")
-    if not result.evidence_items:
+    if _completeness(result) < 2:
         retried = invoke_structured_with_retry(structured_model, messages)
-        if isinstance(retried, ExtractedCV) and retried.evidence_items:
+        if isinstance(retried, ExtractedCV) and _completeness(retried) > _completeness(result):
             return retried
     return result
+
+
+def _profile_has_signal(profile: ExtractedProfile) -> bool:
+    """True the moment the model extracted ANY real candidate-level
+    fact. A genuine CV (already confirmed non-blank by cv.py's own
+    `if not cv_text.strip()` check, before any LLM call happens) has a
+    name and/or contact details essentially every time — a completely
+    empty profile object is far more likely a model miss on that half
+    of the task than a real absence of the information."""
+    return bool(
+        profile.full_name or profile.email or profile.phone or profile.headline or profile.summary or profile.location
+    )
+
+
+def _completeness(cv: ExtractedCV) -> int:
+    """0-2: whether each independent half of the extraction (the
+    evidence bank, the candidate profile) came back with real data.
+    Used only to compare a first attempt against a retry — never a
+    pass/fail gate on its own (a genuinely thin CV, e.g. one job and no
+    stated contact info, is a real result this codebase must still
+    accept, not force into looking "complete")."""
+    return (1 if cv.evidence_items else 0) + (1 if _profile_has_signal(cv.profile) else 0)
 
 
 def parse_loose_date(value: str | None) -> date | None:
