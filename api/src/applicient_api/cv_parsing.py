@@ -20,6 +20,8 @@ from docx import Document as DocxDocument
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
 
+from applicient_api.llm_retry import invoke_structured_with_retry
+
 # dateutil fills in missing day/month from this default when the
 # source only gave e.g. "Jan 2024" — pins day=1 so a month-only date
 # doesn't silently inherit today's day-of-month.
@@ -171,14 +173,36 @@ def parse_cv_text(model: BaseChatModel, cv_text: str) -> ExtractedCV:
     # LlmCall rows) and no reasoning-channel default to fight with, so
     # nothing needed changing in tier_resolution.py at all.
     structured_model = model.with_structured_output(ExtractedCV, method="function_calling")
-    result = structured_model.invoke(
-        [
-            ("system", _SYSTEM_PROMPT),
-            ("user", cv_text),
-        ]
-    )
+    messages = [
+        ("system", _SYSTEM_PROMPT),
+        ("user", cv_text),
+    ]
+    # Adrian, direct: reported intermittent — the exact same real CV
+    # ("no extractable accomplishments") failed once, then parsed fine
+    # (27 real evidence items) on an immediate retry with nothing else
+    # changed. invoke_structured_with_retry (llm_retry.py, already used
+    # by scoring/tailoring/verification for the SAME model tier) covers
+    # two known-transient shapes — a reasoning model burning its whole
+    # budget internally and emitting no content, and a bare network
+    # blip — but neither of those raises here silently as "0 items";
+    # they'd surface as a real exception instead. This is a THIRD,
+    # distinct flakiness shape: the call fully succeeds and returns a
+    # valid ExtractedCV, but the model itself missed the task and
+    # returned an empty list. A real, non-trivial CV (already confirmed
+    # non-blank by cv.py's own `if not cv_text.strip()` check before
+    # any LLM call ever happens) essentially never has ZERO genuinely
+    # extractable accomplishments, so an empty result on the first
+    # attempt is far more likely a missed attempt than a real one —
+    # worth one retry before accepting it, same "retry once, let the
+    # caller decide" discipline invoke_structured_with_retry itself
+    # already follows for its own two shapes.
+    result = invoke_structured_with_retry(structured_model, messages)
     if not isinstance(result, ExtractedCV):
         raise ExtractionError(f"structured output call returned unexpected type: {type(result)}")
+    if not result.evidence_items:
+        retried = invoke_structured_with_retry(structured_model, messages)
+        if isinstance(retried, ExtractedCV) and retried.evidence_items:
+            return retried
     return result
 
 
