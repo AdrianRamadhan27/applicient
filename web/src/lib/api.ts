@@ -899,6 +899,8 @@ export type Application = {
   ghosted: boolean;
   job_title: string;
   company_name: string;
+  // "in_progress" | "awaiting_review" | "awaiting_handoff" | "awaiting_email" | null
+  active_attempt_status: string | null;
 };
 
 export type ApplicationEvent = {

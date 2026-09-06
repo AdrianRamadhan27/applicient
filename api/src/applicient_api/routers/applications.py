@@ -60,9 +60,12 @@ _ACTIVE_ATTEMPT_STATUSES = ("in_progress", "awaiting_review", "awaiting_handoff"
 router = APIRouter(prefix="/applications", tags=["applications"])
 
 
-def _to_out(application: Application, *, ghosted: bool, job: Job | None = None) -> schemas.ApplicationOut:
+def _to_out(
+    application: Application, *, ghosted: bool, job: Job | None = None, active_attempt_status: str | None = None
+) -> schemas.ApplicationOut:
     out = schemas.ApplicationOut.model_validate(application)
     out.ghosted = ghosted
+    out.active_attempt_status = active_attempt_status
     if job is not None:
         out.job_title = job.title
         out.company_name = job.company_name_raw
@@ -74,6 +77,31 @@ def _jobs_by_id(db: Session, applications: list[Application]) -> dict[uuid.UUID,
     if not job_ids:
         return {}
     return {j.id: j for j in db.query(Job).filter(Job.id.in_(job_ids)).all()}
+
+
+def _active_attempt_statuses(db: Session, applications: list[Application]) -> dict[uuid.UUID, str]:
+    """Adrian, direct: "if the job is currently running pipeline agent
+    for it to have like animation state like applying etc" — one query
+    for the whole board, not one per card. Keyed by application_id;
+    latest attempt wins in the (rare) case more than one is somehow
+    active at once for the same application."""
+
+    application_ids = [a.id for a in applications]
+    if not application_ids:
+        return {}
+    rows = (
+        db.query(ApplicationAttempt.application_id, ApplicationAttempt.status)
+        .filter(
+            ApplicationAttempt.application_id.in_(application_ids),
+            ApplicationAttempt.status.in_(_ACTIVE_ATTEMPT_STATUSES),
+        )
+        .order_by(ApplicationAttempt.created_at.desc())
+        .all()
+    )
+    result: dict[uuid.UUID, str] = {}
+    for application_id, status in rows:
+        result.setdefault(application_id, status)
+    return result
 
 
 def _latest_fit_scores(
@@ -257,8 +285,14 @@ def list_applications(
     applications = query.order_by(Application.created_at.desc()).all()
     latest = latest_event_times(db, [a.id for a in applications])
     jobs = _jobs_by_id(db, applications)
+    active_attempts = _active_attempt_statuses(db, applications)
     return [
-        _to_out(a, ghosted=is_ghosted(a, latest_event_at=latest.get(a.id)), job=jobs.get(a.job_id))
+        _to_out(
+            a,
+            ghosted=is_ghosted(a, latest_event_at=latest.get(a.id)),
+            job=jobs.get(a.job_id),
+            active_attempt_status=active_attempts.get(a.id),
+        )
         for a in applications
     ]
 
@@ -337,6 +371,9 @@ def get_application(
         out.company_name = job.company_name_raw
     out.events = [schemas.ApplicationEventOut.model_validate(e) for e in events]
     out.attempts = [schemas.ApplicationAttemptOut.model_validate(a) for a in attempts]
+    # Already have every attempt loaded above — no extra query needed,
+    # unlike list_applications's own batched _active_attempt_statuses.
+    out.active_attempt_status = next((a.status for a in attempts if a.status in _ACTIVE_ATTEMPT_STATUSES), None)
     out.available_documents = available_document_types(db, application=application)
     return out
 

@@ -1061,6 +1061,12 @@ class ApplicationOut(BaseModel):
     ghosted: bool = False
     job_title: str = ""
     company_name: str = ""
+    # Adrian, direct: "if the job is currently running pipeline agent
+    # for it to have like animation state like applying etc" — one of
+    # _ACTIVE_ATTEMPT_STATUSES (in_progress/awaiting_review/
+    # awaiting_handoff/awaiting_email), or None if no attempt is
+    # currently active for this application.
+    active_attempt_status: str | None = None
 
 
 class ApplicationEventOut(BaseModel):

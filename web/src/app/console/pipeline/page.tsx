@@ -37,7 +37,7 @@ import { CreditCostBadge } from "@/components/credit-cost-badge";
 import { AddToPipelineDialog } from "@/components/add-to-pipeline-dialog";
 import { usePersona } from "@/components/persona-provider";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, ChevronUp, ExternalLink, Plus, Settings, Square, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, ExternalLink, Loader2, Plus, Settings, Square, Trash2 } from "lucide-react";
 
 // Detail panel width — draggable, persisted per-browser (first use of
 // localStorage in this file; persona-provider.tsx's selectedPersonaId
@@ -58,6 +58,34 @@ const MAX_PANEL_WIDTH = 800;
 // conversion, time-to-response) is a separate, still-disclosed gap —
 // see M4_IMPLEMENTATION.md §10.
 const UNASSIGNED_COLUMN_KEY = "__unassigned__";
+
+// Adrian, direct: "if the job is currently running pipeline agent for
+// it to have like animation state like applying etc" — one label per
+// real ApplicationAttempt status the backend's own
+// _ACTIVE_ATTEMPT_STATUSES can report; "in_progress" gets the spinning
+// treatment (the agent is actually doing something right now), the
+// awaiting_* ones get a pulsing dot instead (paused on a real decision
+// point, not actively running, but still needs attention).
+const ACTIVE_ATTEMPT_LABEL: Record<string, string> = {
+  in_progress: "Applying…",
+  awaiting_review: "Awaiting review",
+  awaiting_handoff: "Needs you",
+  awaiting_email: "Drafting email",
+};
+
+function ActiveAttemptBadge({ status }: { status: string }) {
+  const running = status === "in_progress";
+  return (
+    <div className={cn("flex items-center gap-1.5", running ? "text-primary" : "text-warn")}>
+      {running ? (
+        <Loader2 className="size-3 shrink-0 animate-spin" />
+      ) : (
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-warn" />
+      )}
+      <span className="font-mono text-[10px]">{ACTIVE_ATTEMPT_LABEL[status] ?? "Active"}</span>
+    </div>
+  );
+}
 
 function timestamp(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -155,6 +183,19 @@ export default function PipelinePage() {
       cancelled = true;
     };
   }, [refresh, refreshStages]);
+
+  // Adrian, direct: "does the agent pipeline continue even if i leave
+  // the page" (yes — it's a real server-side run, independent of this
+  // tab) — so the board's own animated "Applying…"/"Awaiting review"
+  // badges need to poll to ever clear on their own, since nothing here
+  // pushes a live update otherwise. Only polls while at least one card
+  // actually has an active attempt, so an idle board (the common case)
+  // never polls at all.
+  React.useEffect(() => {
+    if (!applications.some((a) => a.active_attempt_status)) return;
+    const id = window.setTimeout(() => void refresh(), 8000);
+    return () => window.clearTimeout(id);
+  }, [applications, refresh]);
 
   const stageKeys = React.useMemo(() => new Set(stages.map((s) => s.key)), [stages]);
 
@@ -324,6 +365,7 @@ export default function PipelinePage() {
                           </span>
                           {app.ghosted && <Badge variant="destructive">ghosted</Badge>}
                         </div>
+                        {app.active_attempt_status && <ActiveAttemptBadge status={app.active_attempt_status} />}
                       </button>
                     ))}
                   </div>
