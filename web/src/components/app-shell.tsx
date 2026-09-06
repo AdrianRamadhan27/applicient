@@ -583,6 +583,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenuContent side="top" align="start" className="w-56">
               <DropdownMenuLabel>{authedUser.email}</DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => router.push("/console/settings")}>
+                <Settings className="size-3.5" />
+                Settings
+              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => {

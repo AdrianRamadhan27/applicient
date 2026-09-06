@@ -20,6 +20,11 @@ type AuthContextValue = {
   signup: (email: string, password: string) => Promise<string>;
   loginWithToken: (token: string) => Promise<void>;
   logout: () => void;
+  // Re-fetches /auth/me and updates `user` in place — for anything
+  // that changes account state the frontend caches here without a
+  // fresh login (e.g. console/settings/page.tsx after setting a
+  // password on a Google-only account flips has_password false->true).
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
@@ -122,9 +127,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }
 
+  async function refreshUser() {
+    const me = await api.me();
+    setUser(me);
+  }
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, connectionError, retryAuth, login, signup, loginWithToken, logout }}
+      value={{ user, loading, connectionError, retryAuth, login, signup, loginWithToken, logout, refreshUser }}
     >
       {children}
     </AuthContext.Provider>

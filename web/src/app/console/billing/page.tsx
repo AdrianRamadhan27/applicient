@@ -293,15 +293,25 @@ export default function BillingPage() {
         ) : (
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
             {subscription && (() => {
-              // Free -> Paid's own in-flight checkout also sets
-              // pending_plan_name, and /billing/checkout is now
-              // rejected once already on a paid plan (routers/
-              // billing.py) — so an "active" status with a pending
-              // plan can ONLY mean a scheduled next-cycle change
-              // (billing_service.change_subscription_plan), never an
-              // unpaid checkout still waiting on the overlay.
-              const isScheduledChange = subscription.status === "active" && !!subscription.pending_plan_name;
-              const isAwaitingPayment = subscription.status !== "active" && !!subscription.pending_plan_name;
+              // Bug (Adrian, direct): open the checkout overlay, close
+              // it without paying, refresh — showed "switching to X on
+              // [date]" (a SCHEDULED change) for an account that never
+              // paid anything. Root cause: `subscription.status` stays
+              // "active" on the Free plan the whole time (there's no
+              // Dodo-driven "pending" status pre-payment), so keying
+              // off status couldn't tell "still awaiting payment" apart
+              // from "already scheduled." The real, reliable signal is
+              // the CURRENT plan's own price: POST /billing/checkout
+              // (start_checkout, sets pending_plan_id BEFORE payment
+              // confirms) only ever runs from the Free plan — it 409s
+              // otherwise (routers/billing.py) — while POST
+              // /billing/change-plan (a genuine scheduled change) only
+              // ever runs from an ALREADY-paid plan, 409ing on Free. So
+              // pending_plan_name while price_idr === 0 can ONLY be an
+              // unpaid checkout in flight; pending_plan_name while
+              // price_idr > 0 can ONLY be a real scheduled change.
+              const isAwaitingPayment = subscription.price_idr === 0 && !!subscription.pending_plan_name;
+              const isScheduledChange = subscription.price_idr > 0 && !!subscription.pending_plan_name;
               return (
                 <div className="border border-border bg-card p-4 flex flex-col gap-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -390,12 +400,16 @@ export default function BillingPage() {
                   // this one) went disabled the moment ANY plan went
                   // pending. Only OTHER plans stay blocked while one is
                   // in flight, to avoid starting two conflicting checkouts.
+                  // Same bug/fix as the summary card above — keyed off
+                  // the current plan's own price (currentlyOnPaidPlan),
+                  // not subscription.status, which stays "active" on
+                  // Free the whole time an unpaid checkout is pending.
                   const isAwaitingPaymentForThis =
-                    subscription?.status !== "active" &&
+                    !currentlyOnPaidPlan &&
                     !!subscription?.pending_plan_id &&
                     subscription.pending_plan_id === p.id;
                   const blockedByOtherPending =
-                    subscription?.status !== "active" && !!subscription?.pending_plan_name && !isAwaitingPaymentForThis;
+                    !currentlyOnPaidPlan && !!subscription?.pending_plan_name && !isAwaitingPaymentForThis;
                   // Adrian, direct: upgrade/downgrade between two paid
                   // plans is scheduled (billing_service.
                   // change_subscription_plan), never a fresh checkout —
@@ -403,7 +417,7 @@ export default function BillingPage() {
                   // combination server-side too, this just avoids
                   // opening the Dodo overlay for a call that would fail.
                   const isScheduledToThis =
-                    subscription?.status === "active" &&
+                    currentlyOnPaidPlan &&
                     !!subscription?.pending_plan_id &&
                     subscription.pending_plan_id === p.id;
                   const isSwitch = currentlyOnPaidPlan && p.price_idr > 0 && !isCurrent;

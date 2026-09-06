@@ -14,6 +14,7 @@ import {
   Mail,
   Mic,
   Radar,
+  Settings,
   Terminal,
   Users,
   Workflow,
@@ -67,6 +68,12 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/console/credentials", label: "Credentials", icon: KeyRound, section: "System" },
   { href: "/console/billing", label: "Billing", icon: CreditCard, section: "System" },
   { href: "/console/notifications", label: "Notifications", icon: Bell, section: "System" },
+  // Account identity (email, password) — deliberately NOT the same
+  // thing as the CV/Persona "Profile Studio" tab inside Dashboard
+  // (?tab=profile), which is job-search material, not account
+  // security. Named "Settings" rather than "Profile" specifically to
+  // avoid that collision.
+  { href: "/console/settings", label: "Settings", icon: Settings, section: "System" },
 
   // SaaS pivot — the operator configures which LLM providers/models
   // power the whole deployment and is the only one who sees raw cost

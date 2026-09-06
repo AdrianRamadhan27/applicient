@@ -40,7 +40,15 @@ export class ApiError extends Error {
   }
 }
 
-export type User = { id: string; email: string; role: "user" | "admin"; email_verified: boolean };
+export type User = {
+  id: string;
+  email: string;
+  role: "user" | "admin";
+  email_verified: boolean;
+  // false for a Google-only account (no password at all) — Settings
+  // shows "Set a password" instead of "Change password" for that case.
+  has_password: boolean;
+};
 
 // SaaS pivot — admin-only surfaces.
 // Phase 16 — credits only, deliberately no `$` field here at all.
@@ -1520,6 +1528,32 @@ export const api = {
    * client-side (see resend-verification-button.tsx's own cooldown). */
   resendVerification: (email: string) =>
     request<void>("/auth/resend-verification", { method: "POST", body: JSON.stringify({ email }) }),
+
+  /** Unauthenticated by necessity, same anti-enumeration shape as
+   * resendVerification above — always resolves regardless of whether
+   * the address is registered/Google-only, rate-limited server-side
+   * (60s/1 send) by the email itself. */
+  forgotPassword: (email: string) =>
+    request<void>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+  /** `token` is whatever /reset-password?token=... on this page's own
+   * URL carried in from the emailed link — see
+   * routers/auth.py's reset_password for what makes a token valid
+   * (signature, 1h expiry, and the fingerprinted current password
+   * hash — reused or expired tokens both 400). */
+  resetPassword: (token: string, newPassword: string) =>
+    request<void>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
+    }),
+  /** Authenticated. `currentPassword` is required unless
+   * `user.has_password` is false (a Google-only account setting a
+   * password for the first time — routers/auth.py's change_password
+   * skips the current-password check only in that case). */
+  changePassword: (currentPassword: string | null, newPassword: string) =>
+    request<void>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
 
   listConnections: () => request<ProviderConnection[]>("/provider-connections"),
   createConnection: (body: {

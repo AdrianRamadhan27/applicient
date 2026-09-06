@@ -37,12 +37,21 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from applicient_api import credit_ledger, email_service, google_auth_service, pipeline_stage_service, schemas
-from applicient_api.auth import AuthError, create_access_token, decode_access_token, hash_password, verify_password
+from applicient_api.auth import (
+    AuthError,
+    create_access_token,
+    create_password_reset_token,
+    decode_access_token,
+    decode_password_reset_token,
+    hash_password,
+    password_fingerprint,
+    verify_password,
+)
 from applicient_api.billing_service import default_plan
 from applicient_api.deps import current_user_id, get_db
 from applicient_api.models.billing import Subscription
 from applicient_api.models.profile import User
-from applicient_api.rate_limit import check_rate_limit
+from applicient_api.rate_limit import check_rate_limit, rate_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -53,6 +62,11 @@ _VERIFY_TOKEN_TTL = timedelta(hours=24)
 # gets a 429 with Retry-After, never a silent no-op.
 _RESEND_LIMIT = 1
 _RESEND_WINDOW_SECONDS = 60
+# Same cooldown shape as resend-verification above, keyed by email
+# instead of a logged-in user (forgot-password is necessarily
+# unauthenticated too).
+_FORGOT_PASSWORD_LIMIT = 1
+_FORGOT_PASSWORD_WINDOW_SECONDS = 60
 
 
 def _api_base_url() -> str:
@@ -72,6 +86,28 @@ async def _send_verification_email(user: User) -> None:
         # Don't fail signup/resend over a flaky email provider or a
         # not-yet-configured RESEND_API_KEY — verification isn't a
         # login gate, so there's nothing to block here either way.
+        pass
+
+
+async def _send_password_reset_email(user: User) -> None:
+    # Only ever called with password_hash already known non-None (both
+    # call sites check first) — a Google-only account has no password
+    # to reset, and create_password_reset_token needs a real hash to
+    # fingerprint.
+    reset_token = create_password_reset_token(user.id, password_hash=user.password_hash)
+    reset_url = f"{_frontend_url()}/reset-password?token={reset_token}"
+    try:
+        await email_service.send_password_reset_email(to=user.email, reset_url=reset_url)
+    except (RuntimeError, email_service.EmailSendError):
+        pass
+
+
+async def _send_password_changed_email(user: User) -> None:
+    try:
+        await email_service.send_password_changed_email(
+            to=user.email, forgot_password_url=f"{_frontend_url()}/forgot-password"
+        )
+    except (RuntimeError, email_service.EmailSendError):
         pass
 
 
@@ -164,6 +200,75 @@ async def resend_verification(body: schemas.ResendVerificationIn, db: Session = 
     user = db.query(User).filter_by(email=email).one_or_none()
     if user is not None and not user.email_verified and user.password_hash is not None:
         await _send_verification_email(user)
+
+
+@router.post("/forgot-password", status_code=204)
+async def forgot_password(body: schemas.ForgotPasswordIn, db: Session = Depends(get_db)):
+    """Adrian, direct: "Need to add forgot password in sign in... on
+    forgot password there must be an email to verify the password
+    change." Unauthenticated by necessity — same anti-enumeration shape
+    as resend_verification above: always 204 whether or not the
+    address is registered/Google-only, rate-limited by the email
+    itself, never reveals which case it was."""
+
+    email = body.email.strip().lower()
+    check_rate_limit(
+        f"forgot-password:{email}", limit=_FORGOT_PASSWORD_LIMIT, window_seconds=_FORGOT_PASSWORD_WINDOW_SECONDS
+    )
+    user = db.query(User).filter_by(email=email).one_or_none()
+    if user is not None and user.password_hash is not None:
+        await _send_password_reset_email(user)
+
+
+@router.post("/reset-password", status_code=204)
+async def reset_password(body: schemas.ResetPasswordIn, db: Session = Depends(get_db)):
+    """The link _send_password_reset_email above emailed out lands the
+    frontend on a real form (new password), which POSTs here. The
+    token's embedded password fingerprint (auth.py's own
+    password_fingerprint) is checked against the user's CURRENT
+    password_hash — not just decoded — so a reset link stops working
+    the moment the password actually changes by any means (including a
+    second, later reset), without needing a revocation table."""
+
+    try:
+        user_id, token_fingerprint = decode_password_reset_token(body.token)
+    except AuthError:
+        raise HTTPException(400, "this reset link is invalid or has expired — request a new one")
+    user = db.query(User).filter_by(id=user_id).one_or_none()
+    if user is None or user.password_hash is None:
+        raise HTTPException(400, "this reset link is invalid or has expired — request a new one")
+    if token_fingerprint != password_fingerprint(user.password_hash):
+        raise HTTPException(400, "this reset link has already been used — request a new one")
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    await _send_password_changed_email(user)
+
+
+@router.post(
+    "/change-password",
+    status_code=204,
+    dependencies=[Depends(rate_limit("change-password", limit=5, window_seconds=300))],
+)
+async def change_password(
+    body: schemas.ChangePasswordIn, db: Session = Depends(get_db), user_id: uuid.UUID = Depends(current_user_id)
+):
+    """Adrian, direct: "Need to add change password in the profile."
+    Authenticated, unlike reset-password above (this account can
+    already prove who it is via its bearer token) — so the real check
+    here is the CURRENT password, not a fingerprinted email link.
+    A Google-only account (password_hash is None) has nothing to
+    verify against — this becomes "set a password" for it instead of
+    "change," the one case current_password is allowed to be omitted."""
+
+    user = db.query(User).filter_by(id=user_id).one_or_none()
+    if user is None:
+        raise HTTPException(404, "user not found")
+    if user.password_hash is not None:
+        if not body.current_password or not verify_password(body.current_password, user.password_hash):
+            raise HTTPException(401, "current password is incorrect")
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    await _send_password_changed_email(user)
 
 
 @router.get("/google/login")

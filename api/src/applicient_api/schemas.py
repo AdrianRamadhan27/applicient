@@ -18,6 +18,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     email_verified: bool
+    has_password: bool
 
 
 class SignupIn(BaseModel):
@@ -47,6 +48,24 @@ class SignupOut(BaseModel):
 
 class ResendVerificationIn(BaseModel):
     email: str
+
+
+class ForgotPasswordIn(BaseModel):
+    email: str
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
+class ChangePasswordIn(BaseModel):
+    # Optional — null/omitted only when the account has no password
+    # yet at all (a Google-only signup "setting" a password for the
+    # first time, not "changing" one); routers/auth.py's change_password
+    # enforces that distinction, not this schema.
+    current_password: str | None = None
+    new_password: str = Field(min_length=8)
 
 
 class ProviderConnectionCreate(BaseModel):

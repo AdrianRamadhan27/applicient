@@ -28,8 +28,12 @@ export default function LoginPage() {
   const [unverifiedEmail, setUnverifiedEmail] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("verified") === "1") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("verified") === "1") {
       toast.success("Email verified — you can log in now.");
+    }
+    if (params.get("reset") === "1") {
+      toast.success("Password updated — sign in with your new password.");
     }
   }, []);
 
@@ -85,7 +89,12 @@ export default function LoginPage() {
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            <Link href="/forgot-password" className="text-xs text-primary underline hover:text-primary/80">
+              Forgot password?
+            </Link>
+          </div>
           <PasswordInput
             id="password"
             autoComplete="current-password"

@@ -47,6 +47,16 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # the hot auth path. A real, disclosed trade-off, not an oversight.
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    @property
+    def has_password(self) -> bool:
+        """Not a column — a plain computed property, read by
+        schemas.UserOut (pydantic's `from_attributes` treats a property
+        the same as any other attribute). Lets the frontend's Settings
+        page tell a Google-only account (no password at all, "Set a
+        password") apart from a real password account ("Change
+        password") without ever exposing the hash itself."""
+        return self.password_hash is not None
+
 
 class Profile(UUIDPKMixin, TimestampMixin, UserScopedMixin, Base):
     """Versioned (F1.3) — generated documents bind to the revision that

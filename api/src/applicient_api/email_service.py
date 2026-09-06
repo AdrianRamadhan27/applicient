@@ -384,3 +384,43 @@ async def send_subscription_ended_email(*, to: str, plan_name: str, billing_url:
         preheader=f"Your {plan_name} plan has ended — renew to keep your features.", body_html=body
     )
     await send_email(to=to, subject="Your subscription has ended — Applicient", html=html_out)
+
+
+async def send_password_reset_email(*, to: str, reset_url: str) -> None:
+    """Adrian, direct: "on forgot password there must be an email to
+    verify the password change." `reset_url` points at the FRONTEND
+    (`/reset-password?token=...`), unlike verify_email's link — this
+    one lands on a real form (enter a new password), not a bare
+    redirect, so the frontend has to own it end to end."""
+
+    body = f"""
+        <p style="margin:0 0 4px; font-family:{_FONT_STACK}; font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:{_PRIMARY}; text-align:center;">Password reset</p>
+        <h1 style="margin:6px 0 16px; font-family:{_FONT_STACK}; font-size:20px; font-weight:600; color:{_TEXT}; text-align:center;">Reset your password</h1>
+        <p style="margin:0 0 4px; font-family:{_FONT_STACK}; font-size:14px; color:{_TEXT}; text-align:center;">Someone requested a password reset for this Applicient account. Click below to set a new one.</p>
+        {_button("Reset your password", reset_url)}
+        <p style="margin:20px 0 0; font-family:{_FONT_STACK}; font-size:12px; color:{_MUTED}; text-align:center;">This link expires in 1 hour and only works once. If you didn&rsquo;t request this, you can safely ignore this email — your password won&rsquo;t change.</p>
+    """
+    html_out = _email_shell(preheader="Reset your Applicient account password.", body_html=body)
+    await send_email(to=to, subject="Reset your password — Applicient", html=html_out)
+
+
+async def send_password_changed_email(*, to: str, forgot_password_url: str) -> None:
+    """Security notification, not an action — fires from BOTH real
+    password-change paths (routers/auth.py's change_password and
+    reset_password), same "tell the user whenever something
+    security-sensitive happened to their account" reasoning
+    send_subscription_ended_email already follows for billing. No
+    revocable sessions exist in this codebase (auth.py's own module
+    docstring: short-lived bearer tokens, no server-side revocation
+    list) — this email is the only real signal an account owner gets
+    if a change wasn't actually them."""
+
+    body = f"""
+        <p style="margin:0 0 4px; font-family:{_FONT_STACK}; font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:{_WARN}; text-align:center;">Security</p>
+        <h1 style="margin:6px 0 16px; font-family:{_FONT_STACK}; font-size:20px; font-weight:600; color:{_TEXT}; text-align:center;">Your password was just changed</h1>
+        <p style="margin:0 0 4px; font-family:{_FONT_STACK}; font-size:14px; color:{_TEXT}; text-align:center;">The password on your Applicient account was changed just now. If this was you, no action is needed.</p>
+        <p style="margin:12px 0 0; font-family:{_FONT_STACK}; font-size:14px; color:{_TEXT}; text-align:center;">If this <strong>wasn&rsquo;t</strong> you, reset your password right away.</p>
+        {_button("Reset your password", forgot_password_url)}
+    """
+    html_out = _email_shell(preheader="Your Applicient account password was just changed.", body_html=body)
+    await send_email(to=to, subject="Your password was changed — Applicient", html=html_out)

@@ -12,16 +12,46 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { AuthLayout } from "@/components/auth-layout";
 import { GoogleIcon } from "@/components/icons/google-icon";
+import { cn } from "@/lib/utils";
+
+// Format-only (Adrian, direct: "must be an email") — deliberately not
+// a strict RFC 5322 pattern, just "looks like local@domain.tld", so it
+// never rejects a real address on some rare-but-valid syntax. Actually
+// confirming the mailbox exists isn't done here at all: signup's own
+// verification-email link (already required before login) is the real
+// proof of a working address, which no client-side check can replace.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignupPage() {
   const { signup } = useAuth();
   const router = useRouter();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+
+  // Adrian, direct: "live password validation... even before user
+  // click on sign up" — only once the field has something in it (an
+  // untouched, empty field just shows the plain muted hint below, not
+  // an error), so a blank form doesn't open already looking broken.
+  const passwordTooShort = password.length > 0 && password.length < 8;
+  const passwordsMismatch = confirmPassword.length > 0 && confirmPassword !== password;
+  const emailInvalid = email.length > 0 && !EMAIL_PATTERN.test(email.trim());
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (emailInvalid) {
+      toast.error("Enter a valid email address");
+      return;
+    }
+    if (passwordTooShort) {
+      toast.error("Password is too short — at least 8 characters");
+      return;
+    }
+    if (passwordsMismatch) {
+      toast.error("Passwords don't match");
+      return;
+    }
     setSubmitting(true);
     try {
       const signedUpEmail = await signup(email.trim(), password);
@@ -52,9 +82,11 @@ export default function SignupPage() {
             type="email"
             autoComplete="email"
             required
+            aria-invalid={emailInvalid}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
+          {emailInvalid && <span className="text-[11px] text-crit">Enter a valid email address.</span>}
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="password">Password</Label>
@@ -63,12 +95,32 @@ export default function SignupPage() {
             autoComplete="new-password"
             minLength={8}
             required
+            aria-invalid={passwordTooShort}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <span className="text-[11px] text-muted-foreground">At least 8 characters.</span>
+          <span className={cn("text-[11px]", passwordTooShort ? "text-crit" : "text-muted-foreground")}>
+            {passwordTooShort ? "Password is too short — at least 8 characters." : "At least 8 characters."}
+          </span>
         </div>
-        <Button type="submit" disabled={submitting} className="mt-1">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="confirm-password">Confirm password</Label>
+          <PasswordInput
+            id="confirm-password"
+            autoComplete="new-password"
+            minLength={8}
+            required
+            aria-invalid={passwordsMismatch}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+          {passwordsMismatch && <span className="text-[11px] text-crit">Passwords don&apos;t match.</span>}
+        </div>
+        <Button
+          type="submit"
+          disabled={submitting || emailInvalid || passwordTooShort || passwordsMismatch}
+          className="mt-1"
+        >
           {submitting ? "Creating account…" : "Sign up"}
         </Button>
       </form>
