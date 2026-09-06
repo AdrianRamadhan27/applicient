@@ -44,6 +44,7 @@ from applicient_api.routers import (
     providers,
     radar,
     saved_searches,
+    site_content,
     sources,
     streaming,
     webhooks,
@@ -166,3 +167,5 @@ app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(calendar_events.router)
 app.include_router(dashboard.router)
+app.include_router(site_content.router)
+app.include_router(site_content.admin_router)

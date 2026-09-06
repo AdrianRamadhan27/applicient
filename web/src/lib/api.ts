@@ -40,6 +40,13 @@ export class ApiError extends Error {
   }
 }
 
+export type SiteContent = {
+  demo_video_url: string | null;
+  // slot -> a URL to fetch the admin-uploaded override image from, or
+  // null (use the bundled default asset in web/public/screenshots/).
+  media: Record<string, string | null>;
+};
+
 export type User = {
   id: string;
   email: string;
@@ -2486,6 +2493,37 @@ export const api = {
     }),
   listCreditTransactions: (before?: string) =>
     request<CreditTransaction[]>(`/billing/credits/transactions${before ? `?before=${before}` : ""}`),
+
+  // Adrian, direct: "a whole CMS where i can control what shows up in
+  // the landing page... changing like images and whatnot shouldnt be
+  // through commits" — scoped to media (the demo video link + each
+  // screenshot slot). getSiteContent is public (the landing page has
+  // no auth); the admin/* calls below require an admin token.
+  getSiteContent: () => request<SiteContent>("/site-content"),
+  getAdminSiteContent: () => request<SiteContent>("/admin/site-content"),
+  updateSiteVideo: (demoVideoUrl: string | null) =>
+    request<SiteContent>("/admin/site-content/video", {
+      method: "PATCH",
+      body: JSON.stringify({ demo_video_url: demoVideoUrl }),
+    }),
+  /** Plain multipart upload, not through request() (which always
+   * forces a JSON Content-Type) — same "raw fetch for a file body"
+   * shape streamParseCV already uses. */
+  async uploadSiteMedia(slot: string, file: File): Promise<SiteContent> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_BASE_URL}/admin/site-content/media/${slot}`, {
+      method: "POST",
+      headers: authHeader(),
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new ApiError(`POST /admin/site-content/media/${slot} -> ${res.status}: ${extractErrorMessage(body)}`, res.status);
+    }
+    return res.json();
+  },
+  resetSiteMedia: (slot: string) => request<SiteContent>(`/admin/site-content/media/${slot}`, { method: "DELETE" }),
 
   listPlans: () => request<AdminPlan[]>("/admin/plans"),
   createPlan: (body: {

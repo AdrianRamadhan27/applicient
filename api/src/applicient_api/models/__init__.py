@@ -17,6 +17,7 @@ from applicient_api.models import (  # noqa: F401
     pipeline,
     profile,
     scoring,
+    site_content,
 )
 
 __all__ = ["Base"]

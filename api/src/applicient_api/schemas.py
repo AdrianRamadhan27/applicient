@@ -1403,6 +1403,21 @@ class CreditAdjustIn(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class SiteContentOut(BaseModel):
+    """Public — the landing page fetches this with no auth. `media`
+    maps each known slot (routers/site_content.py's SITE_MEDIA_SLOTS)
+    to either a URL to fetch the admin-uploaded override from, or None
+    (meaning "use the bundled default asset in web/public/screenshots/,
+    nothing's been uploaded for this slot")."""
+
+    demo_video_url: str | None
+    media: dict[str, str | None]
+
+
+class SiteSettingsUpdate(BaseModel):
+    demo_video_url: str | None = None
+
+
 class AdminUserOut(BaseModel):
     id: uuid.UUID
     email: str

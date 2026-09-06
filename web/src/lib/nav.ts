@@ -7,6 +7,7 @@ import {
   type LucideIcon,
   DollarSign,
   FileText,
+  Image,
   Inbox,
   KeyRound,
   Layers,
@@ -89,4 +90,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/console/run-console", label: "Run Console", icon: Terminal, section: "Admin", adminOnly: true },
   { href: "/console/admin/users", label: "Users", icon: Users, section: "Admin", adminOnly: true },
   { href: "/console/admin/plans", label: "Plans", icon: Layers, section: "Admin", adminOnly: true },
+  // Landing-page CMS (Adrian, direct: media only — demo video + each
+  // screenshot slot, no admin extensibility beyond that scope).
+  { href: "/console/admin/site-content", label: "Landing Page", icon: Image, section: "Admin", adminOnly: true },
 ];

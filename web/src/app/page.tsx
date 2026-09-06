@@ -25,7 +25,8 @@ import {
   ChevronRight,
   Plus,
 } from "lucide-react";
-import { api, type Plan } from "@/lib/api";
+import { api, API_BASE_URL, type Plan, type SiteContent } from "@/lib/api";
+import { youtubeEmbedUrl } from "@/lib/youtube";
 import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -369,7 +370,7 @@ const AUTO_ADVANCE_MS = 2800;
 // pixel-identical copy), so the next advance can keep moving right.
 const SLIDES = [...HIGHLIGHTS, HIGHLIGHTS[0]];
 
-function HighlightCarousel() {
+function HighlightCarousel({ siteContent }: { siteContent: SiteContent | null }) {
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const [active, setActive] = React.useState(0);
   const [paused, setPaused] = React.useState(false);
@@ -428,7 +429,7 @@ function HighlightCarousel() {
               </div>
               <div className="flex flex-col gap-3">
                 <ScreenshotFrame
-                  src={h.screenshot.src}
+                  src={screenshotSrc(siteContent, slotFromScreenshotPath(h.screenshot.src), h.screenshot.src)}
                   alt={`${h.eyebrow} in Applicient`}
                   width={h.screenshot.width}
                   height={h.screenshot.height}
@@ -611,6 +612,21 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** slot's admin-uploaded override if one exists, else the bundled
+ * default already checked into web/public/screenshots/. */
+function screenshotSrc(siteContent: SiteContent | null, slot: string, fallback: string): string {
+  const override = siteContent?.media[slot];
+  return override ? `${API_BASE_URL}${override}` : fallback;
+}
+
+/** HIGHLIGHTS' own screenshot filenames (job-search.png, etc.) already
+ * match routers/site_content.py's SITE_MEDIA_SLOTS 1:1 — derived here
+ * instead of adding a parallel `slot` field to that array, so the two
+ * can never quietly drift apart. */
+function slotFromScreenshotPath(src: string): string {
+  return src.split("/").pop()?.replace(/\.[a-zA-Z0-9]+$/, "") ?? src;
+}
+
 export default function LandingPage() {
   const { user } = useAuth();
   const [bannerDismissed, setBannerDismissed] = React.useState(false);
@@ -625,6 +641,12 @@ export default function LandingPage() {
     rate: null,
     usd_rate: null,
   });
+  // Adrian, direct: "a whole CMS where i can control what shows up in
+  // the landing page... changing like images and whatnot shouldnt be
+  // through commits" — null means "nothing loaded yet," in which case
+  // every image below just renders its bundled default (same as
+  // before this feature existed), never a broken/missing src.
+  const [siteContent, setSiteContent] = React.useState<SiteContent | null>(null);
 
   React.useEffect(() => {
     (async () => {
@@ -637,7 +659,9 @@ export default function LandingPage() {
       }
     })();
     api.getLocalizedCurrency().then(setLocalCurrency).catch(() => {});
+    api.getSiteContent().then(setSiteContent).catch(() => {});
   }, []);
+
 
   const primaryHref = user ? "/console" : "/signup";
   const primaryLabel = user ? "Go to app" : "Get started free";
@@ -761,7 +785,7 @@ export default function LandingPage() {
           </div>
           <div className="lg:order-1">
             <ScreenshotFrame
-              src="/screenshots/dashboard.png"
+              src={screenshotSrc(siteContent, "hero", "/screenshots/dashboard.png")}
               alt="The Applicient dashboard — jobs discovered, applications tracked, and your base CV in one view"
               width={1400}
               height={673}
@@ -813,17 +837,32 @@ export default function LandingPage() {
 
       {/* Highlights: one panel per stage, scrolls sideways */}
       <Section>
-        <HighlightCarousel />
+        <HighlightCarousel siteContent={siteContent} />
       </Section>
 
       {/* Demo video */}
       <Section id="demo">
         <Eyebrow>See it in action</Eyebrow>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Watch a full run</h2>
-        <div className="mt-6 flex aspect-video w-full flex-col items-center justify-center gap-2 border border-dashed border-input bg-secondary/40">
-          <PlayCircle className="size-12 text-muted-foreground" strokeWidth={1} />
-          <span className="text-sm text-muted-foreground">Demo video coming soon</span>
-        </div>
+        {(() => {
+          const embedUrl = siteContent?.demo_video_url ? youtubeEmbedUrl(siteContent.demo_video_url) : null;
+          return embedUrl ? (
+            <div className="mt-6 aspect-video w-full overflow-hidden border border-border bg-black">
+              <iframe
+                src={embedUrl}
+                title="Applicient demo video"
+                className="h-full w-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          ) : (
+            <div className="mt-6 flex aspect-video w-full flex-col items-center justify-center gap-2 border border-dashed border-input bg-secondary/40">
+              <PlayCircle className="size-12 text-muted-foreground" strokeWidth={1} />
+              <span className="text-sm text-muted-foreground">Demo video coming soon</span>
+            </div>
+          );
+        })()}
       </Section>
 
       {/* Pricing */}
