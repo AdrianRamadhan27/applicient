@@ -81,6 +81,28 @@ def _build_chat_model(entry: ModelCatalogEntry, conn: ProviderConnection, callba
             api_key=api_key or "unused",
             base_url=_resolve_base_url(conn),
             callbacks=callbacks,
+            # Root-caused live (Adrian, direct: CV parsing's profile
+            # section stuck empty forever on a real production account)
+            # — no timeout was ever set here, so a stalled provider
+            # request just hangs indefinitely. cv.py's own CV-scoring
+            # step is the clearest victim: it does its own premature
+            # db.commit() (cv_review_service.run_cv_score_for_profile)
+            # BEFORE the caller's later commit that actually saves
+            # `parsed_profile` — so a hang in exactly that LLM call
+            # leaves evidence items durably saved while the profile
+            # info never gets written, forever, with no error surfaced
+            # anywhere (confirmed live: an AgentRun stuck status=
+            # "running" for 3+ minutes with zero further provider
+            # traffic in the logs). 120s is generous for a real
+            # structured-output call (observed real CV parses complete
+            # in 30-90s) while still bounding the wait — a timeout here
+            # raises `openai.APITimeoutError`, which llm_retry.py's
+            # invoke_structured_with_retry already retries once, and
+            # cv.py's own scoring step already degrades gracefully
+            # ("Analysis skipped: ...") if it fails twice — this one
+            # parameter is what lets either of those actually run
+            # instead of the call hanging forever first.
+            timeout=120,
         )
 
     # Anthropic and Google AI Studio both have real catalog/pricing
@@ -235,6 +257,14 @@ def resolve_embedding_tier(session: Session, *, user_id: uuid.UUID) -> tuple["Op
         # passthrough for provider-specific fields outside its typed
         # signature.
         model_kwargs={"encoding_format": "float", "extra_body": {"truncate": "END"}},
+        # Same reasoning as _build_chat_model's own `timeout` above — a
+        # stalled embeddings request has no bound otherwise. Shorter
+        # than the chat model's 120s: embedding calls are much smaller/
+        # faster requests by nature, and cv.py's own embedding step now
+        # treats a failure here as best-effort (never blocks evidence/
+        # profile from being saved), so there's no reason to make a
+        # real user wait as long for this to give up.
+        timeout=60,
     )
     # Returned alongside the client (rather than re-derived from
     # openai_api_base downstream) because more than one provider can

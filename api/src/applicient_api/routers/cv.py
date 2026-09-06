@@ -217,22 +217,49 @@ async def _parse_cv_stream(
             emit_step("saving", t0, {"count": len(created)})
             yield _event("saving", "done", f"Saved {len(created)} evidence items")
 
-            # --- embedding ---
+            # --- write the core result now, BEFORE embedding/scoring
+            # (Adrian, direct: "why is profile write done after cv
+            # scoring" — there was never a real dependency reason for
+            # that order, just incidental build-out sequence. Moved
+            # here so a hang or failure in either of the two slower,
+            # LLM-calling steps below can never again cost the user the
+            # evidence bank + profile info they just uploaded a CV for.
+            # Confirmed live this was a real, not just theoretical,
+            # risk: a stalled CV-scoring call (no timeout existed on any
+            # LLM client until tier_resolution.py's own fix) left
+            # evidence items committed — run_cv_score_for_profile does
+            # its own internal db.commit() — while parsed_profile stayed
+            # permanently empty and the whole request hung forever. ---
+            profile.parsed_profile = extracted.profile.model_dump(mode="json", exclude_none=True)
+            profile.parsed_at = datetime.now(timezone.utc)
+            profile.confirmed = False
+            profile.revision += 1
+            db.commit()
+
+            # --- embedding — best-effort from here on, same reasoning
+            # scoring below already followed: a stalled/failed embed
+            # must never cost the user the evidence bank or profile
+            # info that's already durably saved above. ---
             t0 = datetime.now(timezone.utc)
             yield _event("embedding", "started", f"Embedding {len(created)} evidence items")
-            await to_thread(
-                embed_evidence_items,
-                db,
-                embeddings_client,
-                created,
-                user_id=user_id,
-                session_factory=session_factory,
-                provider=embeddings_provider,
-                stage="cv-parse",
-                agent_run_id=run.id,
-            )
-            emit_step("embedding", t0, {})
-            yield _event("embedding", "done", "Embeddings complete")
+            try:
+                await to_thread(
+                    embed_evidence_items,
+                    db,
+                    embeddings_client,
+                    created,
+                    user_id=user_id,
+                    session_factory=session_factory,
+                    provider=embeddings_provider,
+                    stage="cv-parse",
+                    agent_run_id=run.id,
+                )
+                db.commit()
+                emit_step("embedding", t0, {})
+                yield _event("embedding", "done", "Embeddings complete")
+            except Exception as exc:
+                db.rollback()
+                yield _event("embedding", "done", f"Embeddings skipped: {str(exc)[:200]}")
 
             # --- scoring (Adrian, direct: "after user upload cv there
             # needs to be cv scoring... to give analysis and feedback",
@@ -252,11 +279,8 @@ async def _parse_cv_stream(
             except Exception as exc:
                 yield _event("scoring", "done", f"Analysis skipped: {str(exc)[:200]}")
 
-            # --- finalize ---
-            profile.parsed_profile = extracted.profile.model_dump(mode="json", exclude_none=True)
-            profile.parsed_at = datetime.now(timezone.utc)
-            profile.confirmed = False
-            profile.revision += 1
+            # --- finalize: run bookkeeping only now — the actual
+            # result the user cares about was already committed above. ---
             active_profile = active_model_profile(db)
             run.model_profile_id = active_profile.id if active_profile else None
             run.status = "completed"
