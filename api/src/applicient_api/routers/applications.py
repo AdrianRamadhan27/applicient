@@ -32,7 +32,11 @@ from applicient_agents.application_service import (
 
 from applicient_api import pipeline_stage_service, schemas
 from applicient_api.deps import current_user_id, get_db, get_session_factory
-from applicient_api.document_resolution import available_document_types, resolve_application_documents
+from applicient_api.document_resolution import (
+    available_document_types,
+    resolve_application_documents,
+    resolve_job_group_id_for,
+)
 from applicient_api.models.agents import AgentRun, RunEvent
 from applicient_api.models.discovery import Job
 from applicient_api.models.enums import EventActor
@@ -209,11 +213,15 @@ def create_application(
     if persona is None:
         raise HTTPException(404, "persona not found")
 
+    job_group_id = body.job_group_id or resolve_job_group_id_for(
+        db, job_id=body.job_id, persona_id=persona.id, user_id=user_id
+    )
+
     application = Application(
         user_id=user_id,
         job_id=body.job_id,
         persona_id=persona.id,
-        job_group_id=body.job_group_id,
+        job_group_id=job_group_id,
         primary_document_id=body.primary_document_id,
         # M5 follow-up — the user's own first pipeline stage, not a
         # fixed "discovered" literal. The fallback is defensive only:

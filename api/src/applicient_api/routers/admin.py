@@ -6,8 +6,10 @@ editable without a deploy. Every route here requires
 
 from __future__ import annotations
 
+import os
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,53 @@ from applicient_api.models.billing import CreditPack, FeatureCreditCost, Plan, S
 from applicient_api.models.profile import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _browser_worker_url() -> str:
+    return os.environ.get("BROWSER_WORKER_URL", "http://localhost:8100").rstrip("/")
+
+
+# Adrian, direct: hit "2 concurrent browser sessions already open" in
+# production and asked for an admin page to monitor + kill sessions.
+# browser-worker has no auth of its own (reachable only from inside the
+# compose network — see its own docstrings), so these routes are the
+# real auth boundary: current_admin_user gates them, then they're a
+# thin proxy onto browser-worker's own GET/DELETE /sessions (added
+# alongside this same request — see browser_worker/sessions.py).
+@router.get("/browser-sessions")
+async def list_browser_sessions(_admin_id: uuid.UUID = Depends(current_admin_user)):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_browser_worker_url()}/sessions")
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"could not reach browser-worker: {exc}")
+    return r.json()
+
+
+@router.delete("/browser-sessions/{session_id}")
+async def kill_browser_session(session_id: str, _admin_id: uuid.UUID = Depends(current_admin_user)):
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.delete(f"{_browser_worker_url()}/sessions/{session_id}")
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"could not reach browser-worker: {exc}")
+    if r.status_code == 404:
+        raise HTTPException(404, "session not found — it may have already closed on its own")
+    if r.is_error:
+        raise HTTPException(502, f"browser-worker rejected the close request: {r.text}")
+    return {"closed": session_id}
+
+
+@router.delete("/browser-sessions")
+async def kill_all_browser_sessions(_admin_id: uuid.UUID = Depends(current_admin_user)):
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.delete(f"{_browser_worker_url()}/sessions")
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"could not reach browser-worker: {exc}")
+    return r.json()
 
 
 @router.get("/users", response_model=list[schemas.AdminUserOut])

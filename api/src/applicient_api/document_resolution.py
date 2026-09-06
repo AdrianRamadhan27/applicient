@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from applicient_api.models.documents import Document
+from applicient_api.models.documents import Document, JobGroup, JobGroupMember
 from applicient_api.models.pipeline import Application
 from applicient_api.models.profile import Persona, Profile
 from applicient_api.rendering_service import RenderError, render_document
@@ -41,6 +41,63 @@ class ResolvedDocument:
     key: str
     filename: str
     content_type: str
+
+
+def resolve_job_group_id_for(db: Session, *, job_id: uuid.UUID, persona_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID | None:
+    """Adrian, direct: "this job is already added to job group and has
+    tailored cv. But the cv button direct to base cv instead of the
+    tailored cv for that job group" — an Application only ever got
+    `job_group_id` set if whichever flow created it happened to pass it
+    explicitly (only Composer's own "add to pipeline" ever did — Job
+    Inbox and this same page's own "Add to pipeline" dialog never did,
+    even when a job group with a real tailored CV already existed for
+    this exact (job, persona)). Called both at Application-creation
+    time (routers/applications.py) AND every time documents are
+    resolved for one (below) — the latter is what makes this a real
+    fix for an ALREADY-existing, already-broken Application row too,
+    not just new ones, since it never needs a backfill migration.
+
+    A job can belong to more than one group (JobGroupMember is
+    many-to-many) — genuinely ambiguous only in that case, broken by
+    preferring whichever candidate group actually has a generated
+    Document (a group with no tailored CV yet is no better than none
+    for this purpose), most recent first."""
+
+    group_ids = [
+        row[0]
+        for row in (
+            db.query(JobGroupMember.job_group_id)
+            .join(JobGroup, JobGroup.id == JobGroupMember.job_group_id)
+            .filter(JobGroupMember.job_id == job_id, JobGroup.persona_id == persona_id)
+            .all()
+        )
+    ]
+    if not group_ids:
+        return None
+    with_document = (
+        db.query(Document.job_group_id)
+        .filter(Document.job_group_id.in_(group_ids), Document.user_id == user_id)
+        .order_by(Document.created_at.desc())
+        .first()
+    )
+    return with_document[0] if with_document is not None else group_ids[0]
+
+
+def _effective_job_group_id(db: Session, application: Application) -> uuid.UUID | None:
+    """`application.job_group_id` if already set, else a live lookup —
+    and self-heals the row the first time it resolves to something, so
+    this lookup only ever runs once per application rather than on
+    every single document fetch/panel open."""
+
+    if application.job_group_id is not None:
+        return application.job_group_id
+    resolved = resolve_job_group_id_for(
+        db, job_id=application.job_id, persona_id=application.persona_id, user_id=application.user_id
+    )
+    if resolved is not None:
+        application.job_group_id = resolved
+        db.commit()
+    return resolved
 
 
 def _add_rendered(
@@ -85,10 +142,11 @@ def resolve_application_documents(
             if doc is not None:
                 _add_rendered(resolved, session_factory, doc, user_id)
 
-        if application.job_group_id is not None:
+        job_group_id = _effective_job_group_id(db, application)
+        if job_group_id is not None:
             docs = (
                 db.query(Document)
-                .filter_by(job_group_id=application.job_group_id, user_id=user_id)
+                .filter_by(job_group_id=job_group_id, user_id=user_id)
                 .order_by(Document.doc_type, Document.version.desc())
                 .all()
             )
@@ -131,10 +189,11 @@ def available_document_types(db: Session, *, application: Application) -> list[s
         if doc is not None:
             types.add(doc.doc_type)
 
-    if application.job_group_id is not None:
+    job_group_id = _effective_job_group_id(db, application)
+    if job_group_id is not None:
         rows = (
             db.query(Document.doc_type)
-            .filter_by(job_group_id=application.job_group_id, user_id=application.user_id)
+            .filter_by(job_group_id=job_group_id, user_id=application.user_id)
             .distinct()
             .all()
         )

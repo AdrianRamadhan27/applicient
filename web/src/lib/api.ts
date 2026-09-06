@@ -40,6 +40,16 @@ export class ApiError extends Error {
   }
 }
 
+export type BrowserSession = {
+  id: string;
+  // "user:<id>:app:<id>" for a real application-agent run, "job-url-parse"
+  // for the one-shot job-listing parser, or null if some other caller
+  // never passed one — always opaque, browser-worker never parses it.
+  label: string | null;
+  created_at: string;
+  url: string;
+};
+
 export type SiteContent = {
   demo_video_url: string | null;
   // slot -> a URL to fetch the admin-uploaded override image from, or
@@ -2524,6 +2534,17 @@ export const api = {
     return res.json();
   },
   resetSiteMedia: (slot: string) => request<SiteContent>(`/admin/site-content/media/${slot}`, { method: "DELETE" }),
+
+  // Adrian, direct: "make it in admin page so i can monitor concurrent
+  // browser usage. and also shut them down if possible" — hit the
+  // 2-concurrent-session cap in production. A thin proxy through api's
+  // own admin router onto browser-worker's own GET/DELETE /sessions
+  // (browser-worker has no auth of its own, so current_admin_user on
+  // the api side is the real gate here).
+  listBrowserSessions: () => request<BrowserSession[]>("/admin/browser-sessions"),
+  killBrowserSession: (sessionId: string) =>
+    request<{ closed: string }>(`/admin/browser-sessions/${sessionId}`, { method: "DELETE" }),
+  killAllBrowserSessions: () => request<{ closed: number }>("/admin/browser-sessions", { method: "DELETE" }),
 
   listPlans: () => request<AdminPlan[]>("/admin/plans"),
   createPlan: (body: {

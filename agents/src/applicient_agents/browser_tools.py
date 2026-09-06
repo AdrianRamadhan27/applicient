@@ -101,7 +101,16 @@ def build_application_tools(
         a logged-out page instead of a login wall) before assuming you
         need to log in at all."""
 
-        payload: dict = {"url": url}
+        # Adrian, direct: "make it in admin page so i can monitor
+        # concurrent browser usage" — an opaque label browser-worker
+        # just stores and echoes back on GET /sessions, never parses;
+        # user_id/application_id are real closure variables here (this
+        # whole tool set is built per-application, see
+        # build_application_tools's own docstring), the one real
+        # identifying context that exists at browser-worker's session
+        # layer, which otherwise has none of its own (no DB/user access
+        # by design).
+        payload: dict = {"url": url, "label": f"user:{user_id}:app:{application_id}"}
         if storage_state is not None:
             payload["storage_state"] = storage_state
         r = await http_client.post(f"{base}/sessions", json=payload)

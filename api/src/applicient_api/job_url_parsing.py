@@ -94,7 +94,7 @@ async def open_snapshot_and_close(url: str) -> str | None:
 
     async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_SECONDS) as client:
         try:
-            r = await client.post(f"{BROWSER_WORKER_URL}/sessions", json={"url": url})
+            r = await client.post(f"{BROWSER_WORKER_URL}/sessions", json={"url": url, "label": "job-url-parse"})
         except httpx.HTTPError:
             return None
         if r.is_error:

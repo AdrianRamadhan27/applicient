@@ -45,6 +45,15 @@ class Session:
     context: BrowserContext
     page: Page
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Adrian, direct: "make it in admin page so i can monitor concurrent
+    # browser usage" — an arbitrary, opaque string the CALLER supplies
+    # (e.g. "user:<id>:app:<id>"), purely for that admin monitor to show
+    # something identifying. Deliberately just a string, never parsed
+    # or validated here — this worker still has no DB/user access of
+    # its own (see this module's own docstring); the label is display-
+    # only, and browser_tools.py's browser_open is the one real caller
+    # that has real user/application context to put in it.
+    label: str | None = None
 
 
 class SessionManager:
@@ -81,7 +90,7 @@ class SessionManager:
             raise SessionNotFoundError(session_id)
         return session
 
-    async def open(self, url: str, storage_state: dict | None = None) -> tuple[str, str]:
+    async def open(self, url: str, storage_state: dict | None = None, label: str | None = None) -> tuple[str, str]:
         """F6.2 — opens the given URL in a fresh, isolated context and
         returns (session_id, initial accessibility snapshot). `storage_state`
         restores a persisted authenticated context (F6.6) when provided."""
@@ -96,9 +105,29 @@ class SessionManager:
         await page.goto(url, wait_until="domcontentloaded")
 
         session_id = str(uuid.uuid4())
-        self._sessions[session_id] = Session(id=session_id, context=context, page=page)
+        self._sessions[session_id] = Session(id=session_id, context=context, page=page, label=label)
         snapshot = await self.snapshot(session_id)
         return session_id, snapshot
+
+    def list_sessions(self) -> list[Session]:
+        """Adrian, direct: an admin monitor for concurrent browser
+        usage — sorted oldest-first, since a stuck/runaway session is
+        the one that's been open longest, exactly what an admin
+        scanning this list actually wants to spot first."""
+
+        return sorted(self._sessions.values(), key=lambda s: s.created_at)
+
+    async def close_all(self) -> int:
+        """The admin monitor's "shut them all down" action — closes
+        every context cleanly (same teardown `close` already does per
+        session) without touching the shared Chromium process itself,
+        unlike `stop()` above (process-shutdown only, closes the
+        browser too)."""
+
+        ids = list(self._sessions)
+        for session_id in ids:
+            await self.close(session_id)
+        return len(ids)
 
     async def goto(self, session_id: str, url: str) -> None:
         """Navigates this *existing* session's page to a new URL,

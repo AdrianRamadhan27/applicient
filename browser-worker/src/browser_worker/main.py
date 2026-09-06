@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
@@ -48,11 +49,23 @@ def _manager(app_: FastAPI) -> SessionManager:
 class OpenSessionIn(BaseModel):
     url: str
     storage_state: dict | None = None
+    label: str | None = None
 
 
 class OpenSessionOut(BaseModel):
     session_id: str
     snapshot: str
+
+
+class SessionSummary(BaseModel):
+    id: str
+    label: str | None
+    created_at: datetime
+    url: str
+
+
+class CloseAllOut(BaseModel):
+    closed: int
 
 
 class SnapshotOut(BaseModel):
@@ -99,12 +112,33 @@ async def health() -> dict:
 @app.post("/sessions", response_model=OpenSessionOut)
 async def open_session(body: OpenSessionIn) -> OpenSessionOut:
     try:
-        session_id, snapshot = await _manager(app).open(body.url, storage_state=body.storage_state)
+        session_id, snapshot = await _manager(app).open(body.url, storage_state=body.storage_state, label=body.label)
     except SessionLimitError as exc:
         raise HTTPException(503, str(exc))
     except PlaywrightError as exc:
         raise HTTPException(422, str(exc))
     return OpenSessionOut(session_id=session_id, snapshot=snapshot)
+
+
+@app.get("/sessions", response_model=list[SessionSummary])
+async def list_sessions() -> list[SessionSummary]:
+    """Adrian, direct: "make it in admin page so i can monitor
+    concurrent browser usage" — every currently-open session, oldest
+    first. `url` reads Playwright's own live `page.url` (a plain
+    attribute, not a snapshot taken at open time), so this always
+    reflects wherever the session has actually navigated to since."""
+
+    return [
+        SessionSummary(id=s.id, label=s.label, created_at=s.created_at, url=s.page.url)
+        for s in _manager(app).list_sessions()
+    ]
+
+
+@app.delete("/sessions", response_model=CloseAllOut)
+async def close_all_sessions() -> CloseAllOut:
+    """The admin monitor's "shut them all down" action."""
+
+    return CloseAllOut(closed=await _manager(app).close_all())
 
 
 @app.post("/sessions/{session_id}/goto", response_model=SnapshotOut)

@@ -2,6 +2,7 @@ import {
   Bell,
   BotMessageSquare,
   CalendarDays,
+  AppWindow,
   Cpu,
   CreditCard,
   type LucideIcon,
@@ -88,6 +89,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/console/models", label: "Models", icon: Cpu, section: "Admin", adminOnly: true },
   { href: "/console/cost", label: "Cost", icon: DollarSign, section: "Admin", adminOnly: true },
   { href: "/console/run-console", label: "Run Console", icon: Terminal, section: "Admin", adminOnly: true },
+  // Adrian, direct: hit browser-worker's concurrent-session cap in
+  // production, wants to monitor + kill sessions from an admin page.
+  { href: "/console/admin/browser-sessions", label: "Browser Sessions", icon: AppWindow, section: "Admin", adminOnly: true },
   { href: "/console/admin/users", label: "Users", icon: Users, section: "Admin", adminOnly: true },
   { href: "/console/admin/plans", label: "Plans", icon: Layers, section: "Admin", adminOnly: true },
   // Landing-page CMS (Adrian, direct: media only — demo video + each
