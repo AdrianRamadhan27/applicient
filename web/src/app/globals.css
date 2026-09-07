@@ -305,12 +305,42 @@
   animation: anim-hand-stop 3s ease-in-out infinite;
 }
 
+/* A gentle idle bob — Adrian, direct: the landing-page mocks "needs
+   more animation like floating/bouncing". Slower and smaller than
+   anim-pop (which reads as a discrete "event"), meant for things that
+   should just feel alive while sitting idle: a chat avatar, the
+   dashboard mock's active sidebar icon, a waveform's mic glyph. */
+@keyframes anim-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.anim-float {
+  animation: anim-float 2.4s ease-in-out infinite;
+}
+
+/* An idle audio-visualizer bar — the hero dashboard's Interview tab
+   preview isn't wired to a real mic (see dashboard-mock.tsx's own
+   InterviewTab comment), so this is what stands in for "the waveform is
+   alive" while it's just sitting there: each bar scales from its own
+   base line, staggered per-bar via inline animation-delay so the whole
+   row reads as one continuous equalizer rather than N synced bars. */
+@keyframes anim-bar-pulse {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1); }
+}
+.anim-bar-pulse {
+  animation: anim-bar-pulse 1s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-flow,
   .anim-pop,
   .anim-fade-cycle,
   .anim-press,
-  .anim-hand-stop {
+  .anim-hand-stop,
+  .anim-float,
+  .anim-bar-pulse {
     animation: none;
   }
 }

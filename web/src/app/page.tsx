@@ -11,21 +11,14 @@ import {
   FileCheck2,
   MousePointerClick,
   KanbanSquare,
-  BotMessageSquare,
   Mic,
   PlayCircle,
   ChevronDown,
-  ArrowRight,
-  FileText,
-  Check,
-  Building2,
-  Mail,
-  Hand,
   ChevronLeft,
   ChevronRight,
   Plus,
 } from "lucide-react";
-import { api, API_BASE_URL, type Plan, type SiteContent } from "@/lib/api";
+import { api, type Plan, type SiteContent } from "@/lib/api";
 import { youtubeEmbedUrl } from "@/lib/youtube";
 import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -36,6 +29,13 @@ import { localEstimateLabel, primaryPriceLabel, type LocalizedCurrency } from "@
 import { TierLabel } from "@/lib/plan-tiers";
 import { cn } from "@/lib/utils";
 import { ParticleField } from "@/components/particle-field";
+import { MockFrame } from "@/components/landing/mock-frame";
+import { HeroChatMock } from "@/components/landing/hero-chat-mock";
+import { JobSearchResultsMock } from "@/components/landing/job-search-results-mock";
+import { InterviewPracticeMock } from "@/components/landing/interview-practice-mock";
+import { CvVerifierMock } from "@/components/landing/cv-verifier-mock";
+import { AutoApplyMock } from "@/components/landing/auto-apply-mock";
+import { PipelineTrackingMock } from "@/components/landing/pipeline-tracking-mock";
 
 // Structure follows the saas-ui-nextjs-landing-page template's own
 // section order (announcement banner -> header -> hero -> logos ->
@@ -104,201 +104,6 @@ const FAQ = [
   },
 ];
 
-// A real product screenshot, framed in this app's own mock-browser
-// chrome (same three-dot bar language ApplyDiagram already draws in
-// pure CSS) so a real PNG reads as "a window onto the actual app"
-// rather than a bare image dropped onto the page. Used for the hero's
-// dashboard shot and, smaller, above each carousel slide's own
-// animated diagram — one component, two sizes, not two copies of the
-// frame markup. Plain `<img>` (not next/image) — this codebase has
-// never used the Next image optimizer (would need `sharp` added to
-// the Docker image for zero benefit here, since every screenshot is
-// already pre-resized to its real display width before being checked
-// in, see web/public/screenshots/ — nothing left for a runtime
-// optimizer to do).
-function ScreenshotFrame({
-  src,
-  alt,
-  width,
-  height,
-  priority = false,
-  className,
-}: {
-  src: string;
-  alt: string;
-  width: number;
-  height: number;
-  priority?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={cn("overflow-hidden border border-border bg-card", className)}>
-      <div className="flex items-center gap-1 border-b border-border px-2.5 py-2">
-        <span className="size-1.5 shrink-0 bg-border" />
-        <span className="size-1.5 shrink-0 bg-border" />
-        <span className="size-1.5 shrink-0 bg-border" />
-      </div>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={alt}
-        width={width}
-        height={height}
-        loading={priority ? "eager" : "lazy"}
-        fetchPriority={priority ? "high" : "auto"}
-        className="block h-auto w-full"
-      />
-    </div>
-  );
-}
-
-// Illustrates the exact claim-verifier flow the text beside it
-// describes — a CV claim goes into the verifier, and only comes out
-// SUPPORTED or UNSUPPORTED, reusing the same two badge colors/labels
-// already shown in that text column instead of inventing new ones.
-function VerifierDiagram() {
-  return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col items-center gap-1.5 border border-border bg-card px-4 py-3">
-          <FileText className="size-5 text-muted-foreground" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-muted-foreground">CV claim</span>
-        </div>
-        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
-          <ShieldCheck className="anim-pop size-5 text-primary" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-primary">Verifier</span>
-        </div>
-      </div>
-      <div className="h-4 w-px bg-border" />
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <div className="anim-fade-cycle flex items-center gap-1.5 border border-ok bg-ok-bg px-3 py-1.5">
-          <Check className="size-3.5 shrink-0 text-ok" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-ok">SUPPORTED</span>
-        </div>
-        <div className="anim-fade-cycle flex items-center gap-1.5 border border-crit bg-crit-bg px-3 py-1.5" style={{ animationDelay: "1.2s" }}>
-          <X className="size-3.5 shrink-0 text-crit" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-crit">UNSUPPORTED</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Sources feeding the scorer, output as a ranked list — three bars of
-// decreasing width/color (ok -> warn -> muted) standing in for
-// strong_apply/apply/lower-ranked results, same rank colors used on
-// every real Job Inbox card.
-function DiscoveryDiagram() {
-  return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-1.5 border border-border bg-card px-3 py-1.5">
-            <Search className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-            <span className="font-mono text-[9px] text-muted-foreground">Job boards</span>
-          </div>
-          <div className="flex items-center gap-1.5 border border-border bg-card px-3 py-1.5">
-            <Building2 className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-            <span className="font-mono text-[9px] text-muted-foreground">ATS sites</span>
-          </div>
-        </div>
-        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
-          <ShieldCheck className="anim-pop size-5 text-primary" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-primary">Score</span>
-        </div>
-      </div>
-      <div className="h-4 w-px bg-border" />
-      <div className="flex w-40 flex-col gap-1.5">
-        <div className="anim-fade-cycle h-2 w-full bg-ok" />
-        <div className="anim-fade-cycle h-2 w-4/5 bg-warn" style={{ animationDelay: "0.3s" }} />
-        <div className="anim-fade-cycle h-2 w-3/5 bg-muted" style={{ animationDelay: "0.6s" }} />
-      </div>
-    </div>
-  );
-}
-
-// A mock browser window, filled fields, stopped right at Submit — the
-// literal "agent fills the form and stops before the submit button"
-// promise, not just described in text.
-function ApplyDiagram() {
-  return (
-    <div className="flex w-48 flex-col border border-border bg-card">
-      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
-        <span className="size-1.5 shrink-0 bg-border" />
-        <span className="size-1.5 shrink-0 bg-border" />
-        <span className="size-1.5 shrink-0 bg-border" />
-      </div>
-      <div className="flex flex-col gap-1.5 p-3">
-        <div className="h-2 w-full bg-secondary" />
-        <div className="h-2 w-4/5 bg-secondary" />
-        <div className="h-2 w-3/5 bg-secondary" />
-        <div className="mt-1.5 flex items-center justify-between">
-          <span className="anim-press border border-primary px-2 py-1 font-mono text-[9px] text-primary">Submit</span>
-          <Hand className="anim-hand-stop size-4 shrink-0 text-warn" strokeWidth={1.5} />
-        </div>
-      </div>
-      <div className="flex items-center justify-center gap-1.5 border-t border-warn bg-warn-bg px-2 py-1.5">
-        <span className="font-mono text-[9px] text-warn">waiting for your review</span>
-      </div>
-    </div>
-  );
-}
-
-// Inbox -> pipeline, with the two most common real detections shown —
-// same ok/crit coloring the Application Pipeline board itself uses.
-function EmailDiagram() {
-  return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col items-center gap-1.5 border border-border bg-card px-4 py-3">
-          <Mail className="size-5 text-muted-foreground" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-muted-foreground">Inbox</span>
-        </div>
-        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
-          <KanbanSquare className="anim-pop size-5 text-primary" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-primary">Pipeline</span>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <div className="anim-fade-cycle border border-ok bg-ok-bg px-3 py-1.5">
-          <span className="font-mono text-[9px] text-ok">Interview detected</span>
-        </div>
-        <div className="anim-fade-cycle border border-crit bg-crit-bg px-3 py-1.5" style={{ animationDelay: "1.2s" }}>
-          <span className="font-mono text-[9px] text-crit">Rejection detected</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// A spoken exchange (mic in, agent voice out), ending in real scored
-// feedback — same bordered-box-plus-icon language and anim-* classes
-// as every other panel here, not a new visual idiom.
-function InterviewPracticeDiagram() {
-  return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col items-center gap-1.5 border border-primary bg-card px-4 py-3">
-          <Mic className="anim-pop size-5 text-primary" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-primary">You, out loud</span>
-        </div>
-        <ArrowRight className="anim-flow size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
-        <div className="flex flex-col items-center gap-1.5 border border-border bg-card px-4 py-3">
-          <BotMessageSquare className="size-5 text-muted-foreground" strokeWidth={1.5} />
-          <span className="font-mono text-[9px] text-muted-foreground">AI interviewer</span>
-        </div>
-      </div>
-      <div className="h-4 w-px bg-border" />
-      <div className="anim-fade-cycle border border-ok bg-ok-bg px-3 py-1.5">
-        <span className="font-mono text-[9px] text-ok">Scored feedback</span>
-      </div>
-    </div>
-  );
-}
-
 // One panel per major stage of the loop, not just the claim verifier —
 // raised directly by Adrian after the verifier panel shipped alone;
 // scrolls sideways (scroll-snap, no carousel library — same "no new
@@ -309,21 +114,22 @@ const HIGHLIGHTS = [
     eyebrow: "AI job search",
     title: "Every board, one honest AI score",
     body: "Search Greenhouse, Lever, Ashby, Workable and more from one plain list of target roles — deduplicated across sources automatically. Every posting found gets AI-ranked dimension by dimension against your real profile, with the exact reasoning shown, never a bare number.",
-    // The Job Search page mid-run alongside the Assistant chat that
-    // kicked it off — one real screenshot standing in for two of the
-    // pages this whole highlight strip previously had no shot of.
-    screenshot: { src: "/screenshots/job-search.png", width: 1400, height: 694 },
-    diagram: <DiscoveryDiagram />,
+    // A search bar typing out a query, then results streaming in one by
+    // one with a score and a one-line reason each — Adrian, direct: "make
+    // it be like a search element being typed then jobs 1 by 1 show up
+    // with scores and recommendations" (the chat framing moved to the
+    // hero's own HeroChatMock, which now covers the whole product loop).
+    mock: <JobSearchResultsMock />,
     badges: null as React.ReactNode,
   },
   {
     eyebrow: "The hard guarantee",
     title: "Zero fabricated claims — enforced technically, not just promised",
     body: "Every AI-tailored bullet point is generated with a link back to a real, atomic piece of your evidence bank. A separate, adversarial AI verifier agent then checks each claim — and it never sees the job description, so it can't rationalize inflating something to fit what a role wants. Anything unsupported or inflated blocks export until it's fixed.",
-    // CV Composer's real "What changed" diff view — the literal
-    // struck-through/inserted text the verifier's pass produces.
-    screenshot: { src: "/screenshots/cv-compose.png", width: 1400, height: 645 },
-    diagram: <VerifierDiagram />,
+    // An interactive mock of CV Composer's real "What changed" diff view —
+    // the literal struck-through/inserted text and verifier verdicts a
+    // real pass produces, staged one beat at a time instead of a screenshot.
+    mock: <CvVerifierMock />,
     badges: (
       <>
         <Badge variant="secondary" className="font-mono text-[10px]">SUPPORTED</Badge>
@@ -337,24 +143,29 @@ const HIGHLIGHTS = [
     eyebrow: "AI auto-apply",
     title: "The AI agent applies. You approve the submit.",
     body: "Applicient's AI agent opens the real application form and fills every field — resume, cover letter, screening questions — then stops right before the submit button for your review. A captcha or login wall hands the live browser back to you directly, mid-run.",
-    screenshot: { src: "/screenshots/pipeline.png", width: 1400, height: 695 },
-    diagram: <ApplyDiagram />,
+    // The real form-filling flow, field by field, stopped right at
+    // Submit — the literal promise in the text beside it, not just a
+    // static screenshot of it.
+    mock: <AutoApplyMock />,
     badges: null as React.ReactNode,
   },
   {
     eyebrow: "Email analyze",
     title: "Your pipeline updates itself",
     body: "Interview invites, rejections and assessment requests are detected straight from your inbox and reflected on the pipeline board automatically — no manual status updates after you hit apply.",
-    screenshot: { src: "/screenshots/track-status.png", width: 1400, height: 745 },
-    diagram: <EmailDiagram />,
+    // An inbox email arriving, getting labeled, and its matching
+    // application card sliding to the right pipeline column on its own.
+    mock: <PipelineTrackingMock />,
     badges: null as React.ReactNode,
   },
   {
     eyebrow: "AI interview practice",
     title: "A real spoken AI interview, not a script",
     body: "Practice out loud with an AI interviewer grounded in the actual role and your real experience — or a full group discussion where it plays every other participant. Every session ends with structured, scored feedback.",
-    screenshot: { src: "/screenshots/interview.png", width: 1400, height: 770 },
-    diagram: <InterviewPracticeDiagram />,
+    // A real, live camera/mic demo (confirmed directly) — not a
+    // screenshot. See InterviewPracticeMock's own docstring for why the
+    // AI's question/reply are scripted rather than a real backend call.
+    mock: <InterviewPracticeMock />,
     badges: null as React.ReactNode,
   },
 ];
@@ -370,7 +181,7 @@ const AUTO_ADVANCE_MS = 2800;
 // pixel-identical copy), so the next advance can keep moving right.
 const SLIDES = [...HIGHLIGHTS, HIGHLIGHTS[0]];
 
-function HighlightCarousel({ siteContent }: { siteContent: SiteContent | null }) {
+function HighlightCarousel() {
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const [active, setActive] = React.useState(0);
   const [paused, setPaused] = React.useState(false);
@@ -428,15 +239,7 @@ function HighlightCarousel({ siteContent }: { siteContent: SiteContent | null })
                 {h.badges && <div className="mt-4 flex flex-wrap gap-2">{h.badges}</div>}
               </div>
               <div className="flex flex-col gap-3">
-                <ScreenshotFrame
-                  src={screenshotSrc(siteContent, slotFromScreenshotPath(h.screenshot.src), h.screenshot.src)}
-                  alt={`${h.eyebrow} in Applicient`}
-                  width={h.screenshot.width}
-                  height={h.screenshot.height}
-                />
-                <div className="flex aspect-[3/1] items-center justify-center border border-dashed border-input bg-secondary/40">
-                  {h.diagram}
-                </div>
+                <MockFrame>{h.mock}</MockFrame>
               </div>
             </div>
           </div>
@@ -600,7 +403,7 @@ function ScrollParticleField() {
 
 function Section({ id, className, children }: { id?: string; className?: string; children: React.ReactNode }) {
   return (
-    <section id={id} className={cn("mx-auto w-full max-w-7xl px-5 py-16 sm:py-20", className)}>
+    <section id={id} className={cn("mx-auto w-full max-w-[96rem] px-5 py-16 sm:py-20", className)}>
       {children}
     </section>
   );
@@ -610,21 +413,6 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
     <span className="font-mono text-[11px] tracking-wider uppercase text-primary">{children}</span>
   );
-}
-
-/** slot's admin-uploaded override if one exists, else the bundled
- * default already checked into web/public/screenshots/. */
-function screenshotSrc(siteContent: SiteContent | null, slot: string, fallback: string): string {
-  const override = siteContent?.media[slot];
-  return override ? `${API_BASE_URL}${override}` : fallback;
-}
-
-/** HIGHLIGHTS' own screenshot filenames (job-search.png, etc.) already
- * match routers/site_content.py's SITE_MEDIA_SLOTS 1:1 — derived here
- * instead of adding a parallel `slot` field to that array, so the two
- * can never quietly drift apart. */
-function slotFromScreenshotPath(src: string): string {
-  return src.split("/").pop()?.replace(/\.[a-zA-Z0-9]+$/, "") ?? src;
 }
 
 export default function LandingPage() {
@@ -708,7 +496,7 @@ export default function LandingPage() {
       )}
 
       <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-5">
+        <div className="mx-auto flex h-14 max-w-[96rem] items-center gap-6 px-5">
           <Link href="/" className="flex items-center gap-2">
             <Target className="size-4 text-primary" strokeWidth={1.5} />
             <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>
@@ -784,13 +572,9 @@ export default function LandingPage() {
             <span className="text-xs text-muted-foreground">No credit card required for the Free plan.</span>
           </div>
           <div className="lg:order-1">
-            <ScreenshotFrame
-              src={screenshotSrc(siteContent, "hero", "/screenshots/dashboard.png")}
-              alt="The Applicient dashboard — jobs discovered, applications tracked, and your base CV in one view"
-              width={1400}
-              height={673}
-              priority
-            />
+            <MockFrame>
+              <HeroChatMock />
+            </MockFrame>
           </div>
         </div>
       </Section>
@@ -837,7 +621,7 @@ export default function LandingPage() {
 
       {/* Highlights: one panel per stage, scrolls sideways */}
       <Section>
-        <HighlightCarousel siteContent={siteContent} />
+        <HighlightCarousel />
       </Section>
 
       {/* Demo video */}
@@ -954,7 +738,7 @@ export default function LandingPage() {
       </div>
 
       <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-10 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-[96rem] flex-col gap-4 px-5 py-10 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Target className="size-4 text-primary" strokeWidth={1.5} />
             <span className="font-mono text-sm font-semibold tracking-tight">applicient</span>

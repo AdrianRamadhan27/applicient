@@ -22,12 +22,15 @@ from applicient_api.deps import current_admin_user, get_db
 from applicient_api.models.site_content import SiteMediaAsset, SiteSettings
 from applicient_api.object_storage import delete_prefix, get_object, put_object
 
-# Fixed, code-defined vocabulary — matches the exact slots
-# web/src/app/page.tsx renders (the hero shot plus one per HIGHLIGHTS
-# carousel entry). Not admin-extensible: adding a new slot is a code
-# change (a new spot on the page to put it), same as the media CMS
-# scope decision this whole feature was deliberately limited to.
-SITE_MEDIA_SLOTS = ["hero", "job-search", "cv-compose", "pipeline", "track-status", "interview"]
+# Fixed, code-defined vocabulary — was one entry per web/src/app/page.tsx
+# section still shown as a screenshot. Empty now that every landing-page
+# section (hero, job search, CV verifier, auto-apply, pipeline tracking,
+# interview practice) is an interactive mock instead — the upload/reset
+# admin routes below are kept (rather than deleted outright) in case a
+# future section ever goes back to a screenshot, but with no valid slot
+# name they simply 404 for now. Any pre-existing SiteMediaAsset rows for
+# the old slot names are harmless orphans, no longer reachable here.
+SITE_MEDIA_SLOTS: list[str] = []
 
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 

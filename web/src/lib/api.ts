@@ -52,8 +52,10 @@ export type BrowserSession = {
 
 export type SiteContent = {
   demo_video_url: string | null;
-  // slot -> a URL to fetch the admin-uploaded override image from, or
-  // null (use the bundled default asset in web/public/screenshots/).
+  // Always empty now — every landing-page section that used to read an
+  // override from here became an interactive mock instead of a
+  // screenshot. Kept on the type only because the API still returns the
+  // key (see routers/site_content.py's SITE_MEDIA_SLOTS).
   media: Record<string, string | null>;
 };
 
@@ -2508,9 +2510,12 @@ export const api = {
 
   // Adrian, direct: "a whole CMS where i can control what shows up in
   // the landing page... changing like images and whatnot shouldnt be
-  // through commits" — scoped to media (the demo video link + each
-  // screenshot slot). getSiteContent is public (the landing page has
-  // no auth); the admin/* calls below require an admin token.
+  // through commits" — originally scoped to media (the demo video link
+  // + a screenshot slot per section); the screenshot-slot upload/reset
+  // calls were removed once every landing section became an
+  // interactive mock instead of a screenshot (SITE_MEDIA_SLOTS is now
+  // empty). getSiteContent is public (the landing page has no auth);
+  // the admin/* calls below require an admin token.
   getSiteContent: () => request<SiteContent>("/site-content"),
   getAdminSiteContent: () => request<SiteContent>("/admin/site-content"),
   updateSiteVideo: (demoVideoUrl: string | null) =>
@@ -2518,24 +2523,6 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ demo_video_url: demoVideoUrl }),
     }),
-  /** Plain multipart upload, not through request() (which always
-   * forces a JSON Content-Type) — same "raw fetch for a file body"
-   * shape streamParseCV already uses. */
-  async uploadSiteMedia(slot: string, file: File): Promise<SiteContent> {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await fetch(`${API_BASE_URL}/admin/site-content/media/${slot}`, {
-      method: "POST",
-      headers: authHeader(),
-      body: formData,
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new ApiError(`POST /admin/site-content/media/${slot} -> ${res.status}: ${extractErrorMessage(body)}`, res.status);
-    }
-    return res.json();
-  },
-  resetSiteMedia: (slot: string) => request<SiteContent>(`/admin/site-content/media/${slot}`, { method: "DELETE" }),
 
   // Adrian, direct: "make it in admin page so i can monitor concurrent
   // browser usage. and also shut them down if possible" — hit the
